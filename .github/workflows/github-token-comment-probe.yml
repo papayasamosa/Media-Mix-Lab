@@ -1,0 +1,175 @@
+name: GitHub token comment permission probe
+
+# DIAGNOSTIC ONLY - TEMPORARY. Delete this file once the diagnosis of the
+# Claude fallback review comment-posting failure is complete.
+#
+# This workflow never invokes Claude, Anthropic, or Codex. It never
+# checks out repository contents, never pushes, never commits, and never
+# merges anything. It only attempts small, uniquely-marked, harmless
+# comments on the disposable PR #357, to A/B test GitHub's documented
+# alternative GITHUB_TOKEN permission sets for the REST "create an issue
+# comment" endpoint (issues:write vs pull-requests:write) without
+# changing the repository-wide default Workflow permissions setting.
+#
+# All comment targets are hard-bound to repos/papayasamosa/Media-Mix-Lab
+# /issues/357/comments - the PR number is a literal in this file, never
+# taken from event input, so this cannot be redirected to any other PR.
+
+on:
+  workflow_dispatch:
+    inputs:
+      permission_mode:
+        description: "Which permission set to probe"
+        required: true
+        type: choice
+        options:
+          - issues_write
+          - pull_requests_write
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: github-token-comment-probe
+  cancel-in-progress: false
+
+# No blanket permissions - every job below declares its own minimal set.
+permissions: {}
+
+jobs:
+  # --- workflow_dispatch probes -------------------------------------
+  # Two separate jobs because job-level `permissions:` are static and
+  # cannot be chosen dynamically at runtime from an input.
+
+  issues_write_probe:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.permission_mode == 'issues_write'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Probe issues:write via the REST issue-comments endpoint
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          MARKER="<!-- github-token-probe:issues-write:${GITHUB_RUN_ID} -->"
+          jq -n --arg marker "${MARKER}" \
+            '{body: ($marker + "\nTemporary GITHUB_TOKEN issues:write diagnostic probe.")}' \
+            > "${RUNNER_TEMP}/probe.json"
+
+          HTTP_STATUS="$(curl -sS -o "${RUNNER_TEMP}/probe_response.json" -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -D "${RUNNER_TEMP}/probe_headers.txt" \
+            --data @"${RUNNER_TEMP}/probe.json" \
+            "https://api.github.com/repos/papayasamosa/Media-Mix-Lab/issues/357/comments")"
+
+          echo "=== issues:write probe ==="
+          echo "HTTP status: ${HTTP_STATUS}"
+          echo "--- Response headers (non-secret) ---"
+          grep -i \
+            "^x-github-request-id\|^x-accepted-github-permissions\|^x-oauth-scopes\|^x-accepted-oauth-scopes" \
+            "${RUNNER_TEMP}/probe_headers.txt" || echo "(no matching headers present)"
+          echo "--- Response body ---"
+          cat "${RUNNER_TEMP}/probe_response.json"
+
+  pull_requests_write_probe:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.permission_mode == 'pull_requests_write'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+    steps:
+      - name: Probe pull-requests:write via the REST issue-comments endpoint
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          MARKER="<!-- github-token-probe:pull-requests-write:${GITHUB_RUN_ID} -->"
+          jq -n --arg marker "${MARKER}" \
+            '{body: ($marker + "\nTemporary GITHUB_TOKEN pull-requests:write diagnostic probe.")}' \
+            > "${RUNNER_TEMP}/probe.json"
+
+          HTTP_STATUS="$(curl -sS -o "${RUNNER_TEMP}/probe_response.json" -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -D "${RUNNER_TEMP}/probe_headers.txt" \
+            --data @"${RUNNER_TEMP}/probe.json" \
+            "https://api.github.com/repos/papayasamosa/Media-Mix-Lab/issues/357/comments")"
+
+          echo "=== pull-requests:write probe ==="
+          echo "HTTP status: ${HTTP_STATUS}"
+          echo "--- Response headers (non-secret) ---"
+          grep -i \
+            "^x-github-request-id\|^x-accepted-github-permissions\|^x-oauth-scopes\|^x-accepted-oauth-scopes" \
+            "${RUNNER_TEMP}/probe_headers.txt" || echo "(no matching headers present)"
+          echo "--- Response body ---"
+          cat "${RUNNER_TEMP}/probe_response.json"
+
+  # --- issue_comment-triggered probe --------------------------------
+  # Same permission set as the real claude-fallback-review.yml
+  # (contents:read, issues:write, pull-requests:read), triggered the
+  # same way (issue_comment), to separate "does workflow_dispatch's
+  # token work" from "does an issue_comment-triggered token work" -
+  # since those are minted through different paths. Fails closed: the
+  # PR number, comment author, and comment body must match exactly, or
+  # the job does not run. This repository is public, so an unbounded
+  # `issue_comment` gate would let any commenter on any issue/PR trigger
+  # a write-capable job - the three exact-match conditions below prevent
+  # that.
+  issue_comment_probe:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      github.event.issue.number == 357 &&
+      github.event.comment.user.login == 'papayasamosa' &&
+      github.event.comment.body == 'github-token-comment-probe'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Probe issue_comment-triggered token via the REST issue-comments endpoint
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          MARKER="<!-- github-token-probe:issue-comment-trigger:${GITHUB_RUN_ID} -->"
+          jq -n --arg marker "${MARKER}" \
+            '{body: ($marker + "\nTemporary GITHUB_TOKEN issue_comment-triggered diagnostic probe.")}' \
+            > "${RUNNER_TEMP}/probe.json"
+
+          HTTP_STATUS="$(curl -sS -o "${RUNNER_TEMP}/probe_response.json" -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -D "${RUNNER_TEMP}/probe_headers.txt" \
+            --data @"${RUNNER_TEMP}/probe.json" \
+            "https://api.github.com/repos/papayasamosa/Media-Mix-Lab/issues/357/comments")"
+
+          echo "=== issue_comment-triggered probe ==="
+          echo "HTTP status: ${HTTP_STATUS}"
+          echo "--- Response headers (non-secret) ---"
+          grep -i \
+            "^x-github-request-id\|^x-accepted-github-permissions\|^x-oauth-scopes\|^x-accepted-oauth-scopes" \
+            "${RUNNER_TEMP}/probe_headers.txt" || echo "(no matching headers present)"
+          echo "--- Response body ---"
+          cat "${RUNNER_TEMP}/probe_response.json"
