@@ -1318,31 +1318,56 @@ def domain_section(
     number: str,
     title: str,
     purpose: str,
-    structure: str,
+    need_it: str,
+    grain: str,
+    sheets_note: str,
     raw_example: str,
-    dictionary_schema: str,
+    required_rows: list[list[str]],
+    conditional_rows: list[list[str]],
+    optional_rows: list[list[str]],
     rag: list[dict[str, str]],
     connection: str,
-    checklist: list[str],
-    add: list[str],
     common_mistakes: list[str],
     valid_invalid: list[list[str]],
     extra_html: str = "",
 ) -> str:
+    required_table = simple_table(
+        ["Field", "What it means", "What to enter", "Example"], required_rows, "wide"
+    )
+    conditional_table = (
+        simple_table(
+            ["Field", "When do I need this?", "What it means"],
+            conditional_rows,
+            "wide",
+        )
+        if conditional_rows
+        else ""
+    )
+    optional_table = (
+        simple_table(["Field", "Note"], optional_rows, "compact")
+        if optional_rows
+        else ""
+    )
+    full_reference = (
+        "<details><summary>Full technical field reference (every field, RAG-coded, for power users and auditors)</summary>"
+        + html_table(rag, "wide")
+        + "</details>"
+    )
     return f"""
     <section id="{anchor}" class="domain section">
       <p class="eyebrow">Domain {number}</p><h2>{esc(title)}</h2>
-      <h3>Purpose</h3><p>{purpose}</p>
-      <h3>Workbook structure</h3><p>{structure}</p>
-      <h3>Raw table example</h3>{code_block(raw_example)}
-      <h3>Dictionary schema</h3><p>{dictionary_schema}</p>
-      {html_table(rag, "wide")}
-      <h3>Worked connection</h3><p>{connection}</p>
-      <h3>Minimum checklist</h3>{mistakes(checklist)}
-      <h3>Add these when available</h3>{mistakes(add)}
+      <p>{purpose}</p>
+      <div class="callout"><b>Do I need this file?</b> {need_it}</div>
+      <h3>What does one row mean?</h3><p>{grain}</p>
+      <h3>Sheets in this workbook</h3><p>{sheets_note}</p>
+      <h3>Example</h3>{code_block(raw_example)}<p>{connection}</p>
+      <h3>Fields you must fill in</h3>{required_table}
+      {"<h3>Fields you may need</h3>" + conditional_table if conditional_table else ""}
+      {"<h3>Optional metadata</h3><p>Helpful for reporting and governance, but not needed for a first fit.</p>" + optional_table if optional_table else ""}
       <h3>Common mistakes</h3>{mistakes(common_mistakes)}
       <h3>Valid and invalid examples</h3>{simple_table(["Valid", "Invalid", "Why"], valid_invalid)}
       {extra_html}
+      {full_reference}
     </section>
     """
 
@@ -1359,190 +1384,186 @@ def build_html() -> str:
       <div class="diagram-box context"><b>Context workbook</b><span>tidy context_data<br>+ variable_dictionary + events</span></div>
     </div>
     """
+
+    upload_types_table = simple_table(
+        ["Upload", "Do I need it?", "What it's for", "Where to get it"],
+        [
+            [
+                "Outcomes",
+                "Yes — always",
+                "The KPI numbers the model explains",
+                "“Outcomes (v2)” download button",
+            ],
+            [
+                "Activity and Media",
+                "Yes — always",
+                "Spend, clicks, impressions and other media/activity data",
+                "“Activity and Media” download button",
+            ],
+            [
+                "Context and External Factors",
+                "Yes — always",
+                "Controls like CPI, seasonality, and named events",
+                "“Context and External Factors” download button",
+            ],
+            [
+                "Outcome Valuation (FH LTR / DNA revenue)",
+                "Only for monetary ROI reporting",
+                "Turns counts into pound/dollar value",
+                "“Download valuation template”, in its own section of the upload page",
+            ],
+            [
+                "Experiment Evidence",
+                "Only if you have a lift test or experiment to record",
+                "Stores raw experiment/lift-test rows for future calibration",
+                "“Experiment Evidence” download button",
+            ],
+            [
+                "Candidate A Search observations",
+                "Only for the Search capacity/mediation feature",
+                "Weekly Search delivery, cap, and organic-capture numbers",
+                "“Download Candidate A observation template”, on the Model Training page",
+            ],
+            [
+                "Google Trends Brand Demand anchor",
+                "Only for the Search capacity/mediation feature",
+                "An approved weekly Brand-search-interest series",
+                "Upload box on the Model Training page",
+            ],
+            [
+                "SEO / Google Search Console visibility",
+                "Only for the SEO visibility feature",
+                "Organic search ranking/impression data",
+                "Upload box on the Model Training page",
+            ],
+            [
+                "Demo or realistic sample data",
+                "No — exploration only",
+                "Fake data to try the app before you have real data",
+                "“Load demo data” button",
+            ],
+        ],
+        "wide",
+    )
+
+    minimum_checklist_html = f"""
+    <div class="callout">
+      <b>Minimum for your first UK count-based model.</b> You need exactly three workbooks: Outcomes, Activity and Media, and Context and External Factors. Inside each, only a handful of fields are truly required — they are listed under <b>Fields you must fill in</b> in each section below. Everything else on this page is optional or only needed for a specific later feature.
+    </div>
+    {upload_types_table}
+    <div class="callout warning">
+      <b>Add later, once the first fit works:</b> FH LTR / DNA revenue value reporting, Experiment Evidence, Search capacity (Candidate A), SEO visibility, and named-event administration. See <a href="#add-later">Add these later</a>.
+    </div>
+    """
+
     faq = [
         (
             "What is the safest first upload?",
-            'Upload the three standard domain workbooks using the current templates, with dictionaries completed and source metadata attached. See <a href="#workflow">the workflow</a>.',
+            'Upload the three required workbooks — Outcomes, Activity and Media, and Context — using the current templates. Fill in only the fields marked <b>Fields you must fill in</b> to start. See <a href="#workflow">the checklist</a>.',
         ),
         (
             "Can one domain use more than one physical file?",
-            "Yes. A logical domain may contain many uploaded files or workbooks. The app merges them only when keys and shared values are compatible.",
-        ),
-        (
-            "Can one workbook contain several domains?",
-            "Yes, but select the domain explicitly when the workbook contains more than one recognised domain.",
+            "Yes. You can upload several files for the same domain. The app merges them only when the keys and values agree.",
         ),
         (
             "Is market read from the filename?",
-            "No. Market must be a row-level column in every relevant table.",
+            "No. Market must be a column in every table, on every row. The app never guesses it from a filename.",
         ),
         (
-            "Should I make all data weekly?",
-            "No. Upload the source at its native frequency. A later alignment step needs its own approved method.",
+            "Should I make all data weekly before uploading?",
+            "No. Upload each source at whatever frequency it actually comes in (weekly, monthly, quarterly). Converting frequency is a separate, later step.",
         ),
         (
             "Are missing values the same as zero?",
-            "No. Missing means unavailable or not observed; zero is a measured zero. Never fill one with the other silently.",
-        ),
-        (
-            "What does outcomes wide mean?",
-            "Each row is one period and market. Each outcome has its own source column.",
-        ),
-        (
-            "What does activity tidy-long mean?",
-            "Each row identifies one period, market, and activity, with one or more raw measures in columns.",
-        ),
-        (
-            "What is source_column?",
-            "It is the exact header in the raw outcomes table that contains the outcome values.",
-        ),
-        (
-            "Can an ID explain the whole outcome?",
-            "No. The dictionary carries meaning. IDs must be stable and useful, but meaning must never be guessed from an ID.",
+            "No. A missing value means “we don't know.” A zero means “we checked, and it was zero.” Never use one to mean the other.",
         ),
         (
             "Which Family History segments are in scope?",
-            "New, Winback, and DNA cross-sell. Do not add a fourth FH segment without an approved decision.",
-        ),
-        (
-            "Can I add DNA self-activated and gifted segments?",
-            "Only when the source and an approved use support them. Do not add them silently.",
+            "New, Winback, and DNA cross-sell. Don't invent a fourth segment without checking with the project first.",
         ),
         (
             "Are GSA and Net Bill Through the same metric?",
-            "No. They are distinct definitions with different date, cohort, maturity, and reconciliation needs.",
-        ),
-        (
-            "Can I upload weekly Net Bill Through?",
-            "Yes, when it is a supplied governed outcome with an approved definition and completeness metadata. The app does not reconstruct it from raw billing events.",
+            "No. They are two different measures with different dates, cohorts, and approval needs. Keep them in separate columns.",
         ),
         (
             "What is the completeness sheet for?",
-            "It records the data-as-of date, model window, maturity rule, and owner for an outcome. It is especially important for official NBT use.",
+            "It records how fresh and complete an outcome's data is — useful for any KPI, and required for official UK production NBT.",
         ),
         (
-            "What are the official UK production NBT outcomes?",
-            'Three separate Family History outcomes: fh_net_billthrough_count_new, fh_net_billthrough_count_dna_cross_sell, and fh_net_billthrough_count_winback. See <a href="#uk-nbt-production">the UK production NBT note</a>.',
+            "Does production NBT use the 14-day example shown elsewhere in this guide?",
+            "No. That 14-day rule is just an illustrative example for historical/test work. Production NBT uses its own approved rule and evidence — see the UK production NBT box in the Outcomes section.",
         ),
         (
-            "Does production NBT use the same 14-day maturity example shown elsewhere in this guide?",
-            "No. That 14-day example is an illustrative historical-test rule. Official UK production NBT uses its own approved production definition, maturity rule, and evidence bundle supplied with the source pack.",
-        ),
-        (
-            "Does the downloadable generic sample outcome workbook already use the NBT ids?",
-            "No. The generic sample teaches the pattern using GSA ids. UK production NBT ids and definitions come from the approved UK source pack, not the generic sample.",
-        ),
-        (
-            "What is model_input_measure?",
-            "The exact raw activity measure selected for modelling, such as spend, clicks, impressions, GRPs, or TVRs.",
-        ),
-        (
-            "What is model_input_column?",
-            "The model-ready destination column created after tidy activity data is pivoted. It is not the raw measurement column.",
+            "Does the downloadable sample outcome workbook already use the NBT ids?",
+            "No. The sample teaches the pattern with GSA ids. Real UK production NBT ids come from the approved UK source pack.",
         ),
         (
             "Does the activity ID need every metadata field?",
-            "No. Use the smallest stable identity that avoids collisions. Keep descriptive fields in the dictionary.",
+            "No. Use the smallest name that keeps every activity unique. Put descriptive detail in the dictionary fields instead of the ID.",
         ),
         (
-            "Should the same activity ID be reused across markets?",
-            "It may be reused for the same cross-market activity concept, with market remaining part of the row key. Use pooling_group_id for an optional cross-market identity.",
-        ),
-        (
-            "Does pooling_group_id pool the model?",
-            "No. It records comparable identity only. Pooling is a separate model choice.",
+            "Does pooling_group_id make the model pool markets together?",
+            "No. It's just a label saying “these activities are comparable.” Pooling is a separate, later modelling choice.",
         ),
         (
             "Do spend and clicks mean the same thing?",
-            "No. Record the model input, spend, and response unit separately. A later governed mapping is required for monetary economics.",
-        ),
-        (
-            "Should all raw activity measures be modelled?",
-            "No. Keep useful raw measures, but select one model_input_measure per activity for the model input.",
-        ),
-        (
-            "Do owned and earned activity belong in another domain?",
-            "No. They are activity/media records too. Their ownership, role, and economics must be explicit.",
+            "No. Spend is money. Clicks are a count of a physical response. Keep them in separate columns and pick one as the model input.",
         ),
         (
             "How are Brand and Non-Brand Search represented?",
-            "Use separate activity identities and the approved Search taxonomy: Google/Bing × Brand/Non-Brand. Parent totals are calculated from leaves.",
+            "As separate activities, tagged with search_intent_group_id (brand_search / non_brand_search) and search_platform (google / bing).",
         ),
         (
-            "Can I add a deeper Non-Brand Search child group?",
-            "Only through the governed taxonomy catalogue, starting as draft. A child cannot be fitted at the same model grain as its parent, and it has no planning eligibility or cost-bearing treatment until child-level observed data and governed cost support exist.",
+            "Can I add a deeper Non-Brand Search child group, like a specific sub-category?",
+            "Only through a separate governed process, and it starts as “draft.” It can't be fitted alongside its parent group at the same time, and it has no budget-planning use until it has its own real cost data.",
         ),
         (
             "Can SEO visibility be split by Brand and Non-Brand?",
-            "Yes, using seo_group_id/seo_group_name per market/week. A row with no group supplied stays in one generic seo_visibility group.",
+            "Yes, using seo_group_id. If you don't set a group, everything goes into one combined group.",
         ),
         (
-            "Are PMax, Demand Gen, and YouTube Paid Search?",
-            "No. They are not automatically classified as Paid Search by platform name.",
+            "Are PMax, Demand Gen, and YouTube the same as Paid Search?",
+            "No. The app never assumes this just because the platform is Google. Classify them explicitly.",
         ),
         (
             "What is a Search cap?",
-            "A budget or delivery ceiling. It is a constraint, not realised spend or delivery, and expected unused cap must remain possible.",
+            "A spending or delivery ceiling — a limit, not money that was actually spent.",
         ),
         (
-            "What is residual Paid Search incrementality?",
-            "A model output from the approved treatment path. It is not a raw source metric or a new upload object.",
+            "Can monthly context data be manually copied into every week?",
+            "No. Upload it as monthly. Turning it into weekly numbers is a separate, governed step — don't invent weekly rows yourself.",
         ),
         (
-            "Can Google Trends be generic context?",
-            "Only as an explicitly governed context variable. For Candidate A Brand Demand, use the dedicated anchor upload with its query metadata.",
+            "Does uploading Experiment Evidence automatically change the model?",
+            "No. It's stored as evidence only. A person has to separately review and approve it before it affects a model.",
         ),
         (
-            "Can GSC organic traffic stand in for SEO visibility?",
-            "No. The governed SEO visibility metric is separate from organic Search capture and uses its dedicated observation path.",
+            "Is Outcome Valuation (FH LTR) part of the normal Outcomes workbook?",
+            'No — it is a completely separate, optional upload. See <a href="#ltr">FH LTR and DNA revenue</a>.',
         ),
         (
-            "Can monthly context be manually expanded to weeks?",
-            "No. Do not duplicate or invent weekly rows. Use a governed frequency-alignment method when one is approved.",
+            "Does a currency column convert money between currencies?",
+            "No. It just labels what currency the number is in. Actual conversion needs a separate, approved exchange rate.",
         ),
         (
-            "What are the context variable classes?",
-            "flow_count, stock_level, rate_index, survey_measurement, and event_flag.",
+            "What happens if two rows have the same key (same date, market, and ID)?",
+            "The upload is rejected and you're asked to fix it. The app never silently merges or adds duplicate rows together.",
         ),
         (
-            "How do I upload named events?",
-            "Use the optional events sheet with event_id, event_name, start_date, and end_date. Factual dates stay unchanged; classification is not inferred.",
+            "My upload was rejected, or shows a warning. What do I do?",
+            "Read the exact message — it names the specific problem, such as a missing required column, a duplicate row, or the wrong sheet name. Fix that one thing and upload again. The app never guesses a fix or silently patches your file for you.",
         ),
         (
-            "Does experiment evidence calibrate the model automatically?",
-            "No. It remains source evidence until a separate reviewed calibration record and method are approved.",
+            "Why does the ID builder show a collision warning?",
+            "Because two rows would end up with the exact same ID. Add one more distinguishing detail — don't just add a random number.",
         ),
         (
-            "Is outcome valuation part of the three core workbooks?",
-            "No. FH LTR and DNA revenue valuation are separate governed uploads and are not needed for a count first fit.",
+            "Can I override the ID the builder suggests?",
+            "Yes, using the override column. You're still responsible for keeping it unique and consistent with the dictionary.",
         ),
         (
-            "Can I use an average LTR for future ROI?",
-            "Only as an explicit scenario assumption approved for the project. Do not extrapolate historical values automatically.",
-        ),
-        (
-            "Does a currency column perform FX conversion?",
-            "No. It identifies the monetary unit. FX translation needs a governed rate set and approved method.",
-        ),
-        (
-            "What happens when two rows have the same key?",
-            "The standard merge and canonicalisation paths fail closed and ask you to resolve the source grain; they do not silently aggregate.",
-        ),
-        (
-            "What does a RED field mean?",
-            "The column must exist and the value is required for the stated use. A GREEN field may be optional, but its absence can still limit a feature.",
-        ),
-        (
-            "Why does the builder show a collision warning?",
-            "Because two candidate rows would produce the same stable ID. Add the next meaningful identity field; do not add a random number.",
-        ),
-        (
-            "Can I override a suggested ID?",
-            "Yes. The final ID uses the manual override when present, but you remain responsible for uniqueness, stability, and dictionary consistency.",
-        ),
-        (
-            "Where can I find the exact parser contract?",
-            'See the source files and tests listed in the <a href="#review">review note</a>. This guide explains the analyst-facing boundary.',
+            "Where can I find the exact technical contract behind this guide?",
+            'See the source files and tests listed in <a href="#review">Source and review</a>, and the collapsible “Full technical field reference” at the end of each section above.',
         ),
     ]
     faq_html = "".join(
@@ -1553,326 +1574,482 @@ def build_html() -> str:
         "outcomes",
         "1",
         "Outcomes",
-        "Outcomes are the measures the model explains. Keep Family History New, DNA cross-sell, and Winback separate. Keep DNA customer-relationship partitions separate from purchase-recipient partitions unless an approved definition says otherwise.",
-        "Required sheets: <code>outcomes</code> and <code>outcome_dictionary</code>. Optional sheet: <code>outcome_completeness</code>. The source table is wide: one row per <code>period_start × market</code>, with one source column per outcome. The dictionary is the meaning layer.",
+        "Outcomes are the KPI numbers the model is trying to explain — things like sign-ups or Net Bill Through.",
+        "Yes, always. Every project needs this workbook.",
+        "One row is one market, in one week. Each KPI gets its own column — for example, one column for New GSA and another for Winback GSA.",
+        "Two required sheets: <code>outcomes</code> (the actual weekly numbers) and <code>outcome_dictionary</code> (what each column means). One optional sheet: <code>outcome_completeness</code> — only needed for official or maturity-sensitive outcomes, including UK production NBT.",
         "period_start | market | fh_gsa_new | fh_gsa_dna_cross_sell | fh_gsa_winback\n2026-01-05   | UK     | 120        | 18                    | 9",
-        "The current v2 dictionary requires: outcome_id, source_column, product, metric_key, metric, segment_dimension, segment, outcome_group_id, outcome_group_label, outcome_family_key, group_aggregation. The code also accepts optional canonical definition fields such as unit, aggregation_type, date_basis, maturity_required, role, eligibility flags, definition_version, event_definition, cohort_or_attribution_basis, completeness_or_maturity_policy, exclusions, reconciliation_source, business_owner, effective_from, effective_to, value_weight, and value_currency.",
+        [
+            [
+                "outcome_id",
+                "A short, stable name for this outcome.",
+                "Lowercase, no spaces. Never changes once other things reference it.",
+                "fh_gsa_new",
+            ],
+            [
+                "source_column",
+                "The exact column header in the <code>outcomes</code> sheet that holds this KPI's numbers.",
+                "Must match the outcomes-sheet header exactly, letter for letter.",
+                "fh_gsa_new",
+            ],
+            [
+                "product",
+                "Which product line this KPI belongs to.",
+                "Family History or DNA (or another approved product).",
+                "Family History",
+            ],
+            [
+                "metric_key",
+                "The stable registry name for what's being measured.",
+                "An approved key from the registry, or <code>custom</code> for a genuinely new measure.",
+                "fh_gsa",
+            ],
+            [
+                "metric",
+                "The human-readable name of the measure.",
+                "Plain text.",
+                "GSA",
+            ],
+            [
+                "segment",
+                "Which customer group this row covers.",
+                "New, Winback, DNA cross-sell, or another approved segment.",
+                "New",
+            ],
+        ],
+        [
+            [
+                "segment_dimension",
+                "Only if the same segment word could mean different things in different places.",
+                "Which approved vocabulary the segment value comes from.",
+            ],
+            [
+                "outcome_group_id, outcome_group_label, outcome_family_key, group_aggregation",
+                "Only if you want the app to know that several outcomes add up to a governed total.",
+                "Fill in all four together, or leave all four blank — don't fill in some and skip others.",
+            ],
+            [
+                "role, included_in_fit, include_in_default_reporting, include_in_official_total, include_in_value, include_in_optimisation",
+                "Only if the sensible defaults don't match what you want (by default, a new outcome is treated as primary, fitted, and reported).",
+                "Each is a separate on/off switch for one specific use.",
+            ],
+            [
+                "definition_version, event_definition, cohort_or_attribution_basis, completeness_or_maturity_policy, exclusions, reconciliation_source, business_owner",
+                "Only needed to get this outcome officially approved for production reporting.",
+                "Together they record who defined the measure, exactly what it counts, and how it reconciles to Finance.",
+            ],
+            [
+                "value_weight, value_currency",
+                "Only if this outcome feeds ROI or monetary value reporting.",
+                "A per-unit value and the currency it's in.",
+            ],
+        ],
+        [
+            [
+                "unit, aggregation_type",
+                "Usually filled in automatically from metric_key — you don't normally need to type these.",
+            ],
+            [
+                "date_basis, maturity_required",
+                "These columns exist in the sheet, but the app does not currently use them for anything. Safe to leave blank.",
+            ],
+            [
+                "effective_from, effective_to",
+                "Only useful if this definition's meaning changes at a known date.",
+            ],
+        ],
         OUTCOME_RAG,
-        "The dictionary row with <code>outcome_id=fh_gsa_new</code> points to <code>source_column=fh_gsa_new</code>. The parser checks that this exact column exists in <code>outcomes</code>; it does not infer that “GSA” or “NBT” in an ID means anything. If a group is supplied, its rows describe semantic membership and optional sum reconciliation. Group membership does not automatically make a total fit or become an official report.",
+        "In this example, the dictionary row for <code>outcome_id=fh_gsa_new</code> points at <code>source_column=fh_gsa_new</code> — the app checks that this column really exists in the <code>outcomes</code> sheet. It never guesses meaning from the ID itself.",
         [
-            "The two required sheets exist and have exact required headers.",
-            "Every outcomes row has a period_start and market.",
-            "Every dictionary source_column exists in outcomes.",
-            "Outcome IDs are unique and stable.",
-            "Product, metric, segment dimension, and segment are explicit.",
-            "Use the completeness sheet for official/maturity-sensitive outcomes, especially supplied NBT.",
-        ],
-        [
-            "Add versioned definition, owner, date basis, cohort basis, exclusions, and reconciliation source.",
-            "Add outcome_group fields when a component/total relationship is governed.",
-            "Add outcome_completeness for data-as-of and maturity review.",
-            "Add a separate valuation upload for FH LTR or DNA revenue; do not put rate calculations in the count table.",
-        ],
-        [
-            "Using NBT as a friendly name for GSA or treating sign-up → NBT → GSA as a universal sequence.",
-            "Putting outcomes in long format when the current standard outcomes contract expects wide rows.",
-            "Using an outcome ID to carry meaning while leaving dictionary fields blank.",
-            "Guessing product or segment from a source-column name.",
-            "Adding self-activated/gifted/unactivated DNA splits without source support and approval.",
-            "Fitting a supplied total and its components together without an explicit treatment.",
-            "Reconstructing weekly NBT from event-level billing data at upload time.",
-            "Using a rate as if it were a count or adding rates across weeks.",
-            "Applying the illustrative 14-day historical-test maturity example as the production NBT default instead of the approved production maturity rule and evidence.",
+            "Using “NBT” as a friendly nickname for GSA, or assuming sign-up → GSA → NBT always happens in that order.",
+            "Uploading outcomes in long format — the standard contract expects one wide row per market-week.",
+            "Leaving the dictionary fields blank and hoping the ID explains everything.",
+            "Guessing product or segment from the column name instead of stating them.",
+            "Adding new DNA splits (self-activated, gifted) without checking they're approved first.",
+            "Reconstructing weekly NBT yourself from raw billing events — upload the already-governed weekly number instead.",
+            "Treating the illustrative 14-day maturity example as the production NBT rule.",
         ],
         [
             [
-                "fh_gsa_new + product Family History + segment New + metric_key fh_gsa",
-                "metric_key fh_net_billthrough_count but metric says GSA",
-                "The key, label, and definition disagree.",
+                "fh_gsa_new with product=Family History, segment=New, metric_key=fh_gsa",
+                "metric_key=fh_net_billthrough_count but metric says “GSA”",
+                "The key, label, and definition disagree with each other.",
             ],
             [
-                "DNA New Customer and DNA Existing FH Customer in separate rows",
-                "A DNA combined row silently copied into both segments",
-                "A copied value double-counts and invents support.",
+                "outcome_group_id left blank for a standalone outcome",
+                "group_aggregation=sum with no group ID set",
+                "The four group fields must be filled in together, or all left blank.",
             ],
             [
-                "outcome_group_id blank for an independent outcome",
-                "group_aggregation=sum with no group ID",
-                "The group block must be complete or blank.",
-            ],
-            [
-                "outcome_completeness row names the exact NBT outcome_id",
-                "Completeness row uses a friendly label not in the dictionary",
-                "Completeness is keyed to the governed definition.",
-            ],
-            [
-                "GSA and NBT supplied as distinct columns",
-                "One column labelled GSA/NBT",
-                "These are different measures and approvals.",
+                "GSA and NBT as two separate columns",
+                "One column labelled “GSA/NBT”",
+                "They are different measures with different rules — never combine them.",
             ],
         ],
-        extra_html="<h3>Optional outcome_completeness schema</h3><p>Use this sheet for freshness, model-window, maturity, and ownership metadata. Official NBT requires it under the approved completeness contract.</p>"
-        + html_table(COMPLETENESS_RAG, "wide")
-        + """
-      <h3 id="uk-nbt-production">UK production Net Bill Through (NBT)</h3>
-      <div class="callout warning"><b>Production-specific example, not a universal rule.</b> This section describes the approved UK production boundary. It does not change the generic outcome contract above, and it must not be read as a default for every market or project.</div>
-      <p>Official UK production configures three separate Family History NBT outcomes — <code>fh_net_billthrough_count_new</code>, <code>fh_net_billthrough_count_dna_cross_sell</code>, and <code>fh_net_billthrough_count_winback</code> — as distinct <code>outcome_id</code>/<code>source_column</code> rows sharing <code>metric_key=fh_net_billthrough_count</code> with New, DNA cross-sell, and Winback as separate <code>segment</code> values, the same New/DNA-cross-sell/Winback pattern already shown for GSA above. GSA remains a distinct secondary/context measure: it is never reconstructed into NBT, and NBT is never reconstructed from GSA or from raw billing events.</p>
-      <p>Production NBT requires its own completeness/maturity evidence supplied with the source pack, not invented at upload time: the approved production definition, maturity/completeness evidence, exclusions, reconciliation source, <code>data_as_of_date</code>, and a source fingerprint. This production evidence bundle is a separate, stricter requirement than the bounded historical-test 14-day maturity rule used for exploratory/historical work — do not apply the historical-test rule to production NBT, and do not treat the illustrative 14-day example elsewhere in this guide as the production default.</p>
-      <p>This boundary is recorded in <code>docs/uk_production_onboarding_runbook.md</code> and the approved <code>REQ-NBT-001</code> through <code>REQ-NBT-004</code> requirement records, which are the authority for the exact production definition, maturity rule, and evidence requirements — this guide summarises them for an analyst preparing an upload; it does not restate them as new rules.</p>""",
+        extra_html='<h3 id="ltr">Optional: FH LTR and DNA revenue</h3>'
+        '<div class="callout warning"><b>FH LTR does not go in this Outcomes workbook.</b> It is a completely separate, optional upload.</div>'
+        "<p>Use this only if you want monetary value or ROI reporting — it is not needed to get your first count-based fit working. Download it from its own “Optional weekly outcome valuations (FH LTR / DNA revenue)” section of the Data Upload page, using the “Download valuation template” button there.</p>"
+        "<p>One row is one <code>valuation_kind</code> (fh_ltr or dna_revenue), in one market, in one week, for one segment. The required columns are <code>valuation_kind, market, week, segment, denominator_outcome_id, quality_status, segment_dimension, aggregate_value, currency, source, source_version, schema_version, horizon_months</code>.</p>"
+        "<p><code>aggregate_value</code> is a total pound/dollar value for that market-week-segment cell, never a per-customer figure. The app divides it by the matching count outcome's real observed number to work out a rate per unit — it never multiplies or invents a rate. <code>denominator_outcome_id</code> must be a real, existing <code>outcome_id</code> from your Outcomes dictionary that counts things (not a rate), such as an approved NBT or GSA outcome — there is no default; you must name it explicitly.</p>"
+        '<div class="callout"><b>The 48-month rule.</b> For <code>fh_ltr</code> rows, <code>horizon_months</code> must be exactly <b>48</b> — this is an approved, fixed rule, not a number you choose. For <code>dna_revenue</code> rows, leave <code>horizon_months</code> blank. Any other value is rejected.</p>'
+        '<h3 id="uk-nbt-production">UK production Net Bill Through (NBT)</h3>'
+        "<div class=\"callout warning\"><b>This is a specific UK production example, not a general rule.</b> It doesn't change anything above, and it doesn't apply automatically to other markets or projects.</div>"
+        "<p>UK production uses three separate NBT outcomes: <code>fh_net_billthrough_count_new</code>, <code>fh_net_billthrough_count_dna_cross_sell</code>, and <code>fh_net_billthrough_count_winback</code>. They share <code>metric_key=fh_net_billthrough_count</code>, with New, DNA cross-sell, and Winback as separate <code>segment</code> values — the same pattern shown for GSA above. GSA stays a separate, secondary measure: NBT is never built from GSA, and GSA is never built from NBT.</p>"
+        "<p>Production NBT needs its own completeness evidence supplied with the source pack — the approved definition, what's excluded, where it reconciles to, the data-as-of date, and a source fingerprint. This is a stricter, separate rule from the illustrative 14-day example used elsewhere in this guide for exploratory work. The full rule is recorded in <code>docs/uk_production_onboarding_runbook.md</code> and requirement records <code>REQ-NBT-001</code> through <code>REQ-NBT-004</code>; this guide only summarises them for someone preparing an upload.</p>"
+        + "<h3>Optional outcome completeness sheet (<code>outcome_completeness</code>)</h3><p>Use the outcome completeness sheet for freshness, model-window, maturity, and ownership information. Required for official NBT use.</p>"
+        + html_table(COMPLETENESS_RAG, "wide"),
     )
+
     activity = domain_section(
         "activity",
         "2",
         "Activity and Media",
-        "Activity data describes what was delivered, spent, or observed. The tidy source is kept separate from the wide model frame so the selected physical measure is visible and reproducible.",
-        "Required sheets: <code>activity_data</code> and <code>activity_dictionary</code>. Raw activity data is tidy/long with at least <code>period_start</code>, <code>market</code>, and <code>activity_id</code>. The dictionary contains base fields plus optional v2 physical-unit and effective-date fields. A single workbook may carry multiple raw measure columns.",
+        "Activity data describes what was delivered, spent, or observed for each marketing activity.",
+        "Yes, always. Every project needs this workbook.",
+        "One row is one activity, in one market, in one week. If you have spend, clicks, and impressions for the same activity, they're three columns on that same row.",
+        "Two required sheets: <code>activity_data</code> (the actual weekly numbers) and <code>activity_dictionary</code> (what each activity is and how the app should treat it).",
         "period_start | market | activity_id                 | spend | impressions | clicks\n2026-01-05   | UK     | paid_search_google_brand   | 1200  | 180000      | 8200",
-        "Base dictionary fields: activity_id, market, pooling_group_id, channel, platform, campaign_type, marketing_objective, funnel_stage, product_advertised, message_type, activity_ownership, intended_model_role, model_input_column, model_input_measure, economic_treatment, planning_eligibility, source. v2 adds model_input_unit, model_input_kind, spend_column, response_unit_column, response_unit, currency, effective_from, and effective_to. Search intent/platform fields exist in the governed activity model, but the current standard source dictionary parser does not map them automatically; use the dedicated mapping/admin boundary and treat this as a review item.",
+        [
+            [
+                "activity_id",
+                "A stable name for this specific activity.",
+                "Lowercase, unique within a market.",
+                "paid_search_google_brand",
+            ],
+            [
+                "channel",
+                "The channel or reporting family.",
+                "Plain text — be specific, not a generic label.",
+                "Paid Search",
+            ],
+            [
+                "intended_model_role",
+                "What role this activity plays in the model.",
+                "intervention, mediator, demand_capture, control, or event.",
+                "intervention",
+            ],
+            [
+                "model_input_column",
+                "The name the app gives this activity's number after processing.",
+                "A stable, unique name — this is not a raw column from your data.",
+                "uk_paid_search_google_brand",
+            ],
+            [
+                "model_input_measure",
+                "Which raw column (spend, clicks, impressions…) the model should actually be fitted on.",
+                "The exact header of a real column in activity_data.",
+                "spend",
+            ],
+            [
+                "economic_treatment",
+                "How cost is treated for this activity.",
+                "paid_media_cost, fully_loaded_cost, campaign_cost, response_only, or not_applicable.",
+                "paid_media_cost",
+            ],
+            [
+                "planning_eligibility",
+                "Whether this activity can be used in budget planning or optimisation.",
+                "optimisable, scenario_only, fixed, or excluded.",
+                "optimisable",
+            ],
+            [
+                "source",
+                "Where this data came from.",
+                "Plain text, ideally with a date or version.",
+                "Google Ads export 2026-08",
+            ],
+        ],
+        [
+            [
+                "activity_ownership",
+                "Rarely changes anything — only matters if this is an external event.",
+                "paid, owned, earned, or external_event.",
+            ],
+            [
+                "campaign_type",
+                "Only needed to separate Brand and Non-Brand Paid Search.",
+                "Brand or Non-Brand.",
+            ],
+            [
+                "search_intent_group_id, search_platform",
+                "Only for Paid Search activities you want split by Brand/Non-Brand and Google/Bing.",
+                "brand_search or non_brand_search; google or bing. Note: today these must be set up separately after upload — the standard sheet doesn't apply them automatically yet.",
+            ],
+        ],
+        [
+            [
+                "platform, funnel_stage, product_advertised, marketing_objective, message_type, pooling_group_id",
+                "Useful for reporting and dashboards, but the model and the optimiser don't read them. Fill in what you have; don't worry about getting them perfect.",
+            ],
+        ],
         ACTIVITY_RAG,
-        "For <code>activity_id=paid_search_google_brand</code>, <code>model_input_measure=spend</code> selects the raw <code>spend</code> column. After canonicalisation, the value is written to the wide destination <code>model_input_column=uk_paid_search_google_brand</code>. This is why <b>model_input_measure</b> and <b>model_input_column</b> are different. Spend, delivery, and response-unit fields remain separate. Missing activity rows stay missing; they are not filled as zero.",
+        "For <code>activity_id=paid_search_google_brand</code> with <code>model_input_measure=spend</code>, the app takes the raw <code>spend</code> column and writes it into a new destination column, <code>model_input_column=uk_paid_search_google_brand</code>. That's why these two fields look similar but are different: one names a column already in your file, the other names a column the app is about to create.",
         [
-            "The two required sheets and exact identity columns exist.",
-            "Every raw row has period_start, market, and activity_id.",
-            "Every dictionary key is unique at market × activity_id.",
-            "model_input_measure names a real raw measure column.",
-            "model_input_column is stable and unique in the model frame.",
-            "Ownership, role, economics, planning, and source are explicit.",
-        ],
-        [
-            "Keep spend, impressions, clicks, GRPs, spots, visits, and other observed measures when useful.",
-            "Record physical units and currency separately.",
-            "Record Search taxonomy only where the dedicated governed mapping supports it.",
-            "Add governed media cost mappings before monetary CPA/ROI.",
-        ],
-        [
-            "Making a wide activity table when the standard source expects tidy-long rows.",
-            "Putting every metadata field into the ID and creating brittle IDs.",
-            "Using <code>model_input_column</code> as if it were the raw source measure.",
-            "Treating spend as clicks, or clicks as conversions, without an explicit mapping.",
-            "Forcing paid, owned, and earned activity into different logical domains.",
-            "Filling missing delivery with zero.",
-            "Assuming every activity is optimisable because it was fitted.",
-            "Calling PMax, Demand Gen, or YouTube Paid Search merely because the platform is Google.",
-            "Using Brand Search as one generic variable without classification.",
+            "Uploading activity data wide (one column per activity) — the standard contract expects tidy/long rows instead.",
+            "Cramming every descriptive detail into the activity_id instead of using the dictionary fields.",
+            "Treating model_input_column as if it were a column that should already exist in your raw file.",
+            "Treating spend, clicks, and conversions as interchangeable without an explicit mapping.",
+            "Filling in missing weeks with zero instead of leaving them out.",
+            "Assuming an activity is automatically optimisable just because it was fitted.",
+            "Calling PMax, Demand Gen, or YouTube “Paid Search” just because the platform is Google.",
         ],
         [
             [
-                "spend is selected as model_input_measure and unit is GBP",
-                "model_input_measure is uk_paid_search_google_brand",
-                "The raw source column and model-ready destination are different.",
+                "spend selected as model_input_measure, unit GBP",
+                "model_input_measure set to the destination column name",
+                "The raw source column and the model-ready destination column are not the same thing.",
             ],
             [
-                "Google Brand and Bing Brand have separate activity IDs",
-                "Google/Bing stored only in a free-text file name",
-                "Platform identity must be explicit.",
+                "Google Brand and Bing Brand as two separate activity_ids",
+                "Google and Bing lumped into one “Brand Search” activity",
+                "Platform identity has to be explicit, not buried in a filename or note.",
             ],
             [
-                "pooling_group_id shared by comparable markets",
-                "assuming shared pooling_group_id means pooled estimation",
-                "Pooling is a model choice, not an ID effect.",
-            ],
-            [
-                "paid_search_cap recorded as a constraint object",
-                "cap copied into realised spend",
-                "A cap is not guaranteed spend.",
-            ],
-            [
-                "owned SEO activity marked earned/demand_capture",
-                "SEO visibility relabelled as paid delivery",
-                "SEO visibility and organic capture are distinct.",
-            ],
-            [
-                "missing row left absent",
-                "missing row filled with 0",
-                "Absence is not an observed zero.",
+                "A missing week left out of the sheet",
+                "A missing week filled in as 0",
+                "Missing and zero mean different things — don't guess.",
             ],
         ],
+        extra_html='<div class="callout warning"><b>These five columns currently have no effect: <code>model_input_unit</code>, <code>model_input_kind</code>, <code>spend_column</code>, <code>response_unit_column</code>, <code>response_unit</code>.</b> They exist in the template, but today the app does not automatically apply them from this sheet — filling them in here changes nothing in the model. The real place to set units and cost mappings is inside the app, in Channel Media Units and Curve Generation, after your data is uploaded. You can leave these blank for your first upload.</div>',
     )
+
     context = domain_section(
         "context",
         "3",
         "Context and External Factors",
-        "Context data records controls, signals, and events at their native source frequency. Its role is explicit because future planning treats exogenous controls, endogenous mediators, latent baseline states, cost assumptions, and decisions differently.",
-        "Required sheets: <code>context_data</code> and <code>variable_dictionary</code>. Optional sheet: <code>events</code>. Context data is tidy/long with <code>period_start</code>, <code>market</code>, <code>variable_id</code>, <code>value</code>, and <code>native_frequency</code>. Monthly or quarterly data may remain monthly or quarterly. Do not manually make fake weekly rows.",
+        "Context data captures things outside your control that might explain changes in the outcome — like CPI, seasonality, or holidays.",
+        "Yes, always. Every project needs this workbook.",
+        "One row is one variable, in one market, at whatever frequency it's actually published — weekly, monthly, or quarterly.",
+        "Two required sheets: <code>context_data</code> (the actual observations) and <code>variable_dictionary</code> (what each variable is). One optional sheet: <code>events</code> (named dates like Black Friday).",
         "period_start | market | variable_id | value | native_frequency\n2026-01-01   | UK     | uk_cpi      | 132.4 | monthly",
-        "The current variable dictionary requires variable_id, variable_class, native_frequency, and role. v2 adds source, scope, effective_from, effective_to, and unit. Events use event_id, event_name, start_date, and end_date. The current closed variable classes are flow_count, stock_level, rate_index, survey_measurement, and event_flag.",
-        CONTEXT_RAG,
-        "The row with <code>variable_id=uk_cpi</code> joins to a dictionary row with <code>variable_class=rate_index</code>, <code>native_frequency=monthly</code>, and an approved role such as <code>exogenous_forecastable_control</code>. The parser preserves native frequency and pivots observations; it does not invent a weekly value. A later alignment method must be approved and documented.",
         [
-            "The two required sheets exist and use exact headers.",
-            "Every context observation has period_start, market, variable_id, value, and native_frequency.",
-            "Every variable has class, native frequency, and role.",
-            "Mixed frequency is disclosed rather than silently converted.",
-            "Missingness and observed zero are distinguishable.",
-            "Events use factual dates and are kept separate from continuous variables.",
-        ],
-        [
-            "Add source, scope, unit, and effective dates.",
-            "Add a named events sheet for campaigns, holidays, or other governed occurrences.",
-            "Add dedicated Google Trends Candidate A metadata when using a Brand Demand anchor.",
-            "Add dedicated SEO visibility observations for GSC-derived ranking visibility.",
-        ],
-        [
-            "Copying monthly data into each week.",
-            "Treating unavailable as zero.",
-            "Using one variable ID for measures with different units or meanings.",
-            "Forecasting an endogenous mediator as an independent future control.",
-            "Using an ordinary external forecast for the latent baseline.",
-            "Assuming the current app has a default monthly-to-weekly conversion.",
-            "Putting a named event into a continuous value column with no event identity.",
-            "Treating Google Trends 0 as confirmed zero demand.",
+            [
+                "variable_id",
+                "A stable name for this variable.",
+                "Lowercase, unique in the dictionary.",
+                "uk_cpi",
+            ],
+            [
+                "value",
+                "The actual number observed.",
+                "A real number, or leave the row out entirely if truly unavailable — never a made-up placeholder.",
+                "132.4",
+            ],
+            [
+                "native_frequency",
+                "How often this variable is actually published.",
+                "weekly, monthly, quarterly, yearly, daily, or event.",
+                "monthly",
+            ],
+            [
+                "variable_class",
+                "What kind of variable this is.",
+                "flow_count, stock_level, rate_index, survey_measurement, or event_flag.",
+                "rate_index",
+            ],
+            [
+                "role",
+                "How this variable is allowed to be used in forecasting.",
+                "An approved role — see the technical reference below for the full list.",
+                "exogenous_forecastable_control",
+            ],
         ],
         [
             [
-                "uk_cpi is monthly and stays monthly",
-                "uk_cpi repeated into four weekly rows",
-                "The source frequency must remain truthful.",
+                "source, scope",
+                "Only needed once this variable is reviewed for wider use (“adoption”), not for a first upload.",
+                "Where it came from, and whether it's UK-specific or a wider series.",
+            ],
+        ],
+        [
+            [
+                "effective_from, effective_to, unit",
+                "Only fill these in if useful — they don't block anything if left blank.",
+            ],
+        ],
+        CONTEXT_RAG,
+        "The row for <code>variable_id=uk_cpi</code> joins to a dictionary row with <code>variable_class=rate_index</code> and <code>native_frequency=monthly</code>. The app keeps it monthly — it never invents a weekly number from a monthly one.",
+        [
+            "Copying a monthly number into every week of that month.",
+            "Treating “unavailable” the same as zero.",
+            "Reusing one variable_id for two different things with different units.",
+            "Forecasting a variable that the model itself generates (like branded-search demand) as if it were an independent external input.",
+            "Assuming the app will convert monthly data to weekly for you — it currently doesn't have a default conversion.",
+        ],
+        [
+            [
+                "uk_cpi stays monthly",
+                "uk_cpi copied into four weekly rows",
+                "The real publishing frequency must stay truthful.",
             ],
             [
                 "variable_class=rate_index",
-                "variable_class=consumer_signal without an approved class",
-                "Use the closed vocabulary for governed context.",
+                "A made-up class not on the approved list",
+                "Only the five approved classes are accepted.",
             ],
             [
-                "role=exogenous_forecastable_control for CPI",
-                "role=exogenous_forecastable_control for branded-search demand",
-                "An endogenous mediator must be generated by the scenario model.",
-            ],
-            [
-                "event_id and factual start/end dates",
-                "event flag silently inferred from a promotion name",
-                "Event treatment is separately governed.",
-            ],
-            [
-                "suppressed value state recorded",
-                "suppressed converted to 0",
-                "Suppressed is not observed zero.",
+                "A missing/suppressed value left out",
+                "A missing/suppressed value entered as 0",
+                "Missing is not the same as an observed zero.",
             ],
         ],
-        extra_html="<h3>Optional events schema</h3><p>Events are a separate optional table. Keep factual dates and event identity; do not infer event family or response treatment.</p>"
+        extra_html="<h3>Optional events sheet</h3><p>A separate table for named dates — keep the real dates and a name; the app never guesses what kind of event it is or what effect it has.</p>"
         + html_table(EVENT_RAG, "wide"),
     )
+
+    add_later_reference = simple_table(
+        [
+            "Add-on",
+            "Do I need it now?",
+            "What it unlocks",
+            "Where to get it",
+            "Key rule",
+        ],
+        [
+            [
+                "Experiment Evidence",
+                "No",
+                "Future ability to calibrate the model against a real lift test",
+                "“Experiment Evidence” download button",
+                "Uploading evidence never changes a model by itself — a person has to review and adopt it.",
+            ],
+            [
+                "Candidate A Search observations",
+                "No",
+                "Search capacity/mediation modelling",
+                "Model Training page → “Download Candidate A observation template”",
+                "Needs a complete weekly grid with no gaps, and delivery must never exceed the cap.",
+            ],
+            [
+                "Google Trends Brand Demand anchor",
+                "No",
+                "Feeds the Search capacity/mediation feature",
+                "Model Training page, upload box",
+                "A reading of 0 means “suppressed,” not “confirmed zero demand.”",
+            ],
+            [
+                "SEO / Google Search Console visibility",
+                "No",
+                "A separate organic-search visibility measure",
+                "Model Training page, upload box",
+                "Never zero-fill a missing week, and it never carries a spend-based ROI.",
+            ],
+            [
+                "Named events administration",
+                "No",
+                "Turns event dates from the Context events sheet into governed, reusable events",
+                "“Named events administration” section of the Data Upload page",
+                "The app never infers what kind of event it is — you classify it explicitly.",
+            ],
+        ],
+        "wide",
+    )
+
     search_table = simple_table(
-        ["Object", "Unit", "Role / treatment", "Upload or source boundary"],
+        ["Object", "Unit", "Role / treatment", "Where it comes from"],
         [
             [
                 "search_demand",
                 "index or count",
-                "demand_capture context; not paid",
-                "Candidate A Google Trends anchor or another governed demand source",
+                "demand signal, not paid",
+                "Google Trends Brand Demand anchor, or another approved source",
             ],
             [
                 "paid_search_spend",
                 "currency",
-                "intervention / paid cost",
+                "a normal paid activity",
                 "activity data + cost mapping",
             ],
             [
                 "paid_search_delivery",
                 "clicks or impressions",
-                "descriptive delivery; not a second fitted spend",
-                "activity data + physical mapping",
+                "descriptive delivery, not a second spend figure",
+                "activity data",
             ],
             [
                 "paid_search_cap",
                 "currency or delivery unit",
-                "constraint/context; not realised spend",
-                "separate governed cap object / Candidate A inputs",
+                "a limit, not real spend",
+                "Candidate A inputs",
             ],
             [
                 "organic_search_capture",
                 "response count",
-                "demand_capture; earned",
-                "activity or dedicated source",
-            ],
-            [
-                "direct_navigation_capture",
-                "response count",
-                "demand_capture; owned",
+                "an earned/organic result",
                 "activity or dedicated source",
             ],
             [
                 "residual Paid Search incrementality",
                 "model output",
-                "treatment result",
+                "something the model calculates",
                 "never a raw upload column",
             ],
         ],
         "compact",
     )
+
     advanced = f"""
     <section id="advanced" class="section">
-      <p class="eyebrow">Optional and advanced boundaries</p><h2>Use separate paths when the feature is different</h2>
-      <p>These inputs are not required for a first count model. Uploading evidence does not grant reporting, planning, or optimisation approval.</p>
-      <h3>Search object model</h3><p>Never collapse these objects into one <code>Brand Search</code> column:</p>{search_table}
-      <p>Minimum Search taxonomy leaves are Google Brand, Bing Brand, Google Non-Brand, and Bing Non-Brand. Keep <code>search_intent_group_id</code> and <code>search_platform</code> as separate axes. PMax, Demand Gen, and YouTube are not automatically Paid Search. A cap is not guaranteed spend, and a higher non-binding cap must not create artificial value.</p>
-      <p>A deeper Non-Brand Search child group (for example a specific Non-Brand sub-category) is supported through a separate governed taxonomy catalogue, not by inventing a new free-text value. A new child starts in draft status until explicitly approved, stays subordinate to its approved Brand/Non-Brand parent, and cannot be fitted at the same model grain as that parent — a project chooses either the parent or its governed children for fitting, not both at once. Google/Bing remains a separate platform axis from the intent group. A draft or newly approved child has no planning eligibility and no cost-bearing economic treatment until child-level observed data and governed cost support exist; reporting can still roll a child up into its parent total.</p>
-      <h3>Candidate A Search mediation/capacity observations</h3>
-      <p>Use the dedicated Candidate A observation boundary when supplying <code>paid_search_delivery</code>, <code>paid_search_cap</code>, <code>organic_search_capture</code>, and <code>direct_navigation_capture</code>. It requires exact period/market rows, a complete weekly grid, finite non-negative values, and delivery not exceeding cap under the governed scale. It does not infer source IDs, cap provenance, demand channels, or a calibration prior.</p>
-      <h3>Google Trends Candidate A Brand Demand anchor</h3>
-      <p>Use the dedicated upload with <code>week</code> and <code>raw_index</code>, plus query_set_id, geography, approved branded terms, category, search property, extraction date, and sigma. The raw index is 0–100 relative interest. A raw zero is <b>suppressed</b>, not confirmed zero. One query set is used for the series; there is no silent stitching. This is exploratory/directional and planning-disabled by default.</p>
-      <h3>SEO / Google Search Console</h3>
-      <p>Use the dedicated SEO visibility path: market, week, dimension_label, position, impressions, and optional clicks. The metric is an impression-weighted inverse position index. It is not organic Search capture, it is not a paid activity, and it is outside spend-based CPA/ROI and optimisation until separately approved.</p>
-      <p>SEO visibility supports more than one named group per market/week — select Brand and Non-Brand (or an explicitly governed deeper child) individually via <code>seo_group_id</code>/<code>seo_group_name</code> rather than blending them into one series; a row with no group supplied defaults to a single generic <code>seo_visibility</code> group. Rows may be raw GSC observations or already-aggregated market/week/group rows. A missing week stays inactive — it is never zero-filled — and SEO carries no spend-based CPA or ROI regardless of grouping.</p>
-      <h3>Outcome valuation</h3>
-      <p>FH LTR and DNA revenue are a separate governed artifact, not an outcome dictionary shortcut. The current upload columns are <code>valuation_kind</code>, <code>market</code>, <code>week</code>, <code>segment</code>, <code>denominator_outcome_id</code>, <code>quality_status</code>, <code>segment_dimension</code>, <code>aggregate_value</code>, <code>currency</code>, <code>source</code>, <code>source_version</code>, <code>schema_version</code>, and <code>horizon_months</code>. Count-first fitting can omit it. Historical rates are derived at weekly segment grain; future values require an explicit scenario assumption, not automatic extrapolation. FX conversion is a separate Finance-governed decision.</p>
-      <h3>Experiment evidence</h3>
-      <p>Optional <code>experiment_evidence</code> rows need experiment_id, activity_id, market, start_date, and end_date. Adoption later needs design, estimand, estimate, uncertainty, method, source, and evidence status. Uploading evidence never auto-calibrates the model or changes a fit.</p>{html_table(EXPERIMENT_RAG, "wide")}
-      <h3>Future-variable roles</h3>
-      {simple_table(["Role", "Meaning", "Example", "Do not do"], [["planned decision variable", "User sets spend, delivery, promotion, price, or cap", "Paid Search spend", "Call a cap realised spend"], ["exogenous forecastable control", "External series suitable for a forecast", "CPI or unemployment", "Forecast an endogenous mediator independently"], ["cost/translation assumption", "CPM, CPC, GRP cost, FX, or similar", "GBP per click", "Treat model input units as automatically monetary"], ["endogenous funnel state", "Generated by the causal model from the plan", "Branded-search demand", "Also configure as an independent future control"], ["latent baseline state", "Projected from its own fitted process", "Time-varying intercept", "Send it to Chronos as an ordinary target"], ["fixed business assumption / diagnostic", "Held fixed or historical-only", "Approved business rule", "Optimise it without approval"]], "compact")}
-      <h3>RAG for advanced uploads</h3>
-      {simple_table(["Input", "First fit needed?", "Standard sheet or separate?", "Absent consequence", "RAG"], [["Outcome completeness", "No for exploratory counts; yes for official/maturity-sensitive outcomes", "Optional standard sheet", "Official use blocks", "AMBER / RED by use"], ["Named events", "No", "Optional standard sheet", "Event response unavailable", "AMBER"], ["Experiment evidence", "No", "Optional standard sheet", "No calibration evidence", "AMBER"], ["SEO/GSC", "No", "Dedicated SEO path", "No SEO visibility pathway", "AMBER"], ["Trends Candidate A", "No", "Dedicated anchor path", "No Candidate A demand anchor", "AMBER"], ["FH LTR/DNA revenue", "No for count fit", "Separate valuation upload", "Economic output blocked", "AMBER / RED for economics"], ["FX/cost mappings", "No", "Separate governed mapping", "CPA/ROI translation blocked", "AMBER / RED for economics"], ["Future assumptions/caps", "No", "Scenario/config boundary", "Scenario value or capacity output blocked", "AMBER / RED for planning"]], "compact")}
+      <p class="eyebrow">Add these later</p><h2 id="add-later">Optional and feature-specific uploads</h2>
+      <p>None of these are needed to get your first count-based fit working. Uploading one of them doesn't automatically turn on the feature it belongs to — a person still reviews and approves it.</p>
+      {add_later_reference}
+      <h3>Why Search needs several separate objects, not one “Brand Search” column</h3>
+      <p>{search_table}</p>
+      <p>The minimum Search split is Google Brand, Bing Brand, Google Non-Brand, and Bing Non-Brand — four activities, not one. A deeper Non-Brand sub-category is possible through a separate governed process; it starts as “draft,” can't be modelled alongside its parent at the same time, and has no budget-planning use until it has its own real cost data. PMax, Demand Gen, and YouTube are never automatically treated as Paid Search just because the platform is Google.</p>
+      <h3>Future-variable roles (for advanced/planning uploads)</h3>
+      {simple_table(["Role", "Meaning", "Example"], [["planned decision variable", "Something a user sets, like spend or price", "Paid Search spend"], ["exogenous forecastable control", "An outside series you can reasonably forecast", "CPI or unemployment"], ["cost/translation assumption", "A conversion rate, like cost per click", "GBP per click"], ["endogenous funnel state", "Something the model itself generates", "Branded-search demand"], ["latent baseline state", "A background trend the model fits on its own", "Time-varying intercept"], ["fixed business assumption", "Held fixed unless a person changes it", "An approved business rule"]], "compact")}
     </section>
     """
+
     workflow = f"""
     <section id="workflow" class="section">
-      <p class="eyebrow">Start here</p><h2>Upload workflow</h2>
-      <div class="callout"><b>Logical domain is not one physical file.</b> You may upload any number of files or workbooks to a domain, and a workbook may contain several tables. The app keeps source versions and table lineage visible.</div>
-      <div class="callout warning"><b>RAG key:</b> RED means provide it for the stated use; AMBER means some uses need it; GREEN means optional. The words and consequences are authoritative — colour is only a visual aid.</div>
-      <ol class="steps"><li>Download the current standard templates.</li><li>Complete dictionary fields before loading large raw files.</li><li>Keep each source at its native frequency and keep market in the rows.</li><li>Upload Outcomes, Activity and Media, and Context and External Factors as their logical categories. Add Experiment Evidence only when it is useful.</li><li>Review warnings, provenance, source versions, missingness, duplicate keys, and model-input mappings.</li><li>Only then continue to transformation, fit, reporting, planning, or optimisation. A successful upload is not an approval.</li></ol>
-      <h3>What the current parser does</h3>
-      <ul><li>Reads every sheet in a standard workbook and retains unknown sheets with a warning.</li><li>Requires explicit domain selection when a workbook contains multiple recognised domains.</li><li>Rejects empty sheets and missing required columns.</li><li>Canonicalises activity only at the explicit model-input boundary, pivoting to period × market.</li><li>Preserves missing rows; it does not silently fill missing activity or context values with zero.</li><li>Rejects duplicate source grain during canonicalisation or incompatible duplicate rows when merging multiple files.</li><li>Accepts legacy v1 shapes but marks them incomplete; use v2 for new work.</li></ul>
+      <p class="eyebrow">Start here</p><h2>What do I actually need to upload?</h2>
+      {minimum_checklist_html}
+      <h3>How uploading works</h3>
+      <ol class="steps"><li>Download the three required templates.</li><li>Fill in the dictionary fields marked “Fields you must fill in” before loading a large raw file.</li><li>Keep each source at its real, native frequency, and keep market as a column in every row.</li><li>Upload Outcomes, Activity and Media, and Context. Add anything from “Add these later” only once you actually need it.</li><li>Check the warnings the app shows you — missing values, duplicate rows, and how your fields were mapped.</li><li>A successful upload is not an approval. Reporting, planning, and optimisation are separate, later steps.</li></ol>
       <h3>Three words that prevent most mistakes</h3>
-      {simple_table(["Word", "Means", "Does not mean"], [["raw", "what the source supplied", "a model-ready wide frame"], ["dictionary", "what a field means and how it is governed", "a licence to infer missing values"], ["canonical", "the explicit transformation boundary", "a silent fill, frequency conversion, or approval"]], "compact")}
+      {simple_table(["Word", "Means", "Does not mean"], [["raw", "exactly what your source file supplied", "a model-ready, cleaned-up table"], ["dictionary", "what a column means and how it's governed", "permission to guess at missing values"], ["canonical", "the one official, processed version the model uses", "something the app invents automatically for you"]], "compact")}
     </section>
     """
+
     glossary = simple_table(
         ["Term", "Plain-English meaning"],
         [
-            ["activity_id", "Stable identity at market × activity grain."],
-            ["model_input_measure", "Raw column selected for the model."],
-            ["model_input_column", "Destination column after activity pivot."],
-            ["outcome_id", "Stable outcome-definition identity."],
-            ["variable_id", "Stable context-variable identity."],
-            ["native frequency", "Frequency the source actually uses."],
+            ["activity_id", "A stable name for one activity, in one market."],
+            ["model_input_measure", "The raw column the model is actually fitted on."],
+            [
+                "model_input_column",
+                "The new column name the app creates after processing.",
+            ],
+            ["outcome_id", "A stable name for one outcome definition."],
+            ["variable_id", "A stable name for one context variable."],
+            ["native frequency", "How often the source data is really published."],
             [
                 "pooling_group_id",
-                "Optional comparison identity, not a pooling instruction.",
+                "A label saying two activities are comparable — it does not force the model to combine them.",
             ],
-            ["cap", "A budget/delivery ceiling, not realised spend."],
-            ["missing", "No usable observed value; not the same as zero."],
-            ["maturity rule", "When an outcome period is complete enough to use."],
-            ["RAG", "Red/amber/green status with written consequences."],
-            ["source version", "Version of the file or upstream source used."],
+            ["cap", "A spending or delivery limit, not money that was actually spent."],
+            ["missing", "“We don't know,” never the same as a real zero."],
             [
-                "residual incrementality",
-                "A model output after the governed pathway treatment.",
+                "maturity rule",
+                "The rule for when an outcome's data is complete enough to trust.",
             ],
             [
-                "evidence status",
-                "Strength/readiness of evidence; not reporting approval.",
+                "RED / AMBER / GREEN",
+                "How urgently a field matters: RED = always fill it in, AMBER = only for some uses, GREEN = optional.",
             ],
         ],
         "compact",
     )
+
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Ancestry MMM Data Upload Guide</title>
 <style>
 :root{{--ink:#18212b;--muted:#5d6b78;--blue:#0b5cab;--navy:#12304a;--wash:#f3f7fb;--line:#d9e2ea;--red:#fce4e4;--amber:#fff1cc;--green:#e3f4e6;--grey:#edf0f2;--shadow:0 8px 24px rgba(19,48,74,.09)}}
-*{{box-sizing:border-box}} html{{scroll-behavior:smooth}} body{{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;color:var(--ink);line-height:1.55;background:#fff}} a{{color:var(--blue)}} a:visited{{color:#5b2a86}} code{{background:#eef3f7;color:#173b5e;border-radius:4px;padding:.1em .3em;font-size:.93em}} footer a:visited{{color:#fff}} .skip{{position:absolute;left:-9999px}} .skip:focus{{left:1rem;top:1rem;background:#fff;padding:.5rem;z-index:10}}
-.layout{{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100vh}} aside{{position:sticky;top:0;height:100vh;overflow:auto;background:var(--navy);color:#fff;padding:1.25rem}} aside h2{{font-size:1.1rem;color:#fff;margin:.2rem 0 1rem}} aside p{{font-size:.82rem;color:#c9d8e5}} nav a{{display:block;color:#e0edf7;text-decoration:none;padding:.32rem .2rem;font-size:.88rem}} nav a:hover,nav a:focus{{color:#fff;background:rgba(255,255,255,.1);border-radius:4px}} .search{{width:100%;padding:.55rem;border-radius:5px;border:1px solid #6e91aa;margin:.4rem 0 1rem}} main{{min-width:0}} .hero{{background:linear-gradient(135deg,#eaf4ff,#fff);padding:4rem clamp(1rem,5vw,5rem) 3.25rem;border-bottom:1px solid var(--line)}} .hero h1{{font-size:clamp(2rem,4vw,3.6rem);line-height:1.08;color:var(--navy);max-width:850px;margin:.2rem 0 1rem}} .hero p{{max-width:780px;font-size:1.08rem}} .badge{{display:inline-block;background:#dbeeff;color:#084d8d;padding:.25rem .55rem;border-radius:999px;font-weight:700;font-size:.78rem}} .section{{padding:3rem clamp(1rem,5vw,5rem);max-width:1500px}} .section:nth-of-type(even){{background:#fff}} .domain{{border-top:1px solid var(--line)}} h2{{font-size:2rem;color:var(--navy);margin:.15rem 0 1.1rem}} h3{{color:#234f72;margin-top:1.8rem}} .eyebrow{{text-transform:uppercase;letter-spacing:.12em;font-size:.76rem;color:var(--blue);font-weight:800;margin:0}} .callout{{border-left:5px solid var(--blue);background:var(--wash);padding:1rem 1.2rem;margin:1.2rem 0}} .warning{{border-left-color:#c67a00;background:#fff8e7}} .table-wrap{{overflow:auto;margin:1rem 0 1.25rem;border:1px solid var(--line);border-radius:7px}} table{{border-collapse:collapse;width:100%;background:#fff;font-size:.87rem}} th,td{{border-bottom:1px solid var(--line);padding:.55rem .65rem;text-align:left;vertical-align:top}} th{{background:#eaf1f6;color:var(--navy);font-weight:800;position:sticky;top:0;z-index:1}} tr:last-child td{{border-bottom:0}} .rag td:nth-child(2){{font-weight:800;min-width:150px}} .rag-red{{background:var(--red)}} .rag-amber{{background:var(--amber)}} .rag-green{{background:var(--green)}} .rag-grey{{background:var(--grey)}} .compact{{max-width:1100px}} pre{{overflow:auto;background:#f5f8fb;color:#17222d;border:1px solid #b8c7d3;padding:1rem;border-radius:6px;font-size:.86rem}} pre code{{background:transparent;color:#17222d;padding:0}} .mistakes{{padding-left:1.2rem}} .mistakes li{{margin:.35rem 0}} .steps{{counter-reset:step;list-style:none;padding:0;display:grid;gap:.7rem;max-width:850px}} .steps li{{counter-increment:step;display:flex;gap:.7rem;background:var(--wash);padding:.75rem;border-radius:6px}} .steps li::before{{content:counter(step);background:var(--blue);color:#fff;width:1.6rem;height:1.6rem;border-radius:50%;display:inline-grid;place-items:center;font-weight:800;flex:0 0 auto}} .diagram{{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;background:#fff;padding:1rem;border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow);margin:1rem 0 2rem}} .diagram-box{{border:2px solid var(--blue);border-radius:7px;padding:.75rem;min-width:180px;background:#f7fbff}} .diagram-box span{{display:block;font-size:.8rem;color:var(--muted);margin-top:.35rem}} .diagram-box.model{{border-color:#258b4d;background:#f5fff7}} .diagram-box.activity{{border-color:#8c5a00;background:#fffbf0}} .diagram-box.context{{border-color:#7846a7;background:#fbf7ff}} .arrow{{font-size:.77rem;color:var(--muted);text-align:center}} details{{border:1px solid var(--line);border-radius:6px;margin:.55rem 0;padding:.7rem 1rem;max-width:1000px}} summary{{cursor:pointer;font-weight:700;color:var(--navy)}} .back{{display:inline-block;margin-top:1.3rem;font-size:.85rem}} footer{{padding:2rem clamp(1rem,5vw,5rem);background:var(--navy);color:#d9e7f2;font-size:.85rem}} footer a{{color:#fff}}
+*{{box-sizing:border-box}} html{{scroll-behavior:smooth}} body{{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;color:var(--ink);line-height:1.55;background:#fff}} a{{color:var(--blue)}} a:visited{{color:#5b2a86}} code{{background:#eef3f7;color:#173b5e;border-radius:4px;padding:.1em .3em;font-size:.93em;overflow-wrap:anywhere}} footer a:visited{{color:#fff}} .skip{{position:absolute;left:-9999px}} .skip:focus{{left:1rem;top:1rem;background:#fff;padding:.5rem;z-index:10}}
+.layout{{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100vh}} aside{{position:sticky;top:0;height:100vh;overflow:auto;background:var(--navy);color:#fff;padding:1.25rem}} aside h2{{font-size:1.1rem;color:#fff;margin:.2rem 0 1rem}} aside p{{font-size:.82rem;color:#c9d8e5}} nav a{{display:block;color:#e0edf7;text-decoration:none;padding:.32rem .2rem;font-size:.88rem}} nav a:hover,nav a:focus{{color:#fff;background:rgba(255,255,255,.1);border-radius:4px}} .search{{width:100%;padding:.55rem;border-radius:5px;border:1px solid #6e91aa;margin:.4rem 0 1rem}} main{{min-width:0}} .hero{{background:linear-gradient(135deg,#eaf4ff,#fff);padding:4rem clamp(1rem,5vw,5rem) 3.25rem;border-bottom:1px solid var(--line)}} .hero h1{{font-size:clamp(2rem,4vw,3.6rem);line-height:1.08;color:var(--navy);max-width:850px;margin:.2rem 0 1rem}} .hero p{{max-width:780px;font-size:1.08rem}} .badge{{display:inline-block;background:#dbeeff;color:#084d8d;padding:.25rem .55rem;border-radius:999px;font-weight:700;font-size:.78rem}} .section{{padding:3rem clamp(1rem,5vw,5rem);max-width:1500px}} .section:nth-of-type(even){{background:#fff}} .domain{{border-top:1px solid var(--line)}} h2{{font-size:2rem;color:var(--navy);margin:.15rem 0 1.1rem}} h3{{color:#234f72;margin-top:1.8rem}} .eyebrow{{text-transform:uppercase;letter-spacing:.12em;font-size:.76rem;color:var(--blue);font-weight:800;margin:0}} .callout{{border-left:5px solid var(--blue);background:var(--wash);padding:1rem 1.2rem;margin:1.2rem 0}} .warning{{border-left-color:#c67a00;background:#fff8e7}} .table-wrap{{overflow:auto;margin:1rem 0 1.25rem;border:1px solid var(--line);border-radius:7px}} table{{border-collapse:collapse;width:100%;background:#fff;font-size:.87rem}} th,td{{border-bottom:1px solid var(--line);padding:.55rem .65rem;text-align:left;vertical-align:top}} th{{background:#eaf1f6;color:var(--navy);font-weight:800;position:sticky;top:0;z-index:1}} tr:last-child td{{border-bottom:0}} .rag td:nth-child(2){{font-weight:800;min-width:150px}} .rag-red{{background:var(--red)}} .rag-amber{{background:var(--amber)}} .rag-green{{background:var(--green)}} .rag-grey{{background:var(--grey)}} .compact{{max-width:1100px}} .wide{{max-width:1400px}} pre{{overflow:auto;background:#f5f8fb;color:#17222d;border:1px solid #b8c7d3;padding:1rem;border-radius:6px;font-size:.86rem}} pre code{{background:transparent;color:#17222d;padding:0}} .mistakes{{padding-left:1.2rem}} .mistakes li{{margin:.35rem 0}} .steps{{counter-reset:step;list-style:none;padding:0;display:grid;gap:.7rem;max-width:850px}} .steps li{{counter-increment:step;display:flex;gap:.7rem;background:var(--wash);padding:.75rem;border-radius:6px}} .steps li::before{{content:counter(step);background:var(--blue);color:#fff;width:1.6rem;height:1.6rem;border-radius:50%;display:inline-grid;place-items:center;font-weight:800;flex:0 0 auto}} .diagram{{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;background:#fff;padding:1rem;border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow);margin:1rem 0 2rem}} .diagram-box{{border:2px solid var(--blue);border-radius:7px;padding:.75rem;min-width:180px;background:#f7fbff}} .diagram-box span{{display:block;font-size:.8rem;color:var(--muted);margin-top:.35rem}} .diagram-box.model{{border-color:#258b4d;background:#f5fff7}} .diagram-box.activity{{border-color:#8c5a00;background:#fffbf0}} .diagram-box.context{{border-color:#7846a7;background:#fbf7ff}} .arrow{{font-size:.77rem;color:var(--muted);text-align:center}} details{{border:1px solid var(--line);border-radius:6px;margin:.55rem 0;padding:.7rem 1rem;max-width:1400px}} summary{{cursor:pointer;font-weight:700;color:var(--navy)}} .back{{display:inline-block;margin-top:1.3rem;font-size:.85rem}} footer{{padding:2rem clamp(1rem,5vw,5rem);background:var(--navy);color:#d9e7f2;font-size:.85rem}} footer a{{color:#fff}}
 @media(max-width:900px){{.layout{{display:block}} aside{{position:relative;height:auto}} nav{{columns:2}} .hero{{padding-top:2.5rem}} .section{{padding-top:2.3rem;padding-bottom:2.3rem}}}} @media print{{aside,.search,.skip,.back{{display:none!important}}.layout{{display:block}}.hero{{padding:1rem 0;border:0}}.section{{padding:1rem 0;break-inside:auto}}details{{break-inside:avoid}}pre{{white-space:pre-wrap}}a{{color:#000;text-decoration:none}}}}
-</style></head><body><a class="skip" href="#main">Skip to content</a><div class="layout"><aside><h2>Ancestry MMM</h2><p>Data Upload Guide</p><input class="search" id="guideSearch" type="search" placeholder="Filter sections" aria-label="Filter guide sections"><nav id="toc"><a href="#top">Overview</a><a href="#workflow">Upload workflow</a><a href="#outcomes">1. Outcomes</a><a href="#activity">2. Activity and Media</a><a href="#context">3. Context</a><a href="#advanced">Advanced boundaries</a><a href="#faq">FAQ</a><a href="#glossary">Glossary</a><a href="#review">Source and review</a></nav></aside><main id="main"><header class="hero" id="top"><span class="badge">Version 2 · source-pack contract</span><h1>Ancestry MMM data upload guide</h1><p>This guide helps a first-time analyst prepare data that the application can understand and review. It explains what each table means, how dictionaries connect to raw data, and what the tool does when information is missing.</p><div class="callout"><b>Most important:</b> upload the meaning with the data. A successful file upload does not mean the measure is approved for modelling, reporting, planning, or optimisation.</div>{relationship}</header>{workflow}{outcomes}{activity}{context}{advanced}<section id="faq" class="section"><p class="eyebrow">Questions analysts ask</p><h2>FAQ</h2><p>Use the links in the answers to jump to the longer explanation. If a business definition is not approved, stop and raise it rather than guessing.</p>{faq_html}</section><section id="glossary" class="section"><p class="eyebrow">Quick reference</p><h2>Glossary</h2>{glossary}</section><section id="review" class="section"><p class="eyebrow">Traceability</p><h2>Source and review</h2><p>This guide was built from the current repository contracts, not from an old guide. The exact files, requirement IDs, parser checks, and review results are recorded in <code>Ancestry_MMM_Data_Upload_Guide_REVIEW.md</code>.</p><p>Primary implementation references include <code>ancestry_mmm/data/templates.py</code>, <code>loader.py</code>, <code>source_pack_adoption.py</code>, <code>source_inventory.py</code>, the Data Upload page, and the upload/template tests. Approved requirement IDs include REQ-DATAIN-001, REQ-COVERAGE-001, REQ-ACTIVITY-001, REQ-OUT-001/002/003, REQ-NBT-001/002/003/004, REQ-SEARCH-001/002/004/005, REQ-SEO-001, REQ-EVENT-001, REQ-EXPMODE-001, REQ-CALIB-001, REQ-ECON-002/003, REQ-FUTURE-001, and REQ-FX-001–006. The UK production NBT boundary is recorded in <code>docs/uk_production_onboarding_runbook.md</code>.</p><a class="back" href="#top">↑ Back to top</a></section></main></div><footer><p><b>Internal analyst guide.</b> No external libraries, fonts, images, or network calls are required. Print this page or open it locally in a browser.</p></footer><script>(function(){{const input=document.getElementById('guideSearch');const links=[...document.querySelectorAll('#toc a')];const sections=[...document.querySelectorAll('main .section, main .hero')];input.addEventListener('input',function(){{const q=input.value.toLowerCase().trim();sections.forEach(s=>{{s.hidden=!!q&&!s.innerText.toLowerCase().includes(q)}});links.forEach(a=>{{const id=a.getAttribute('href').slice(1),s=document.getElementById(id);a.hidden=!!q&&(!s||s.hidden)}})}})}})();</script></body></html>"""
+</style></head><body><a class="skip" href="#main">Skip to content</a><div class="layout"><aside><h2>Ancestry MMM</h2><p>Data Upload Guide</p><input class="search" id="guideSearch" type="search" placeholder="Filter sections" aria-label="Filter guide sections"><nav id="toc"><a href="#top">Overview</a><a href="#workflow">What do I need?</a><a href="#outcomes">1. Outcomes</a><a href="#activity">2. Activity and Media</a><a href="#context">3. Context</a><a href="#ltr">FH LTR / DNA revenue</a><a href="#advanced">Add these later</a><a href="#faq">FAQ</a><a href="#glossary">Glossary</a><a href="#review">Source and review</a></nav></aside><main id="main"><header class="hero" id="top"><span class="badge">Version 2 · source-pack contract</span><h1>Ancestry MMM data upload guide</h1><p>This guide helps a first-time analyst prepare data the application can use. For every field, it tells you if you need it, what it means, what to type, and what happens if you skip it.</p><div class="callout"><b>Most important:</b> uploading a file successfully does not mean it's approved for reporting, planning, or optimisation. Those are separate, later steps.</div>{relationship}</header>{workflow}{outcomes}{activity}{context}{advanced}<section id="faq" class="section"><p class="eyebrow">Questions analysts ask</p><h2>FAQ</h2><p>If a question isn't answered here, check the “Fields you may need” table for that section, or the full technical reference at the end of each section.</p>{faq_html}</section><section id="glossary" class="section"><p class="eyebrow">Quick reference</p><h2>Glossary</h2>{glossary}</section><section id="review" class="section"><p class="eyebrow">Traceability</p><h2>Source and review</h2><p>This guide was built and checked against the current application code, not copied from an older version. The exact files, requirement IDs, and review results are recorded in <code>Ancestry_MMM_Data_Upload_Guide_REVIEW.md</code> and <code>Ancestry_MMM_Data_Upload_Guide_Simplification_Report.md</code>.</p><p>Primary implementation references include <code>ancestry_mmm/data/templates.py</code>, <code>template_downloads.py</code>, <code>loader.py</code>, <code>source_pack_adoption.py</code>, the Data Upload and Model Training pages, and the upload/template tests. Approved requirement IDs include REQ-DATAIN-001, REQ-COVERAGE-001, REQ-ACTIVITY-001, REQ-OUT-001/002/003, REQ-NBT-001/002/003/004, REQ-SEARCH-001/002/004/005, REQ-SEO-001, REQ-EVENT-001, REQ-EXPMODE-001, REQ-CALIB-001, REQ-ECON-002/003, REQ-FUTURE-001, and REQ-FX-001–006. The UK production NBT boundary is recorded in <code>docs/uk_production_onboarding_runbook.md</code>.</p><a class="back" href="#top">↑ Back to top</a></section></main></div><footer><p><b>Internal analyst guide.</b> No external libraries, fonts, images, or network calls are required. Print this page or open it locally in a browser.</p></footer><script>(function(){{const input=document.getElementById('guideSearch');const links=[...document.querySelectorAll('#toc a')];const sections=[...document.querySelectorAll('main .section, main .hero')];input.addEventListener('input',function(){{const q=input.value.toLowerCase().trim();sections.forEach(s=>{{s.hidden=!!q&&!s.innerText.toLowerCase().includes(q)}});links.forEach(a=>{{const id=a.getAttribute('href').slice(1),s=document.getElementById(id);a.hidden=!!q&&(!s||s.hidden)}})}})}})();</script></body></html>"""
 
 
 def clean_token_formula(cell_ref: str) -> str:

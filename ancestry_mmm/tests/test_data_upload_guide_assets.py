@@ -99,6 +99,29 @@ def test_uk_nbt_production_outcomes_named_in_guide_html(guide):
         assert outcome_id in html
 
 
+def test_guide_leads_with_minimum_for_first_fit(guide):
+    html = guide.build_html()
+    assert "Minimum for your first" in html
+    assert "Fields you must fill in" in html
+    assert "Fields you may need" in html
+    # The minimum-checklist callout must appear before the first domain
+    # section, not buried after the schema detail.
+    assert html.index("Minimum for your first") < html.index('id="outcomes"')
+
+
+def test_inert_activity_dictionary_fields_are_flagged_in_guide_html(guide):
+    html = guide.build_html()
+    for field in (
+        "model_input_unit",
+        "model_input_kind",
+        "spend_column",
+        "response_unit_column",
+        "response_unit",
+    ):
+        assert field in html
+    assert "currently have no effect" in html
+
+
 def test_generator_produces_all_expected_outputs(tmp_path, monkeypatch, guide):
     monkeypatch.setattr(guide, "DOCS", tmp_path)
     guide.main()

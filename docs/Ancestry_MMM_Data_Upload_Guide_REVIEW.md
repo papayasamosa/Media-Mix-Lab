@@ -190,3 +190,15 @@ This is a documentation review; per the brief's own scope note (see Pass 1/2 abo
 ### Scope note
 
 This pass changed only documentation/tooling generator source and its generated outputs, plus one new test file. No application parser, schema, model, upload contract, or governance behaviour was changed, consistent with Pass 1/2's scope.
+
+## Pass 4 — 2026-09-07 usability simplification
+
+Status: complete. Full detail lives in the dedicated `Ancestry_MMM_Data_Upload_Guide_Simplification_Report.md`; this entry is a short pointer for the pass log.
+
+The user identified that Pass 3's guide, while accurate, still read like a schema dump — every field equally prominent, no distinction between essential and governance-only. This pass re-derived field necessity from the real consuming code (not the guide) across three background audits (upload-route inventory, Outcome dictionary necessity + FH LTR contract, Activity dictionary necessity), then restructured the HTML around essential/conditional/optional tiers with progressive disclosure — full technical RAG tables kept, demoted into collapsible "Full technical field reference" blocks per domain.
+
+Headline finding: five Activity v2 dictionary columns (`model_input_unit`, `model_input_kind`, `spend_column`, `response_unit_column`, `response_unit`) are currently write-only in the standard upload path — `source_pack_adoption.py` itself says "the source upload does not apply it automatically." The guide now tells analysts this directly rather than describing fields that currently have no effect. Also added: a top-of-guide "what do I actually need to upload" checklist and 9-row upload-type table, a dedicated FH LTR/DNA-revenue section (48-month rule, division-not-multiplication semantics, denominator validation), and an explicit note that `date_basis`/`maturity_required` are schema-present but not read by any transformation today.
+
+Re-validated: generator runs clean; contrast/Playwright QA at 3 viewports — 0 failures (two real regressions were found and fixed during this pass: a long unbroken `<code>` filename overflowing the page at 390px, fixed via `overflow-wrap:anywhere`; and the client-side search check losing its match because the only occurrence of "outcome completeness" had moved inside a collapsed detail block, fixed by restoring the phrase to visible prose); Excel COM validation on all three regenerated workbooks (logic unchanged, evidence re-confirmed identical to Pass 3); parser/canonicaliser round-trip for all three domains; existing 28-test regression suite plus the guard test (now 10 assertions, 2 new) — 38 passed. A manual "confused analyst" walkthrough answered all 10 of the brief's test questions using only the new HTML, surfacing and fixing one real gap (no clear "what do I do if validation fails" answer — a new FAQ entry closes it).
+
+No application parser, schema, model, or governance behaviour was changed. The three Excel ID builders were not redesigned — only regenerated (bytes differ only by embedded timestamp, as in Pass 3).
