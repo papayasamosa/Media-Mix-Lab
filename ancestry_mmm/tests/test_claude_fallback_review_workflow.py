@@ -32,6 +32,32 @@ QUOTA_MESSAGE = "You have reached your Codex usage limits for code reviews"
 COMPLETION_MARKER_PREFIX = "<!-- claude-fallback-review:"
 SHA_PINNED_USES = re.compile(r"^[^@]+@[0-9a-f]{40}(\s|$)")
 
+# The exact genuine Codex quota comment body observed on the disposable
+# smoke-test PR #357 (comments posted 2026-09-06T20:49:51Z / 20:49:59Z).
+GENUINE_CODEX_QUOTA_COMMENT_BODY = (
+    "You have reached your Codex usage limits for code reviews. You can "
+    "see your limits in the [Codex usage dashboard]"
+    "(https://chatgpt.com/codex/cloud/settings/usage).\n"
+    "To continue using code reviews, you can upgrade your account or add "
+    "credits to your account and enable them for code reviews in your "
+    "[settings](https://chatgpt.com/codex/cloud/settings/code-review)."
+)
+
+
+def _fallback_gate_matches(
+    *, is_pull_request: bool, comment_author: str, comment_body: str
+) -> bool:
+    """Reproduces the workflow's job-level `if:` gate in Python:
+    `github.event.issue.pull_request && comment.user.login ==
+    CODEX_BOT_LOGIN && contains(comment.body, QUOTA_MESSAGE)` (the
+    CLAUDE_FALLBACK_REVIEW_ENABLED variable is a separate on/off switch,
+    not part of the identity/message check exercised here)."""
+    return (
+        is_pull_request
+        and comment_author == CODEX_BOT_LOGIN
+        and QUOTA_MESSAGE in comment_body
+    )
+
 
 def _load_workflow_text() -> str:
     return WORKFLOW_PATH.read_text(encoding="utf-8")
@@ -207,8 +233,13 @@ class TestCommentPostingUsesRestEndpoint:
     separate genuine Codex-triggered runs against this exact workflow (runs
     34045016022 and 34051339408) proved rejects an issues-write-only token
     with "GraphQL: Resource not accessible by integration (addComment)".
-    Posting through the REST issue-comments endpoint instead lets
-    pull-requests stay read-only - see TestPermissionsAreMinimal."""
+    Posting through the REST issue-comments endpoint instead is necessary,
+    but the endpoint alone is not sufficient: a controlled diagnostic A/B
+    probe (PR #358) against this exact REST endpoint on this exact PR
+    showed effective `Issues: write` still returns HTTP 403 (run
+    34120435039) while effective `PullRequests: write` returns HTTP 201
+    (run 34122398542) - see TestPermissionsAreMinimal for the resulting
+    scope."""
 
     POSTING_STEP_NAMES = (
         "Post Claude fallback review",
@@ -328,21 +359,26 @@ class TestPermissionsAreMinimal:
     default GitHub-side OIDC authentication (this workflow supplies no
     custom `github_token`), separately from claude_code_oauth_token which
     authenticates the Claude/Anthropic API side - see Anthropic's FAQ entry
-    "Why am I getting OIDC authentication errors?". pull-requests stays
-    read-only: comments are posted via the REST issue-comments endpoint
-    (see TestCommentPostingUsesRestEndpoint), which GitHub's own REST docs
-    confirm accepts issues:write - `gh pr comment`'s GraphQL `addComment`
-    path is what actually needed pull-requests:write, and this workflow no
-    longer uses it. Every other scope stays at the minimum each step
-    actually uses."""
+    "Why am I getting OIDC authentication errors?".
+
+    pull-requests: write (not issues: write) is what actually posts
+    comments in this repository. GitHub's REST docs say the
+    create-an-issue-comment endpoint accepts either scope, but a
+    controlled diagnostic A/B probe (PR #358) against this exact endpoint
+    on this exact PR proved otherwise empirically: effective
+    `Issues: write` returned HTTP 403 (run 34120435039); effective
+    `PullRequests: write` returned HTTP 201 (run 34122398542), same
+    endpoint, same PR, same repository. issues stays read-only - it is
+    only used to read prior comments for duplicate detection. Every other
+    scope stays at the minimum each step actually uses."""
 
     def test_only_the_needed_scopes_are_granted(self):
         doc = _load_workflow_yaml()
         permissions = doc["permissions"]
         assert permissions == {
             "contents": "read",
-            "pull-requests": "read",
-            "issues": "write",
+            "pull-requests": "write",
+            "issues": "read",
             "actions": "read",
             "id-token": "write",
         }
@@ -359,17 +395,21 @@ class TestPermissionsAreMinimal:
         doc = _load_workflow_yaml()
         assert doc["permissions"]["contents"] != "write"
 
-    def test_pull_requests_permission_is_read_only(self):
-        doc = _load_workflow_yaml()
-        assert doc["permissions"]["pull-requests"] == "read"
+    def test_no_write_all(self):
+        text = _load_workflow_text()
+        assert "write-all" not in text
 
-    def test_pull_requests_is_never_write(self):
+    def test_pull_requests_permission_is_write_the_empirically_proven_scope(self):
         doc = _load_workflow_yaml()
-        assert doc["permissions"]["pull-requests"] != "write"
+        assert doc["permissions"]["pull-requests"] == "write"
 
-    def test_issues_permission_is_write(self):
+    def test_issues_permission_is_read_only(self):
         doc = _load_workflow_yaml()
-        assert doc["permissions"]["issues"] == "write"
+        assert doc["permissions"]["issues"] == "read"
+
+    def test_issues_is_never_write(self):
+        doc = _load_workflow_yaml()
+        assert doc["permissions"]["issues"] != "write"
 
     def test_actions_permission_is_read_only(self):
         doc = _load_workflow_yaml()
@@ -415,4 +455,44 @@ class TestClaudeIsReviewOnly:
         post = _step(doc, "Post Claude fallback review")
         assert post["env"]["STRUCTURED_OUTPUT"] == (
             "${{ steps.claude.outputs.structured_output }}"
+        )
+
+
+class TestGenuineQuotaCommentFixture:
+    """Regression fixture using the exact genuine Codex quota comment body
+    observed on the disposable smoke-test PR #357, to prove the gate
+    matches real Codex output and stays bounded to it - never widening to
+    an arbitrary Codex comment, a look-alike message from a different
+    account, or an unrelated comment from the real bot."""
+
+    def test_quota_message_literal_is_contained_in_the_real_observed_body(self):
+        assert QUOTA_MESSAGE in GENUINE_CODEX_QUOTA_COMMENT_BODY
+
+    def test_official_bot_with_the_real_quota_body_matches(self):
+        assert _fallback_gate_matches(
+            is_pull_request=True,
+            comment_author=CODEX_BOT_LOGIN,
+            comment_body=GENUINE_CODEX_QUOTA_COMMENT_BODY,
+        )
+
+    def test_same_real_body_from_a_normal_user_does_not_match(self):
+        assert not _fallback_gate_matches(
+            is_pull_request=True,
+            comment_author="papayasamosa",
+            comment_body=GENUINE_CODEX_QUOTA_COMMENT_BODY,
+        )
+
+    def test_official_bot_with_an_unrelated_comment_does_not_match(self):
+        assert not _fallback_gate_matches(
+            is_pull_request=True,
+            comment_author=CODEX_BOT_LOGIN,
+            comment_body="@codex review",
+        )
+
+    def test_official_bot_with_the_real_body_on_a_plain_issue_does_not_match(self):
+        # the workflow additionally requires github.event.issue.pull_request
+        assert not _fallback_gate_matches(
+            is_pull_request=False,
+            comment_author=CODEX_BOT_LOGIN,
+            comment_body=GENUINE_CODEX_QUOTA_COMMENT_BODY,
         )

@@ -218,24 +218,38 @@ The workflow:
   rewrite its own review instructions by editing
   `.github/claude/fallback-review-prompt.md` in its own diff
 - grants repository contents read-only access, and requests only the
-  additional scopes actually used (`pull-requests: read` to resolve the PR
-  head/base SHAs; `issues: write` to read prior comments for duplicate
-  detection *and* to post every PR conversation comment this workflow
-  sends; `actions: read` to let Claude inspect CI; `id-token: write`
-  because the official Claude GitHub App's default GitHub-side
-  authentication requires it - see
-  [One-time Claude authentication](#one-time-claude-authentication) above).
-  `pull-requests` stays read-only: GitHub represents PR conversation
-  comments as Issues-API objects even for pull requests, and its REST
-  "create an issue comment" endpoint documents accepting either
-  `issues: write` or `pull-requests: write` - so the workflow posts through
-  that REST endpoint (`gh api --method POST .../issues/{n}/comments`)
-  rather than `gh pr comment`. `gh pr comment` is intentionally avoided: it
-  posts via the GraphQL `addComment` mutation against the `PullRequest`
-  node instead of the REST issue-comments endpoint, and two genuine
-  Codex-triggered runs against this exact workflow (before this endpoint
-  switch) proved that mutation rejects an issues-write-only token with
-  "GraphQL: Resource not accessible by integration (addComment)"
+  additional scopes actually used (`issues: read` to read prior comments
+  for duplicate detection; `pull-requests: write` to post every PR
+  conversation comment this workflow sends; `actions: read` to let Claude
+  inspect CI; `id-token: write` because the official Claude GitHub App's
+  default GitHub-side authentication requires it - see
+  [One-time Claude authentication](#one-time-claude-authentication)
+  above).
+
+  The workflow posts every comment through the REST "create an issue
+  comment" endpoint (`gh api --method POST
+  repos/{owner}/{repo}/issues/{n}/comments`), never through `gh pr
+  comment`. That endpoint's own docs say it accepts *either*
+  `issues: write` or `pull-requests: write` - but which one actually
+  works turned out to be repository-specific, not just a documentation
+  choice. A controlled diagnostic workflow
+  (`github-token-comment-probe.yml`, PR #358) posted to this exact
+  endpoint on this exact PR twice, changing only the granted scope:
+  effective `issues: write` (`pull-requests: read`) returned
+  **HTTP 403** (run `34120435039`); effective `pull-requests: write`
+  (`issues: read`) returned **HTTP 201 Created** (run `34122398542`), same
+  endpoint, same PR. So this workflow uses `pull-requests: write` -
+  the scope proven to work here, not merely the one the REST docs alone
+  would suggest - and `issues` stays read-only.
+
+  `gh pr comment` is separately avoided for a different, earlier-found
+  reason: it posts via the GraphQL `addComment` mutation against the
+  `PullRequest` node rather than that REST endpoint, and two genuine
+  Codex-triggered runs against this exact workflow (before the REST-vs-
+  GraphQL switch) proved that mutation rejects an issues-write-only token
+  with "GraphQL: Resource not accessible by integration (addComment)".
+  That finding is kept for context; it is not why `pull-requests` is
+  `write` today - the A/B probe above is.
 - disables Edit and Write tools
 - does not enable arbitrary Bash for Claude
 - tells Claude not to commit/push/merge
