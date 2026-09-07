@@ -1,0 +1,88 @@
+# Ancestry MMM upload-schema necessity review
+
+Status: complete. Analysis only — no application, parser, schema, or model code was changed as part of this review. This document exists to answer one question before any Dictionary Builder is designed:
+
+> Which fields does the analyst genuinely need to supply, which can be derived automatically, and which should be removed from the upload contract entirely?
+
+It builds directly on the field-tier work already done in `Ancestry_MMM_Data_Upload_Guide_Simplification_Report.md`, but goes further in two ways: it traces every field's *actual downstream consumer* (not just whether it's read at all) to distinguish "unused" from "used by a different, independently-configured screen," and it makes an explicit **keep / derive / remove** recommendation per field rather than only a necessity tier.
+
+## Headline finding: a recurring "asked twice, second answer wins" pattern
+
+Two of the three domains show the same structural problem, at different severity:
+
+- **Activity**: five v2 dictionary columns (`model_input_unit`, `model_input_kind`, `spend_column`, `response_unit_column`, `response_unit`) are parsed but never applied — `source_pack_adoption.py` says outright the upload does not apply them. The real, governing configuration is a **separate object entered independently in the app** (`ChannelMediaUnitConfig` in Channel Media Units, `MediaInputSpec` in Curve Generation).
+- **Context — more severe, newly found in this review**: `variable_class` and `native_frequency` in the dictionary are not just unused — the app's real governance screen (Page 15, Data Coverage / `VariableCoverageMatrix`) **re-asks for both values independently and defaults them itself** (`variable_class` defaults to `flow_count`, `native_frequency` defaults to `weekly`) regardless of what was uploaded. The one piece of code that does read the uploaded `variable_class` (`uk_readiness.py`, a CI/diagnostic harness, not the analyst path) **ignores it and hardcodes `rate_index` anyway**. `role` is described in code comments as "governed" but has **no enum enforcement anywhere** — it is plain free text, and isn't even included in the one completeness check (`source_pack_adoption.py`'s `_context_status`) that looks at the rest of the Context metadata.
+
+In both domains, the second, independently-configured entry point is the one that actually governs behaviour. An analyst who carefully fills in the upload dictionary's version of these fields has done work the app throws away.
+
+## Method
+
+For every field in `outcome_dictionary`, `activity_dictionary`, and `variable_dictionary`, this review traced (not assumed) three things directly in code:
+
+1. Is the **column** required to be present in the sheet at all (`SheetSpec.required_columns`, checked by header presence only — `templates.py:430`), independent of whether any given row's value is filled in?
+2. Is the **value**, once uploaded, read by anything that changes model fitting, canonicalisation, planning, or optimisation — or only by a separate adoption/completeness/reporting step, or not at all?
+3. If it's read by something other than the standard upload path, is that *the same* configuration the app actually uses, or a *duplicate* of a value re-entered independently elsewhere (the "asked twice" pattern above)?
+
+## Outcomes (`outcome_dictionary`)
+
+All 11 of `outcome_id, source_column, product, metric_key, metric, segment_dimension, segment, outcome_group_id, outcome_group_label, outcome_family_key, group_aggregation` are required **column headers** (`OUTCOME_DICTIONARY_V2_COLUMNS`, `templates.py:52-64`). All 20 remaining fields are optional columns (`_OUTCOME_DEFINITION_OPTIONAL_COLUMNS`, `templates.py:74-96`).
+
+| Field | Column required? | Recommendation | Why |
+|---|---|---|---|
+| `outcome_id`, `source_column`, `product`, `metric_key`, `metric`, `segment` | Yes | **Keep as required analyst input** | Genuinely identity-defining; read throughout `core/outcomes.py`, `hierarchical_model.py` |
+| `segment_dimension`, `outcome_group_id`, `outcome_group_label`, `outcome_family_key`, `group_aggregation` | Yes (header) | **Keep column, but the app should treat an all-blank group block as "no group" without requiring the analyst to think about it** — already true in behaviour; the friction is that the column must exist at all even for projects that never use groups | Only meaningful when a governed outcome group exists (`core/outcomes.py:1418-1515`) |
+| `role`, `included_in_fit`, `include_in_default_reporting`, `include_in_official_total`, `include_in_value`, `include_in_optimisation` | No | **Keep as optional, defaulted input** | Each already defaults sensibly (primary/included/reported) via `outcome_eligibility()` (`core/outcomes.py:888-906`); only worth setting to override |
+| `unit`, `aggregation_type` | No | **Derive automatically; do not ask** | Auto-populated from `metric_key` via `METRIC_REGISTRY` (`core/outcomes.py:551-563`) whenever the metric is registered — only a genuinely new/custom metric needs a person to type these |
+| `definition_version`, `event_definition`, `cohort_or_attribution_basis`, `completeness_or_maturity_policy`, `exclusions`, `reconciliation_source`, `business_owner` | No | **Keep as optional input, gated to an "official approval" step, not the first upload** | Required only by `outcome_approval.py:361-380`'s official-approval gate; irrelevant to fitting |
+| `value_weight`, `value_currency` | No | **Keep as optional input, gated to the value/ROI objective** | Only read by `optimization_objective_vocabulary.py`/`planning/value.py` |
+| `date_basis` | No | **Candidate for removal from the upload contract** | Confirmed inert: `core/outcomes.py:488-490` states directly "schema and validation only; no transformation reads or computes these fields yet." A dedicated test (`test_net_billthrough.py::test_canonical_signup_date_basis_is_accepted`) was checked directly — it only confirms setting `date_basis` doesn't *break* an unrelated binding check (`outcome_id`/`definition_version`/`definition_fingerprint`); it does not confirm the value is used. Referenced in ~64 test files, but almost entirely as an incidental field on a shared realistic-fixture builder (`tests/support/lifecycle_fixture.py`), not because any test asserts on its effect. |
+| `maturity_required` | No | **Candidate for removal from the upload contract** | Same inert status as `date_basis`; type-coerced to bool and stored (`templates.py:838-841`) but never read downstream. Only 4 test files reference it. |
+
+**Outcomes is the healthiest of the three domains.** Its optional-but-currently-inert fields (`date_basis`, `maturity_required`) are two isolated columns, not a systemic duplication problem, and removing them is a contained, low-blast-radius change (they are already optional, so removing them from the *template* wouldn't even require a parser change — only removing them from `_OUTCOME_DEFINITION_OPTIONAL_COLUMNS` and the ~64 fixture call sites that pass them for completeness).
+
+## Activity and Media (`activity_dictionary`)
+
+Base columns (`activity_id, market, pooling_group_id, channel, platform, campaign_type, marketing_objective, funnel_stage, product_advertised, message_type, activity_ownership, intended_model_role, model_input_column, model_input_measure, economic_treatment, planning_eligibility, source`) are **all required column headers** (`templates.py:212-234`) — every activity_dictionary upload must include all 17, even if a given row leaves the value blank. The v2 extras (`model_input_unit, model_input_kind, spend_column, response_unit_column, response_unit, currency, effective_from, effective_to`) are genuinely optional columns (`_ACTIVITY_V2_EXTRA_COLUMNS`, `templates.py:263-271`).
+
+| Field | Column required? | Recommendation | Why |
+|---|---|---|---|
+| `activity_id`, `channel`, `intended_model_role`, `model_input_column`, `model_input_measure`, `economic_treatment`, `planning_eligibility`, `source` | Yes | **Keep as required analyst input** | Genuinely consumed by canonicalisation, fit-invalidation, and/or the optimiser |
+| `activity_ownership` | Yes | **Keep, but only as a narrow conditional check** | Only changes behaviour for the `external_event` + `optimisable` combination (`activities.py:182,207-211`); harmless default otherwise |
+| `campaign_type` | Yes | **Keep as conditional input** | Its only behavioural effect is gating Search-taxonomy fields (`activities.py:80-85,221-230`) |
+| `market` | Yes | **Keep** | Row-level key |
+| `pooling_group_id`, `funnel_stage`, `marketing_objective`, `product_advertised`, `message_type`, `platform` | **Yes — this is the finding** | **Recommend changing from a required column header to an optional one; do not remove the field itself** | Confirmed never read by fit, canonicalisation, or planning/optimisation code — only reporting rollups (`reporting_rollups.py`) and causal-graph display metadata (`14_Causal_Graph.py`) read them. There is no behavioural reason every activity_dictionary upload must *contain* these six columns; a project that doesn't yet have funnel-stage or campaign-type breakdowns should not be blocked from uploading. Test footprint is modest (4-11 files each), so loosening this from required-header to optional-header is a contained change. |
+| `model_input_unit`, `model_input_kind`, `spend_column`, `response_unit_column`, `response_unit` | No (already optional) | **Recommend removing from the template entirely, or wiring them up — do not leave as-is** | Confirmed write-only: parsed into `activity_semantic_mappings` (`templates.py:619-660`), which `source_pack_adoption.py:152-181` turns into a review-status message stating the upload does not apply them. The real configuration lives in `ChannelMediaUnitConfig`/`MediaInputSpec`, entered independently in the app after upload. Since they're already optional, the "remove" here isn't urgent to correctness (an analyst who never fills them in loses nothing) but leaving them in the template invites the exact confusion this review exists to prevent: an analyst fills in a plausible-looking value and reasonably assumes it did something. |
+| `currency`, `effective_from`, `effective_to` | No | **Keep as optional input** | Provenance/versioning metadata, not misleading — nothing implies these drive behaviour today |
+| `search_intent_group_id`, `search_platform` | Not in the base template at all | **Keep as documented boundary, unchanged** | Exist on the governed `ActivityDefinition` model but `activity_definitions_from_dictionary` still doesn't auto-map them from a standard workbook (`templates.py:569-616`) — a known, already-documented gap, not something to silently add to the template without also fixing the mapping. |
+
+## Context and External Factors (`variable_dictionary`)
+
+Required column headers: `variable_id, variable_class, native_frequency, role` (`templates.py:242-246`). Optional v2 extras: `source, scope, effective_from, effective_to, unit`.
+
+| Field | Column required? | Recommendation | Why |
+|---|---|---|---|
+| `variable_id` | Yes | **Keep as required analyst input** | Genuine identity; drives the pivot column and `ModelSpec.control_cols` (`templates.py:1158-1162`, `uk_readiness.py:412-414`) |
+| `variable_class` | Yes | **Recommend removing from the upload dictionary, or wiring it to actually govern Page 15's default** | The analyst-facing governance screen (`15_Data_Coverage.py:287-289`) does not read the uploaded value at all — it defaults every variable to `flow_count` regardless. The one place that does read it (`uk_readiness.py:443`, a CI/diagnostic harness) **overrides it anyway** to `rate_index` for every control. As written, this field cannot currently do what an analyst filling it in would reasonably expect. |
+| `native_frequency` | Yes | **Recommend downgrading to informational-only, or wiring it to seed Page 15's default** | Only used for a non-blocking warning banner before the Coverage Matrix step (`02_Transform_Pipeline.py:122-129`); the value that actually matters is re-entered independently on Page 15 (defaults to `weekly` regardless of upload). Also duplicated as a required *data-row* column in `context_data` that is confirmed never read into the pivot (`canonicalize_context_data`, `templates.py:1126-1148`) — a second, fully write-only copy of the same information. |
+| `role` | Yes | **Recommend either building real enum enforcement, or stop calling it "governed"** | Code comments call it governed (`templates.py:245`); there is no enum, no allow-list, and it isn't even in the one completeness check that looks at the rest of the metadata (`source_pack_adoption.py:185-190`). Today it is indistinguishable from a free-text note field. This is a documentation-vs-code mismatch worth fixing either direction, but should not be presented to an analyst as a controlled field with a dropdown until one actually exists in code. |
+| `source`, `scope`, `effective_from`, `effective_to` | No | **Keep as optional, presence-checked-only metadata** | Read only by `source_pack_adoption.py`'s completeness/"adoption" check (lines 185-189) — a genuine (if light) governance use, unlike `role`/`unit` below |
+| `unit` | No | **Recommend removing, or deriving from `variable_class`** | Not even included in the adoption completeness check; stored and never read again. Often inferable from `variable_class` or the variable's own naming convention. |
+| `events` sheet: `event_id`, `event_name`, `start_date`, `end_date` | Header optional (sheet itself optional) | **Keep for now, but note the gap** | Confirmed storage/display only — never parsed into any `core.named_events`-style governed record. Not misleading (nothing claims these drive treatment), but also not currently wired into anything beyond the Data Upload page's own display. |
+
+**Context is the domain most in need of attention before any Dictionary Builder is built for it.** Two of its four required-column fields (`variable_class`, `native_frequency`) are actively contradicted by the screen that actually governs the same information, and a third (`role`) is described as governed but isn't.
+
+## Cross-domain recommendations (for a future schema/application change — not made in this review)
+
+1. **Close the "asked twice" gap, in whichever direction is cheaper**: either make Channel Media Units / Curve Generation *read* the Activity dictionary's `model_input_unit`/`model_input_kind`/`spend_column`/`response_unit_column`/`response_unit` on adoption instead of silently ignoring them, or drop those five columns from the template. Same choice for Context's `variable_class`/`native_frequency` versus Page 15's Coverage Matrix.
+2. **Loosen the six inert-but-required Activity columns** (`pooling_group_id`, `funnel_stage`, `marketing_objective`, `product_advertised`, `message_type`, `platform`) from required column headers to optional ones. Low test blast radius (4-11 files each).
+3. **Retire `date_basis` and `maturity_required` from the Outcome template**, or leave them and simply stop asking analysts to fill them in (the guide now already does the latter). Moderate mechanical test-fixture cleanup (~64 files), zero behavioural risk either way since they're already unused.
+4. **Decide `role`'s fate explicitly**: either build the enum validation the comments claim already exists, or relabel it as free text everywhere (guide, RAG reference, any future builder) until it does.
+5. None of these are urgent correctness bugs — every one of them is either already optional, already documented as a boundary, or (worst case) asks for one extra empty column header. The reason to act is **analyst trust**: every field that looks like it does something and doesn't is a small tax on every future upload.
+
+## What this means for the Dictionary Builder work (not started in this review)
+
+When that work resumes, its "essential" tier should map to the **Keep as required analyst input** rows above; its "optional/de-emphasised" tier to the **Keep as optional** rows; and it should **not** build a dropdown or prominent form field for anything marked **candidate for removal** or **recommend removing** above until the underlying schema question is actually resolved — building polished tooling around a field that currently does nothing would only entrench it further. `role`'s Context dropdown specifically should not be built from an invented vocabulary; either the enum gets built in code first, or the builder should present it as free text, matching what the code actually does today.
+
+## Scope note
+
+This is an analysis-only deliverable. No parser, template, schema, dataclass, or UI code was changed. All findings are traced to specific `file:line` evidence in the current `main` branch (post PR #360 merge, commit `398bd7b4`). No Dictionary Builder design or implementation was started, per instruction.
