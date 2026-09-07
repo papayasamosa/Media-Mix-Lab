@@ -16,24 +16,37 @@ concurrency:
   cancel-in-progress: false
 
 # Least-privilege token: contents:read is for checking out the PR head only
-# (Claude cannot push - see disallowedTools below); pull-requests:read is
-# for reading PR head/base SHAs via the API; actions:read is forwarded to
-# Claude via additional_permissions so it can inspect CI results.
+# (Claude cannot push - see disallowedTools below); issues:read is for
+# reading prior PR comments during duplicate detection; actions:read is
+# forwarded to Claude via additional_permissions so it can inspect CI
+# results.
 #
-# issues: write is what posts every PR conversation comment in this
+# pull-requests: write is what posts every PR conversation comment in this
 # workflow (the successful review, the stale-review notice, and the
-# failure notice). GitHub represents PR conversation comments as Issues-API
-# objects even when the number belongs to a pull request, and its REST
+# failure notice), via `gh api --method POST` against the REST
 # "create an issue comment" endpoint
-# (POST /repos/{owner}/{repo}/issues/{issue_number}/comments) documents
-# accepting either issues:write or pull-requests:write. We deliberately use
-# `gh api --method POST .../issues/{n}/comments` (the REST endpoint)
-# instead of `gh pr comment`, because `gh pr comment` posts via the
-# GraphQL `addComment` mutation against the PullRequest node, which two
-# separate genuine Codex-triggered runs against this exact workflow proved
-# rejects an issues-write-only token ("GraphQL: Resource not accessible by
-# integration (addComment)"). Using the REST endpoint directly lets
-# pull-requests stay read-only.
+# (POST /repos/{owner}/{repo}/issues/{issue_number}/comments) - never via
+# `gh pr comment`. This scope choice is empirical, not merely doc-derived:
+# GitHub's own `x-accepted-github-permissions` response header for this
+# endpoint on this repository advertises accepting *either*
+# `issues=write` or `pull_requests=write`, but only one of them actually
+# worked in practice here. A controlled diagnostic workflow
+# (github-token-comment-probe.yml, PR #358) posted to this exact
+# endpoint, on this exact PR, twice, changing only the granted scope:
+#   - effective `Issues: write` (`pull-requests: read`)
+#     -> run 34120435039 -> HTTP 403 "Resource not accessible by
+#        integration"
+#   - effective `PullRequests: write` (`issues: read`)
+#     -> run 34122398542 -> HTTP 201 Created (comment posted)
+# So this workflow uses the smallest permission shape empirically proven
+# to work in this repository, not the shape the REST docs alone would
+# suggest. (An earlier version of this workflow used `gh pr comment`,
+# which posts via the GraphQL `addComment` mutation instead of this REST
+# endpoint; two separate genuine Codex-triggered runs - 34045016022 and
+# 34051339408 - proved that GraphQL path rejects an issues-write-only
+# token with "GraphQL: Resource not accessible by integration
+# (addComment)". That's a different code path from the REST endpoint
+# used here, and is kept for context, not as the reason for this scope.)
 #
 # id-token: write is required even though CLAUDE_CODE_OAUTH_TOKEN is set.
 # These are two separate authentication layers: claude_code_oauth_token
@@ -48,8 +61,8 @@ concurrency:
 # just makes the GitHub-side auth fail at runtime.
 permissions:
   contents: read
-  pull-requests: read
-  issues: write
+  pull-requests: write
+  issues: read
   actions: read
   id-token: write
 
