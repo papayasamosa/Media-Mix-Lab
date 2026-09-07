@@ -9,14 +9,11 @@ lists so an analyst can inspect and edit them without VBA.
 from __future__ import annotations
 
 import html
-import re
-import subprocess
-from datetime import date
 from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.formatting.rule import FormulaRule
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Protection, Side
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter
@@ -506,11 +503,13 @@ def add_rag_reference(wb: Workbook, rows: list[dict[str, str]], id_fields: dict[
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="12304A")
         cell.alignment = Alignment(wrap_text=True, vertical="top")
-    for col, width in {"A":28,"B":42,"C":25,"D":28,"E":23,"F":48,"G":18,"H":25,"I":48,"J":40}.items(): ws.column_dimensions[col].width = width
+    for col, width in {"A":28,"B":42,"C":25,"D":28,"E":23,"F":48,"G":18,"H":25,"I":48,"J":40}.items():
+        ws.column_dimensions[col].width = width
     for i in range(2, ws.max_row + 1):
         status = str(ws.cell(i, 3).value)
         ws.cell(i, 3).fill = PatternFill("solid", fgColor="FCE4E4" if status.startswith("RED") else "FFF1CC" if status.startswith("AMBER") else "E3F4E6")
-        for c in range(1, 11): ws.cell(i, c).alignment = Alignment(wrap_text=True, vertical="top")
+        for c in range(1, 11):
+            ws.cell(i, c).alignment = Alignment(wrap_text=True, vertical="top")
     notes = wb.create_sheet("Read me")
     notes["A1"] = "How to use this builder"
     notes["A1"].font = Font(size=16, bold=True, color="12304A")
@@ -521,7 +520,8 @@ def add_rag_reference(wb: Workbook, rows: list[dict[str, str]], id_fields: dict[
     notes["A7"] = "5. Excel calculates formulas when the file opens. No VBA is used. The formulas use broadly compatible Excel text and conditional functions."
     notes["A9"] = "Important: an ID is not a business definition. Keep the dictionary fields complete even when a field is not part of the ID."
     notes.column_dimensions["A"].width = 120
-    for row in range(3, 10): notes[f"A{row}"].alignment = Alignment(wrap_text=True, vertical="top")
+    for row in range(3, 10):
+        notes[f"A{row}"].alignment = Alignment(wrap_text=True, vertical="top")
     notes.sheet_view.showGridLines = False
 
 
@@ -529,7 +529,8 @@ def add_candidate_table(ws, headers: list[str], rows: list[list[object]], tab_na
     while ws.max_row < 6:
         ws.cell(ws.max_row + 1, 1).value = ""
     ws.append(headers)
-    for row in rows: ws.append(row)
+    for row in rows:
+        ws.append(row)
     end_col = chr(64 + len(headers))
     ref = f"A7:{end_col}{ws.max_row}"
     tab = Table(displayName=tab_name, ref=ref)
@@ -554,9 +555,11 @@ def add_dropdown(ws, cell_range: str, values: list[str], title: str) -> None:
 
 def common_candidate_style(ws, widths: dict[str, int]) -> None:
     ws.sheet_view.showGridLines = False
-    for col, width in widths.items(): ws.column_dimensions[col].width = width
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
     for row in ws.iter_rows():
-        for cell in row: cell.alignment = Alignment(wrap_text=True, vertical="top")
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
     for cell in ws[7]:
         cell.fill = PatternFill("solid", fgColor="12304A")
         cell.font = Font(bold=True, color="FFFFFF")
@@ -605,8 +608,12 @@ def build_outcome_workbook(path: Path) -> None:
     ex.append(["Invalid", "gsa", "Too little identity; product and segment collide."])
     ex.append(["Invalid", "fh_gsa_2026_01_05_uk", "Time and market are row/source scope, not a new outcome definition."])
     ex.append(["Review", "fh_gsa_dna_cross_sell", "Use the approved project spelling/lineage; do not infer from a friendly label."])
-    ex.column_dimensions["A"].width = 16; ex.column_dimensions["B"].width = 38; ex.column_dimensions["C"].width = 95
-    for c in ex[1]: c.font = Font(bold=True, color="FFFFFF"); c.fill = PatternFill("solid", fgColor="12304A")
+    ex.column_dimensions["A"].width = 16
+    ex.column_dimensions["B"].width = 38
+    ex.column_dimensions["C"].width = 95
+    for c in ex[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="12304A")
     ex.sheet_view.showGridLines = False
     wb.calculation.fullCalcOnLoad = True
     wb.calculation.forceFullCalc = True
@@ -614,7 +621,9 @@ def build_outcome_workbook(path: Path) -> None:
 
 
 def build_activity_workbook(path: Path) -> None:
-    wb = Workbook(); ws = wb.active; ws.title = "ID Builder"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "ID Builder"
     set_title(ws, "Activity ID Builder", "Formula-driven, no VBA · progressive collision checks", "Use the smallest stable identity that distinguishes an activity. Keep measures, units, and descriptive fields in the dictionary.")
     headers = ["channel", "platform", "campaign_type", "search_platform", "search_intent_group_id", "activity_id (existing)", "Manual override ID", "Suggested ID", "Final ID", "Collision / completeness warning", "Dictionary row preview"]
     rows = [
@@ -648,14 +657,23 @@ def build_activity_workbook(path: Path) -> None:
     ex.append(["Identity", "paid_search_google_brand", "paid_search_2026_01_05_uk_12345", "Do not encode time or random numbers into stable identity."])
     ex.append(["Capacity", "paid_search_cap as separate governed cap", "cap copied into spend", "A cap is a constraint, not realised spend."])
     ex.append(["Measures", "spend + clicks + impressions retained; one selected input", "all measures silently summed", "Raw measures have different meanings and units."])
-    ex.column_dimensions["A"].width = 22; ex.column_dimensions["B"].width = 52; ex.column_dimensions["C"].width = 52; ex.column_dimensions["D"].width = 72
-    for c in ex[1]: c.font = Font(bold=True, color="FFFFFF"); c.fill = PatternFill("solid", fgColor="12304A")
+    ex.column_dimensions["A"].width = 22
+    ex.column_dimensions["B"].width = 52
+    ex.column_dimensions["C"].width = 52
+    ex.column_dimensions["D"].width = 72
+    for c in ex[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="12304A")
     ex.sheet_view.showGridLines = False
-    wb.calculation.fullCalcOnLoad = True; wb.calculation.forceFullCalc = True; wb.save(path)
+    wb.calculation.fullCalcOnLoad = True
+    wb.calculation.forceFullCalc = True
+    wb.save(path)
 
 
 def build_context_workbook(path: Path) -> None:
-    wb = Workbook(); ws = wb.active; ws.title = "ID Builder"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "ID Builder"
     set_title(ws, "Context Variable ID Builder", "Formula-driven, no VBA · stable variable identity", "Build a stable variable ID from meaning. Do not encode source, frequency, unit, or effective dates unless they represent a genuinely different variable.")
     headers = ["variable_class", "variable name / concept", "variable_id (existing)", "Manual override ID", "Suggested ID", "Final ID", "Collision / completeness warning", "Dictionary row preview"]
     rows = [["rate_index", "UK CPI", "", "", "", "", "", ""], ["flow_count", "UK unemployment claims", "", "", "", "", ""], ["stock_level", "UK active subscribers", "", "", "", "", ""], ["survey_measurement", "Brand consideration", "", "", "", "", ""], ["event_flag", "Black Friday", "", "", "", "", ""], ["", "", "", "", "", "", ""], ["", "", "", "", "", "", ""], ["", "", "", "", "", "", ""]]
@@ -679,10 +697,17 @@ def build_context_workbook(path: Path) -> None:
     ex.append(["Missingness", "unavailable_source", "unavailable changed to 0", "Missingness is not observed zero."])
     ex.append(["Role", "CPI = exogenous_forecastable_control", "branded-search demand = exogenous control", "An endogenous mediator must be model-generated."])
     ex.append(["Event", "event_id + factual dates", "event flag inferred from a campaign name", "Named-event treatment is a separate governed path."])
-    ex.column_dimensions["A"].width = 22; ex.column_dimensions["B"].width = 52; ex.column_dimensions["C"].width = 52; ex.column_dimensions["D"].width = 80
-    for c in ex[1]: c.font = Font(bold=True, color="FFFFFF"); c.fill = PatternFill("solid", fgColor="12304A")
+    ex.column_dimensions["A"].width = 22
+    ex.column_dimensions["B"].width = 52
+    ex.column_dimensions["C"].width = 52
+    ex.column_dimensions["D"].width = 80
+    for c in ex[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="12304A")
     ex.sheet_view.showGridLines = False
-    wb.calculation.fullCalcOnLoad = True; wb.calculation.forceFullCalc = True; wb.save(path)
+    wb.calculation.fullCalcOnLoad = True
+    wb.calculation.forceFullCalc = True
+    wb.save(path)
 
 
 def build_inventory() -> str:
