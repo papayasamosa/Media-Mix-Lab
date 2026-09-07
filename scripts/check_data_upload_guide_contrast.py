@@ -92,7 +92,12 @@ async def run(url: str) -> dict[str, Any]:
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=True)
         page = await browser.new_page(viewport={"width": 1440, "height": 900})
-        page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
+        page.on(
+            "console",
+            lambda message: (
+                console_errors.append(message.text) if message.type == "error" else None
+            ),
+        )
         page.on("pageerror", lambda error: page_errors.append(str(error)))
         await page.goto(url, wait_until="networkidle")
         audit = await page.evaluate(AUDIT_JS)
@@ -101,25 +106,51 @@ async def run(url: str) -> dict[str, Any]:
         faq_open = await details.evaluate("element => element.open")
         search = page.locator("#guideSearch")
         await search.fill("outcome completeness")
-        search_works = await page.locator("#outcomes").is_visible() and not await page.locator("#activity").is_visible()
+        search_works = (
+            await page.locator("#outcomes").is_visible()
+            and not await page.locator("#activity").is_visible()
+        )
         viewport_results = []
         for width, height in [(1440, 900), (1280, 720), (390, 844)]:
             await page.set_viewport_size({"width": width, "height": height})
             await page.reload(wait_until="networkidle")
-            overflow = await page.evaluate("document.documentElement.scrollWidth > window.innerWidth")
-            viewport_results.append({"width": width, "height": height, "horizontal_overflow": overflow})
+            overflow = await page.evaluate(
+                "document.documentElement.scrollWidth > window.innerWidth"
+            )
+            viewport_results.append(
+                {"width": width, "height": height, "horizontal_overflow": overflow}
+            )
         await browser.close()
-    return {"audit": audit, "console_errors": console_errors, "page_errors": page_errors, "faq_open": faq_open, "search_works": search_works, "viewports": viewport_results}
+    return {
+        "audit": audit,
+        "console_errors": console_errors,
+        "page_errors": page_errors,
+        "faq_open": faq_open,
+        "search_works": search_works,
+        "viewports": viewport_results,
+    }
 
 
 def main() -> int:
     if len(sys.argv) != 2:
-        print("usage: python scripts/check_data_upload_guide_contrast.py URL", file=sys.stderr)
+        print(
+            "usage: python scripts/check_data_upload_guide_contrast.py URL",
+            file=sys.stderr,
+        )
         return 2
     result = asyncio.run(run(sys.argv[1]))
     print(json.dumps(result, indent=2))
     audit = result["audit"]
-    failed = bool(audit["failures"] or audit["missingAnchors"] or audit["duplicateIds"] or result["console_errors"] or result["page_errors"] or not result["faq_open"] or not result["search_works"] or any(item["horizontal_overflow"] for item in result["viewports"]))
+    failed = bool(
+        audit["failures"]
+        or audit["missingAnchors"]
+        or audit["duplicateIds"]
+        or result["console_errors"]
+        or result["page_errors"]
+        or not result["faq_open"]
+        or not result["search_works"]
+        or any(item["horizontal_overflow"] for item in result["viewports"])
+    )
     return 1 if failed else 0
 
 

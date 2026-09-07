@@ -51,120 +51,1217 @@ def rag_row(
     fmt: str,
     blank: str,
 ) -> dict[str, str]:
-    return dict(zip(RAG_HEAD, [field, status, exists, filled, meaning, good, why, missing, used, fmt, blank]))
+    return dict(
+        zip(
+            RAG_HEAD,
+            [
+                field,
+                status,
+                exists,
+                filled,
+                meaning,
+                good,
+                why,
+                missing,
+                used,
+                fmt,
+                blank,
+            ],
+        )
+    )
 
 
 OUTCOME_RAG = [
-    rag_row("period_start", "RED — Must provide", "Yes", "Yes", "Start date for the source period.", "2026-01-05", "Aligns rows to the source time grain.", "The table cannot be keyed or checked.", "outcomes", "ISO date; one source period", "Never for an outcomes row."),
-    rag_row("market", "RED — Must provide", "Yes", "Yes", "The market belonging to this row.", "UK", "Market is a row-level key; it is never inferred from the file name.", "The row is rejected or cannot be assigned safely.", "outcomes; all domains", "Stable market code or label", "Never for a usable row."),
-    rag_row("outcome_id", "RED — Must provide", "Yes", "Yes", "Stable identity of the outcome definition.", "fh_gsa_new", "Joins the source column to its approved meaning.", "The outcome cannot be defined or fitted.", "outcome_dictionary; completeness", "Stable lowercase ID; no duplicates", "Never."),
-    rag_row("source_column", "RED — Must provide", "Yes", "Yes", "Exact column in outcomes that holds the values.", "fh_gsa_new", "Connects the dictionary to the wide source table.", "The definition cannot be mapped to data.", "outcome_dictionary; parser", "Exact header spelling", "Never."),
-    rag_row("product", "RED — Must provide", "Yes", "Yes", "Product family represented by the outcome.", "Family History", "Keeps Family History and DNA outcomes distinct.", "The definition is invalid.", "outcome registry; reporting", "Family History or DNA, or an approved product", "Never."),
-    rag_row("metric_key", "RED — Must provide", "Yes", "Yes", "Stable registry key for the metric.", "fh_gsa", "Prevents meaning being guessed from a friendly label.", "The metric may be rejected or treated as custom.", "outcome registry; fit", "Approved key or explicit custom", "Never."),
-    rag_row("metric", "RED — Must provide", "Yes", "Yes", "Human-readable metric name.", "GSA", "Makes the definition readable while the key stays stable.", "The definition is incomplete.", "dictionary; reports", "Do not use aliases as a substitute for a definition", "Never."),
-    rag_row("segment_dimension", "RED — Must provide", "Yes", "Yes", "What the segment label means.", "fh_customer_segment", "Stops the same label meaning different things.", "The segment cannot be interpreted safely.", "outcome registry; groups", "Approved dimension vocabulary", "Never."),
-    rag_row("segment", "RED — Must provide", "Yes", "Yes", "The supplied segment value.", "New", "Fits New, Winback, and DNA cross-sell separately where supported.", "The outcome cannot be assigned to a segment.", "fit; reporting", "Use source-approved labels; do not silently add DNA partitions", "Never."),
-    rag_row("outcome_group_id", "AMBER — Needed for some uses", "Yes", "No", "Optional semantic group identity.", "fh_gsa_family", "Describes components or a supplied total without choosing fit treatment.", "Group reconciliation or group views are unavailable.", "groups; reconciliation", "Stable ID; leave the complete group block blank if unused", "When no governed group exists."),
-    rag_row("outcome_group_label", "AMBER — Needed for some uses", "Yes", "No", "Readable group name.", "Family History GSA", "Explains the group to reviewers.", "The group is incomplete.", "groups; review", "Text", "When outcome_group_id is blank."),
-    rag_row("outcome_family_key", "AMBER — Needed for some uses", "Yes", "No", "Family key used for group semantics.", "fh_gsa", "Keeps group members in one outcome family.", "The group is incomplete.", "groups; reconciliation", "Stable registry/custom key", "When no group is used."),
-    rag_row("group_aggregation", "AMBER — Needed for some uses", "Yes", "No", "Whether the group is a sum or descriptive only.", "sum", "Controls reconciliation semantics; it does not automatically fit a total.", "The group cannot be used for governed reconciliation.", "groups; totals", "sum or none", "When outcome_group_id is blank."),
-    rag_row("unit", "AMBER — Needed for some uses", "Yes", "No", "Unit of the outcome value.", "GSA", "Separates counts, rates, currency, and indexes.", "The registry may supply a default; do not guess for custom metrics.", "definition; economics", "Approved unit text", "Only when the registry has an approved default."),
-    rag_row("aggregation_type", "AMBER — Needed for some uses", "Yes", "No", "How values aggregate.", "count", "A rate is not added like a count.", "Economic/reporting use is blocked or ambiguous.", "definition; reporting", "count, rate, currency, index", "When the registry supplies it."),
-    rag_row("date_basis", "AMBER — Needed for some uses", "Yes", "No", "Date meaning for the outcome.", "signup_date", "Avoids silently mixing event and billing dates.", "The definition may be unapproved for official use.", "approval; completeness", "Approved date-basis vocabulary", "Only while the definition is draft and the registry supplies no value."),
-    rag_row("maturity_required", "AMBER — Needed for some uses", "Yes", "No", "Whether the outcome needs a maturity rule.", "TRUE", "Makes incomplete periods visible.", "Maturity cannot be governed.", "outcome completeness", "TRUE/FALSE", "For outcomes that are not maturity-sensitive."),
-    rag_row("role", "AMBER — Needed for some uses", "Yes", "No", "Use role for this outcome.", "primary", "Separates fit, secondary, funnel, and diagnostic uses.", "Eligibility defaults may not match the intended use.", "eligibility; reporting", "primary, secondary, funnel_intermediate, diagnostic", "When using the project default only."),
-    rag_row("included_in_fit", "AMBER — Needed for some uses", "Yes", "No", "Whether this outcome is included in fitting.", "TRUE", "Keeps definition and use decisions separate.", "The intended fit treatment is unclear.", "fit governance", "TRUE/FALSE", "When approval is not yet decided."),
-    rag_row("include_in_default_reporting", "AMBER — Needed for some uses", "Yes", "No", "Whether it appears in default reports.", "TRUE", "Prevents a fitted outcome becoming headline output by accident.", "Reporting eligibility is unclear.", "reporting governance", "TRUE/FALSE", "When it is diagnostic-only."),
-    rag_row("include_in_official_total", "AMBER — Needed for some uses", "Yes", "No", "Whether it can enter an official total.", "FALSE", "Official totals require explicit approval.", "Official total construction is blocked.", "official reporting", "TRUE/FALSE", "For non-total outcomes."),
-    rag_row("include_in_value", "AMBER — Needed for some uses", "Yes", "No", "Whether economic value may use it.", "TRUE", "Count, value, and rate layers stay distinct.", "CPA/ROI use is blocked for that outcome.", "valuation; economics", "TRUE/FALSE", "For count-only or diagnostic outcomes."),
-    rag_row("include_in_optimisation", "AMBER — Needed for some uses", "Yes", "No", "Whether optimisation may target it.", "FALSE", "Fit and optimisation eligibility are separate approvals.", "Optimisation is blocked for that outcome.", "optimisation governance", "TRUE/FALSE", "For diagnostic or unapproved outcomes."),
-    rag_row("definition_version", "AMBER — Needed for some uses", "Yes", "Yes for approval", "Version of the business definition.", "1.0", "Makes reports reproducible when definitions change.", "Official approval is incomplete.", "approval; persistence", "Version text or number", "During early draft only."),
-    rag_row("event_definition", "AMBER — Needed for some uses", "Yes", "Yes for approval", "What event is counted.", "Approved weekly GSA event", "Finance/Product can reconcile the definition.", "The outcome cannot be approved.", "approval; reconciliation", "Plain text with source reference", "During early draft only."),
-    rag_row("cohort_or_attribution_basis", "AMBER — Needed for some uses", "Yes", "Yes for approval", "How people are assigned to the period and segment.", "signup_date_attributed", "Prevents cohort and event bases being mixed.", "Official use is blocked.", "approval; value join", "Plain text or approved vocabulary", "During early draft only."),
-    rag_row("completeness_or_maturity_policy", "AMBER — Needed for some uses", "Yes", "Yes for approval", "Rule for when a period is complete.", "14-day source horizon (illustrative/historical-test example)", "Stops immature outcome periods being treated as final.", "Official reporting is blocked.", "completeness; approval", "Plain text; versioned; official UK production NBT uses its own approved production maturity rule, evidence, and exclusions — not this illustrative 14-day historical-test example", "Only for exploratory drafts."),
-    rag_row("exclusions", "AMBER — Needed for some uses", "Yes", "Yes for approval", "Rows or cases excluded from the definition.", "Test accounts excluded", "Keeps source reconciliation auditable.", "Approval is incomplete.", "approval; reconciliation", "Plain text", "When there are no exclusions, write none."),
-    rag_row("reconciliation_source", "AMBER — Needed for some uses", "Yes", "Yes for approval", "Source used to reconcile the measure.", "Finance weekly ledger v3", "Names the authority for the measure.", "Official use is blocked.", "approval; audit", "Plain text with version", "Only for exploratory drafts."),
-    rag_row("business_owner", "AMBER — Needed for some uses", "Yes", "Yes for approval", "Owner who approves the definition.", "Finance", "Makes decision ownership visible.", "The definition cannot be approved.", "approval; audit", "Text", "During early draft only."),
-    rag_row("effective_from", "GREEN — Optional", "Yes", "No", "Date the definition becomes active.", "2026-01-01", "Supports versioned definition history.", "No effective window is recorded.", "persistence; audit", "ISO date", "For a definition with no time-limited version."),
-    rag_row("effective_to", "GREEN — Optional", "Yes", "No", "Date the definition stops being active.", "2026-12-31", "Supports versioned definition history.", "No end window is recorded.", "persistence; audit", "ISO date", "For a current/open-ended definition."),
-    rag_row("value_weight", "AMBER — Needed for some uses", "Yes", "No", "Approved value per outcome, if supplied in the definition.", "42.50", "Only a governed mapping may turn counts into value.", "Value reporting is blocked; do not invent a value.", "economics; planning", "Number; not a rate unless explicitly defined", "For count-only models or separate valuation uploads."),
-    rag_row("value_currency", "AMBER — Needed for some uses", "Yes", "No", "Currency of an approved value weight.", "GBP", "Prevents mixing monetary units.", "Monetary output is blocked pending currency governance.", "economics; FX", "Uppercase ISO 4217 code", "When no monetary value is supplied."),
+    rag_row(
+        "period_start",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Start date for the source period.",
+        "2026-01-05",
+        "Aligns rows to the source time grain.",
+        "The table cannot be keyed or checked.",
+        "outcomes",
+        "ISO date; one source period",
+        "Never for an outcomes row.",
+    ),
+    rag_row(
+        "market",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "The market belonging to this row.",
+        "UK",
+        "Market is a row-level key; it is never inferred from the file name.",
+        "The row is rejected or cannot be assigned safely.",
+        "outcomes; all domains",
+        "Stable market code or label",
+        "Never for a usable row.",
+    ),
+    rag_row(
+        "outcome_id",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Stable identity of the outcome definition.",
+        "fh_gsa_new",
+        "Joins the source column to its approved meaning.",
+        "The outcome cannot be defined or fitted.",
+        "outcome_dictionary; completeness",
+        "Stable lowercase ID; no duplicates",
+        "Never.",
+    ),
+    rag_row(
+        "source_column",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Exact column in outcomes that holds the values.",
+        "fh_gsa_new",
+        "Connects the dictionary to the wide source table.",
+        "The definition cannot be mapped to data.",
+        "outcome_dictionary; parser",
+        "Exact header spelling",
+        "Never.",
+    ),
+    rag_row(
+        "product",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Product family represented by the outcome.",
+        "Family History",
+        "Keeps Family History and DNA outcomes distinct.",
+        "The definition is invalid.",
+        "outcome registry; reporting",
+        "Family History or DNA, or an approved product",
+        "Never.",
+    ),
+    rag_row(
+        "metric_key",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Stable registry key for the metric.",
+        "fh_gsa",
+        "Prevents meaning being guessed from a friendly label.",
+        "The metric may be rejected or treated as custom.",
+        "outcome registry; fit",
+        "Approved key or explicit custom",
+        "Never.",
+    ),
+    rag_row(
+        "metric",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Human-readable metric name.",
+        "GSA",
+        "Makes the definition readable while the key stays stable.",
+        "The definition is incomplete.",
+        "dictionary; reports",
+        "Do not use aliases as a substitute for a definition",
+        "Never.",
+    ),
+    rag_row(
+        "segment_dimension",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "What the segment label means.",
+        "fh_customer_segment",
+        "Stops the same label meaning different things.",
+        "The segment cannot be interpreted safely.",
+        "outcome registry; groups",
+        "Approved dimension vocabulary",
+        "Never.",
+    ),
+    rag_row(
+        "segment",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "The supplied segment value.",
+        "New",
+        "Fits New, Winback, and DNA cross-sell separately where supported.",
+        "The outcome cannot be assigned to a segment.",
+        "fit; reporting",
+        "Use source-approved labels; do not silently add DNA partitions",
+        "Never.",
+    ),
+    rag_row(
+        "outcome_group_id",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Optional semantic group identity.",
+        "fh_gsa_family",
+        "Describes components or a supplied total without choosing fit treatment.",
+        "Group reconciliation or group views are unavailable.",
+        "groups; reconciliation",
+        "Stable ID; leave the complete group block blank if unused",
+        "When no governed group exists.",
+    ),
+    rag_row(
+        "outcome_group_label",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Readable group name.",
+        "Family History GSA",
+        "Explains the group to reviewers.",
+        "The group is incomplete.",
+        "groups; review",
+        "Text",
+        "When outcome_group_id is blank.",
+    ),
+    rag_row(
+        "outcome_family_key",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Family key used for group semantics.",
+        "fh_gsa",
+        "Keeps group members in one outcome family.",
+        "The group is incomplete.",
+        "groups; reconciliation",
+        "Stable registry/custom key",
+        "When no group is used.",
+    ),
+    rag_row(
+        "group_aggregation",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Whether the group is a sum or descriptive only.",
+        "sum",
+        "Controls reconciliation semantics; it does not automatically fit a total.",
+        "The group cannot be used for governed reconciliation.",
+        "groups; totals",
+        "sum or none",
+        "When outcome_group_id is blank.",
+    ),
+    rag_row(
+        "unit",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Unit of the outcome value.",
+        "GSA",
+        "Separates counts, rates, currency, and indexes.",
+        "The registry may supply a default; do not guess for custom metrics.",
+        "definition; economics",
+        "Approved unit text",
+        "Only when the registry has an approved default.",
+    ),
+    rag_row(
+        "aggregation_type",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "How values aggregate.",
+        "count",
+        "A rate is not added like a count.",
+        "Economic/reporting use is blocked or ambiguous.",
+        "definition; reporting",
+        "count, rate, currency, index",
+        "When the registry supplies it.",
+    ),
+    rag_row(
+        "date_basis",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Date meaning for the outcome.",
+        "signup_date",
+        "Avoids silently mixing event and billing dates.",
+        "The definition may be unapproved for official use.",
+        "approval; completeness",
+        "Approved date-basis vocabulary",
+        "Only while the definition is draft and the registry supplies no value.",
+    ),
+    rag_row(
+        "maturity_required",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Whether the outcome needs a maturity rule.",
+        "TRUE",
+        "Makes incomplete periods visible.",
+        "Maturity cannot be governed.",
+        "outcome completeness",
+        "TRUE/FALSE",
+        "For outcomes that are not maturity-sensitive.",
+    ),
+    rag_row(
+        "role",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Use role for this outcome.",
+        "primary",
+        "Separates fit, secondary, funnel, and diagnostic uses.",
+        "Eligibility defaults may not match the intended use.",
+        "eligibility; reporting",
+        "primary, secondary, funnel_intermediate, diagnostic",
+        "When using the project default only.",
+    ),
+    rag_row(
+        "included_in_fit",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Whether this outcome is included in fitting.",
+        "TRUE",
+        "Keeps definition and use decisions separate.",
+        "The intended fit treatment is unclear.",
+        "fit governance",
+        "TRUE/FALSE",
+        "When approval is not yet decided.",
+    ),
+    rag_row(
+        "include_in_default_reporting",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Whether it appears in default reports.",
+        "TRUE",
+        "Prevents a fitted outcome becoming headline output by accident.",
+        "Reporting eligibility is unclear.",
+        "reporting governance",
+        "TRUE/FALSE",
+        "When it is diagnostic-only.",
+    ),
+    rag_row(
+        "include_in_official_total",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Whether it can enter an official total.",
+        "FALSE",
+        "Official totals require explicit approval.",
+        "Official total construction is blocked.",
+        "official reporting",
+        "TRUE/FALSE",
+        "For non-total outcomes.",
+    ),
+    rag_row(
+        "include_in_value",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Whether economic value may use it.",
+        "TRUE",
+        "Count, value, and rate layers stay distinct.",
+        "CPA/ROI use is blocked for that outcome.",
+        "valuation; economics",
+        "TRUE/FALSE",
+        "For count-only or diagnostic outcomes.",
+    ),
+    rag_row(
+        "include_in_optimisation",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Whether optimisation may target it.",
+        "FALSE",
+        "Fit and optimisation eligibility are separate approvals.",
+        "Optimisation is blocked for that outcome.",
+        "optimisation governance",
+        "TRUE/FALSE",
+        "For diagnostic or unapproved outcomes.",
+    ),
+    rag_row(
+        "definition_version",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for approval",
+        "Version of the business definition.",
+        "1.0",
+        "Makes reports reproducible when definitions change.",
+        "Official approval is incomplete.",
+        "approval; persistence",
+        "Version text or number",
+        "During early draft only.",
+    ),
+    rag_row(
+        "event_definition",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for approval",
+        "What event is counted.",
+        "Approved weekly GSA event",
+        "Finance/Product can reconcile the definition.",
+        "The outcome cannot be approved.",
+        "approval; reconciliation",
+        "Plain text with source reference",
+        "During early draft only.",
+    ),
+    rag_row(
+        "cohort_or_attribution_basis",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for approval",
+        "How people are assigned to the period and segment.",
+        "signup_date_attributed",
+        "Prevents cohort and event bases being mixed.",
+        "Official use is blocked.",
+        "approval; value join",
+        "Plain text or approved vocabulary",
+        "During early draft only.",
+    ),
+    rag_row(
+        "completeness_or_maturity_policy",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for approval",
+        "Rule for when a period is complete.",
+        "14-day source horizon (illustrative/historical-test example)",
+        "Stops immature outcome periods being treated as final.",
+        "Official reporting is blocked.",
+        "completeness; approval",
+        "Plain text; versioned; official UK production NBT uses its own approved production maturity rule, evidence, and exclusions — not this illustrative 14-day historical-test example",
+        "Only for exploratory drafts.",
+    ),
+    rag_row(
+        "exclusions",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for approval",
+        "Rows or cases excluded from the definition.",
+        "Test accounts excluded",
+        "Keeps source reconciliation auditable.",
+        "Approval is incomplete.",
+        "approval; reconciliation",
+        "Plain text",
+        "When there are no exclusions, write none.",
+    ),
+    rag_row(
+        "reconciliation_source",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for approval",
+        "Source used to reconcile the measure.",
+        "Finance weekly ledger v3",
+        "Names the authority for the measure.",
+        "Official use is blocked.",
+        "approval; audit",
+        "Plain text with version",
+        "Only for exploratory drafts.",
+    ),
+    rag_row(
+        "business_owner",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for approval",
+        "Owner who approves the definition.",
+        "Finance",
+        "Makes decision ownership visible.",
+        "The definition cannot be approved.",
+        "approval; audit",
+        "Text",
+        "During early draft only.",
+    ),
+    rag_row(
+        "effective_from",
+        "GREEN — Optional",
+        "Yes",
+        "No",
+        "Date the definition becomes active.",
+        "2026-01-01",
+        "Supports versioned definition history.",
+        "No effective window is recorded.",
+        "persistence; audit",
+        "ISO date",
+        "For a definition with no time-limited version.",
+    ),
+    rag_row(
+        "effective_to",
+        "GREEN — Optional",
+        "Yes",
+        "No",
+        "Date the definition stops being active.",
+        "2026-12-31",
+        "Supports versioned definition history.",
+        "No end window is recorded.",
+        "persistence; audit",
+        "ISO date",
+        "For a current/open-ended definition.",
+    ),
+    rag_row(
+        "value_weight",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Approved value per outcome, if supplied in the definition.",
+        "42.50",
+        "Only a governed mapping may turn counts into value.",
+        "Value reporting is blocked; do not invent a value.",
+        "economics; planning",
+        "Number; not a rate unless explicitly defined",
+        "For count-only models or separate valuation uploads.",
+    ),
+    rag_row(
+        "value_currency",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Currency of an approved value weight.",
+        "GBP",
+        "Prevents mixing monetary units.",
+        "Monetary output is blocked pending currency governance.",
+        "economics; FX",
+        "Uppercase ISO 4217 code",
+        "When no monetary value is supplied.",
+    ),
 ]
 
 
 COMPLETENESS_RAG = [
-    rag_row("outcome_id", "RED — Must provide", "Yes", "Yes", "Outcome definition covered by this completeness record.", "fh_net_billthrough_count_new", "Joins completeness metadata to one approved outcome.", "The metadata cannot be bound.", "outcome_completeness", "Existing outcome_id", "Never."),
-    rag_row("data_as_of_date", "RED — Must provide", "Yes", "Yes", "Date through which the source is known.", "2026-02-14", "Shows how current the extract is.", "Freshness cannot be reviewed.", "completeness; audit", "ISO date", "Never."),
-    rag_row("model_start_week", "RED — Must provide", "Yes", "Yes", "First model week covered by the source.", "2026-01-05", "Checks the intended model window.", "Coverage cannot be checked.", "completeness", "ISO date", "Never."),
-    rag_row("model_end_week", "RED — Must provide", "Yes", "Yes", "Last model week covered by the source.", "2026-02-09", "Checks the intended model window.", "Coverage cannot be checked.", "completeness", "ISO date", "Never."),
-    rag_row("latest_complete_net_billthrough_week", "RED — Must provide for NBT", "Yes", "Yes for NBT", "Latest week that is complete under the maturity rule.", "2026-01-26", "Stops immature NBT periods being treated as final.", "Official NBT use is blocked.", "NBT completeness; official reporting", "ISO date", "For non-NBT outcomes only if the project contract says not applicable."),
-    rag_row("maturity_rule_description", "RED — Must provide for maturity-sensitive outcomes", "Yes", "Yes", "Plain-English maturity/completeness rule.", "14-day horizon after week end (exploratory/historical-test example only)", "Explains why a period is complete.", "Official use is blocked.", "approval; audit", "Versioned text; for official UK production NBT this must be the approved production maturity rule, not the bounded historical-test 14-day rule", "For outcomes with no maturity requirement."),
-    rag_row("source_owner", "RED — Must provide", "Yes", "Yes", "Owner of the completeness metadata/source.", "Finance Analytics", "Provides accountability for the extract.", "Completeness cannot be approved.", "audit; approval", "Text", "Never for governed metadata."),
+    rag_row(
+        "outcome_id",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Outcome definition covered by this completeness record.",
+        "fh_net_billthrough_count_new",
+        "Joins completeness metadata to one approved outcome.",
+        "The metadata cannot be bound.",
+        "outcome_completeness",
+        "Existing outcome_id",
+        "Never.",
+    ),
+    rag_row(
+        "data_as_of_date",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Date through which the source is known.",
+        "2026-02-14",
+        "Shows how current the extract is.",
+        "Freshness cannot be reviewed.",
+        "completeness; audit",
+        "ISO date",
+        "Never.",
+    ),
+    rag_row(
+        "model_start_week",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "First model week covered by the source.",
+        "2026-01-05",
+        "Checks the intended model window.",
+        "Coverage cannot be checked.",
+        "completeness",
+        "ISO date",
+        "Never.",
+    ),
+    rag_row(
+        "model_end_week",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Last model week covered by the source.",
+        "2026-02-09",
+        "Checks the intended model window.",
+        "Coverage cannot be checked.",
+        "completeness",
+        "ISO date",
+        "Never.",
+    ),
+    rag_row(
+        "latest_complete_net_billthrough_week",
+        "RED — Must provide for NBT",
+        "Yes",
+        "Yes for NBT",
+        "Latest week that is complete under the maturity rule.",
+        "2026-01-26",
+        "Stops immature NBT periods being treated as final.",
+        "Official NBT use is blocked.",
+        "NBT completeness; official reporting",
+        "ISO date",
+        "For non-NBT outcomes only if the project contract says not applicable.",
+    ),
+    rag_row(
+        "maturity_rule_description",
+        "RED — Must provide for maturity-sensitive outcomes",
+        "Yes",
+        "Yes",
+        "Plain-English maturity/completeness rule.",
+        "14-day horizon after week end (exploratory/historical-test example only)",
+        "Explains why a period is complete.",
+        "Official use is blocked.",
+        "approval; audit",
+        "Versioned text; for official UK production NBT this must be the approved production maturity rule, not the bounded historical-test 14-day rule",
+        "For outcomes with no maturity requirement.",
+    ),
+    rag_row(
+        "source_owner",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Owner of the completeness metadata/source.",
+        "Finance Analytics",
+        "Provides accountability for the extract.",
+        "Completeness cannot be approved.",
+        "audit; approval",
+        "Text",
+        "Never for governed metadata.",
+    ),
 ]
 
 
 ACTIVITY_RAG = [
-    rag_row("period_start", "RED — Must provide", "Yes", "Yes", "Start date for the source period.", "2026-01-05", "Preserves the activity source grain.", "Rows cannot be aligned.", "activity_data", "ISO date", "Never."),
-    rag_row("market", "RED — Must provide", "Yes", "Yes", "Market for this activity row or dictionary record.", "UK", "Market is explicit and row-level.", "The row cannot be assigned safely.", "activity_data; activity_dictionary", "Stable market code/label", "Never."),
-    rag_row("activity_id", "RED — Must provide", "Yes", "Yes", "Stable identity of the activity at market × activity grain.", "paid_search_google_brand", "Joins raw observations to the dictionary.", "The activity cannot be mapped.", "activity_data; activity_dictionary", "Stable ID; unique within market", "Never."),
-    rag_row("pooling_group_id", "AMBER — Needed for some uses", "Yes", "No", "Optional cross-market identity for similar activity.", "paid_search_brand", "Supports lineage and comparison; it does not force statistical pooling.", "Cross-market identity is not recorded.", "hierarchy; review", "Stable ID", "When the activity has no governed cross-market peer."),
-    rag_row("channel", "RED — Must provide", "Yes", "Yes", "Channel label used by the model and reports.", "Paid Search", "Separates activity identity from descriptive detail.", "The dictionary is rejected.", "activity dictionary; model input", "Text; do not use a generic Brand Search label", "Never."),
-    rag_row("platform", "AMBER — Needed for some uses", "Yes", "Yes for differentiated platform", "Buying or delivery platform.", "Google", "Helps distinguish Google and Bing when that matters.", "Platform-level identity may collide.", "activity identity; reports", "Text", "If platform is genuinely not applicable."),
-    rag_row("campaign_type", "AMBER — Needed for some uses", "Yes", "No", "Campaign or placement type.", "Brand", "Adds meaningful identity when platform/channel alone is not enough.", "Similar activities may collide.", "activity identity; reports", "Text", "When source has no campaign type."),
-    rag_row("marketing_objective", "AMBER — Needed for some uses", "Yes", "No", "Why the activity was run.", "acquisition/performance", "Supports reporting; it is not silently inferred.", "Objective reporting is incomplete.", "reports; governance", "Suggested vocabulary or documented custom", "When not supplied."),
-    rag_row("funnel_stage", "AMBER — Needed for some uses", "Yes", "Yes for governed classification", "Approved funnel position.", "performance_lower", "Supports pathway governance without guessing.", "Classification is incomplete.", "pathways; reports", "brand_upper, mid_funnel, performance_lower, cross_funnel, not_applicable, unclassified", "Only while unclassified is explicitly accepted."),
-    rag_row("product_advertised", "AMBER — Needed for some uses", "Yes", "No", "Product in the creative or offer.", "Family History", "Separates FH, DNA, and cross-product activity.", "Product reporting is incomplete.", "reports; pathways", "Text; approved product names where known", "When activity is product-neutral."),
-    rag_row("message_type", "AMBER — Needed for some uses", "Yes", "No", "Message or offer type.", "brand", "Descriptive taxonomy for analysis.", "Message reporting is incomplete.", "reports", "Text", "When not available."),
-    rag_row("activity_ownership", "RED — Must provide", "Yes", "Yes", "Who controls or supplies the activity.", "paid", "Keeps paid, owned, earned, and events distinct.", "The activity is invalid.", "model role; economics", "paid, owned, earned, external_event", "Never."),
-    rag_row("intended_model_role", "RED — Must provide", "Yes", "Yes", "Intended role in the model.", "intervention", "Separates treatments, controls, mediators, and demand capture.", "The activity is invalid or misclassified.", "model governance", "intervention, mediator, demand_capture, control, event", "Never."),
-    rag_row("model_input_column", "RED — Must provide", "Yes", "Yes", "Destination column after tidy data is pivoted to model-ready form.", "uk_paid_search_google_brand", "Tells canonicalisation where the selected measure belongs.", "The model input cannot be created.", "canonicalisation; model frame", "Stable wide-column name", "Never."),
-    rag_row("model_input_measure", "RED — Must provide", "Yes", "Yes", "Exact raw column selected as the model input.", "spend", "The parser selects this raw measure explicitly.", "The activity cannot be canonicalised.", "canonicalisation", "Exact raw header such as spend, clicks, impressions, GRPs", "Never."),
-    rag_row("economic_treatment", "RED — Must provide", "Yes", "Yes", "How cost/value is treated.", "paid_media_cost", "Keeps economics separate from physical measurement.", "The dictionary is invalid.", "economics; planning", "paid_media_cost, fully_loaded_cost, campaign_cost, response_only, not_applicable", "Never."),
-    rag_row("planning_eligibility", "RED — Must provide", "Yes", "Yes", "Whether planning or optimisation may use the activity.", "optimisable", "Fit does not automatically grant planning rights.", "Planning treatment is unclear.", "planning; optimisation", "optimisable, scenario_only, fixed, excluded", "Never."),
-    rag_row("source", "RED — Must provide", "Yes", "Yes", "Source system, file, or owner reference.", "Google Ads export 2026-08", "Preserves provenance and reviewability.", "The dictionary is invalid.", "audit; persistence", "Text with version/date preferred", "Never."),
-    rag_row("model_input_unit", "AMBER — Needed for some uses", "Yes", "Yes for model input", "Unit of the selected model input.", "GBP", "Prevents treating all model inputs as spend.", "Unit review is required; economics may be blocked.", "model input; media units", "GBP, impressions, clicks, GRP, TVR, etc.", "When the source unit is recorded elsewhere in a governed mapping."),
-    rag_row("model_input_kind", "AMBER — Needed for some uses", "Yes", "Yes for model input", "Whether input is monetary spend or exposure.", "monetary_spend", "Connects the input to the correct cost contract.", "Physical-to-monetary translation is unresolved.", "media units; economics", "monetary_spend or exposure", "When a governed mapping supplies it."),
-    rag_row("spend_column", "AMBER — Needed for some uses", "Yes", "No", "Raw monetary spend column, if one exists.", "spend", "Allows a later cost mapping without pretending it is the model input.", "Spend mapping needs review.", "economics; cost mapping", "Exact raw header", "For response-only or non-monetary activity."),
-    rag_row("response_unit_column", "AMBER — Needed for some uses", "Yes", "No", "Raw delivery/response column, if one exists.", "clicks", "Records a separate physical response measure.", "Response mapping needs review.", "media units; diagnostics", "Exact raw header", "When no physical response is supplied."),
-    rag_row("response_unit", "AMBER — Needed for some uses", "Yes", "No", "Unit in the response column.", "clicks", "Prevents clicks, impressions, conversions, and visits being conflated.", "Response mapping needs review.", "media units", "Text", "When response_unit_column is blank."),
-    rag_row("currency", "AMBER — Needed for some uses", "Yes", "No", "Currency of monetary spend.", "GBP", "Identifies the monetary unit; it does not perform FX conversion.", "Monetary economics is blocked pending mapping.", "economics; FX", "Uppercase ISO 4217", "For non-monetary activity."),
-    rag_row("effective_from", "GREEN — Optional", "Yes", "No", "Date this mapping becomes active.", "2026-01-01", "Supports versioned source mappings.", "No start window is recorded.", "audit; persistence", "ISO date", "For a stable mapping with no time window."),
-    rag_row("effective_to", "GREEN — Optional", "Yes", "No", "Date this mapping stops being active.", "2026-12-31", "Supports source mapping history.", "No end window is recorded.", "audit; persistence", "ISO date", "For a current/open-ended mapping."),
-    rag_row("search_intent_group_id", "AMBER — Needed for some uses", "Yes in the governed Search mapping", "Yes for Search taxonomy", "Search intent axis such as Brand or Non-Brand.", "brand_search", "Keeps Search leaves explicit instead of one generic Brand Search variable.", "Search taxonomy remains unclassified.", "Search mapping; reports", "brand_search or non_brand_search; a governed deeper Non-Brand child ID is also accepted once explicitly approved (starts draft)", "For non-Search activities."),
-    rag_row("search_platform", "AMBER — Needed for some uses", "Yes in the governed Search mapping", "Yes for Search taxonomy", "Search platform axis.", "google", "Keeps Google and Bing leaves distinct.", "Platform-level Search identity remains unclassified.", "Search mapping; reports", "google or bing", "For non-Search activities."),
+    rag_row(
+        "period_start",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Start date for the source period.",
+        "2026-01-05",
+        "Preserves the activity source grain.",
+        "Rows cannot be aligned.",
+        "activity_data",
+        "ISO date",
+        "Never.",
+    ),
+    rag_row(
+        "market",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Market for this activity row or dictionary record.",
+        "UK",
+        "Market is explicit and row-level.",
+        "The row cannot be assigned safely.",
+        "activity_data; activity_dictionary",
+        "Stable market code/label",
+        "Never.",
+    ),
+    rag_row(
+        "activity_id",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Stable identity of the activity at market × activity grain.",
+        "paid_search_google_brand",
+        "Joins raw observations to the dictionary.",
+        "The activity cannot be mapped.",
+        "activity_data; activity_dictionary",
+        "Stable ID; unique within market",
+        "Never.",
+    ),
+    rag_row(
+        "pooling_group_id",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Optional cross-market identity for similar activity.",
+        "paid_search_brand",
+        "Supports lineage and comparison; it does not force statistical pooling.",
+        "Cross-market identity is not recorded.",
+        "hierarchy; review",
+        "Stable ID",
+        "When the activity has no governed cross-market peer.",
+    ),
+    rag_row(
+        "channel",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Channel label used by the model and reports.",
+        "Paid Search",
+        "Separates activity identity from descriptive detail.",
+        "The dictionary is rejected.",
+        "activity dictionary; model input",
+        "Text; do not use a generic Brand Search label",
+        "Never.",
+    ),
+    rag_row(
+        "platform",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for differentiated platform",
+        "Buying or delivery platform.",
+        "Google",
+        "Helps distinguish Google and Bing when that matters.",
+        "Platform-level identity may collide.",
+        "activity identity; reports",
+        "Text",
+        "If platform is genuinely not applicable.",
+    ),
+    rag_row(
+        "campaign_type",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Campaign or placement type.",
+        "Brand",
+        "Adds meaningful identity when platform/channel alone is not enough.",
+        "Similar activities may collide.",
+        "activity identity; reports",
+        "Text",
+        "When source has no campaign type.",
+    ),
+    rag_row(
+        "marketing_objective",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Why the activity was run.",
+        "acquisition/performance",
+        "Supports reporting; it is not silently inferred.",
+        "Objective reporting is incomplete.",
+        "reports; governance",
+        "Suggested vocabulary or documented custom",
+        "When not supplied.",
+    ),
+    rag_row(
+        "funnel_stage",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for governed classification",
+        "Approved funnel position.",
+        "performance_lower",
+        "Supports pathway governance without guessing.",
+        "Classification is incomplete.",
+        "pathways; reports",
+        "brand_upper, mid_funnel, performance_lower, cross_funnel, not_applicable, unclassified",
+        "Only while unclassified is explicitly accepted.",
+    ),
+    rag_row(
+        "product_advertised",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Product in the creative or offer.",
+        "Family History",
+        "Separates FH, DNA, and cross-product activity.",
+        "Product reporting is incomplete.",
+        "reports; pathways",
+        "Text; approved product names where known",
+        "When activity is product-neutral.",
+    ),
+    rag_row(
+        "message_type",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Message or offer type.",
+        "brand",
+        "Descriptive taxonomy for analysis.",
+        "Message reporting is incomplete.",
+        "reports",
+        "Text",
+        "When not available.",
+    ),
+    rag_row(
+        "activity_ownership",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Who controls or supplies the activity.",
+        "paid",
+        "Keeps paid, owned, earned, and events distinct.",
+        "The activity is invalid.",
+        "model role; economics",
+        "paid, owned, earned, external_event",
+        "Never.",
+    ),
+    rag_row(
+        "intended_model_role",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Intended role in the model.",
+        "intervention",
+        "Separates treatments, controls, mediators, and demand capture.",
+        "The activity is invalid or misclassified.",
+        "model governance",
+        "intervention, mediator, demand_capture, control, event",
+        "Never.",
+    ),
+    rag_row(
+        "model_input_column",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Destination column after tidy data is pivoted to model-ready form.",
+        "uk_paid_search_google_brand",
+        "Tells canonicalisation where the selected measure belongs.",
+        "The model input cannot be created.",
+        "canonicalisation; model frame",
+        "Stable wide-column name",
+        "Never.",
+    ),
+    rag_row(
+        "model_input_measure",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Exact raw column selected as the model input.",
+        "spend",
+        "The parser selects this raw measure explicitly.",
+        "The activity cannot be canonicalised.",
+        "canonicalisation",
+        "Exact raw header such as spend, clicks, impressions, GRPs",
+        "Never.",
+    ),
+    rag_row(
+        "economic_treatment",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "How cost/value is treated.",
+        "paid_media_cost",
+        "Keeps economics separate from physical measurement.",
+        "The dictionary is invalid.",
+        "economics; planning",
+        "paid_media_cost, fully_loaded_cost, campaign_cost, response_only, not_applicable",
+        "Never.",
+    ),
+    rag_row(
+        "planning_eligibility",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Whether planning or optimisation may use the activity.",
+        "optimisable",
+        "Fit does not automatically grant planning rights.",
+        "Planning treatment is unclear.",
+        "planning; optimisation",
+        "optimisable, scenario_only, fixed, excluded",
+        "Never.",
+    ),
+    rag_row(
+        "source",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Source system, file, or owner reference.",
+        "Google Ads export 2026-08",
+        "Preserves provenance and reviewability.",
+        "The dictionary is invalid.",
+        "audit; persistence",
+        "Text with version/date preferred",
+        "Never.",
+    ),
+    rag_row(
+        "model_input_unit",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for model input",
+        "Unit of the selected model input.",
+        "GBP",
+        "Prevents treating all model inputs as spend.",
+        "Unit review is required; economics may be blocked.",
+        "model input; media units",
+        "GBP, impressions, clicks, GRP, TVR, etc.",
+        "When the source unit is recorded elsewhere in a governed mapping.",
+    ),
+    rag_row(
+        "model_input_kind",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for model input",
+        "Whether input is monetary spend or exposure.",
+        "monetary_spend",
+        "Connects the input to the correct cost contract.",
+        "Physical-to-monetary translation is unresolved.",
+        "media units; economics",
+        "monetary_spend or exposure",
+        "When a governed mapping supplies it.",
+    ),
+    rag_row(
+        "spend_column",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Raw monetary spend column, if one exists.",
+        "spend",
+        "Allows a later cost mapping without pretending it is the model input.",
+        "Spend mapping needs review.",
+        "economics; cost mapping",
+        "Exact raw header",
+        "For response-only or non-monetary activity.",
+    ),
+    rag_row(
+        "response_unit_column",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Raw delivery/response column, if one exists.",
+        "clicks",
+        "Records a separate physical response measure.",
+        "Response mapping needs review.",
+        "media units; diagnostics",
+        "Exact raw header",
+        "When no physical response is supplied.",
+    ),
+    rag_row(
+        "response_unit",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Unit in the response column.",
+        "clicks",
+        "Prevents clicks, impressions, conversions, and visits being conflated.",
+        "Response mapping needs review.",
+        "media units",
+        "Text",
+        "When response_unit_column is blank.",
+    ),
+    rag_row(
+        "currency",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "No",
+        "Currency of monetary spend.",
+        "GBP",
+        "Identifies the monetary unit; it does not perform FX conversion.",
+        "Monetary economics is blocked pending mapping.",
+        "economics; FX",
+        "Uppercase ISO 4217",
+        "For non-monetary activity.",
+    ),
+    rag_row(
+        "effective_from",
+        "GREEN — Optional",
+        "Yes",
+        "No",
+        "Date this mapping becomes active.",
+        "2026-01-01",
+        "Supports versioned source mappings.",
+        "No start window is recorded.",
+        "audit; persistence",
+        "ISO date",
+        "For a stable mapping with no time window.",
+    ),
+    rag_row(
+        "effective_to",
+        "GREEN — Optional",
+        "Yes",
+        "No",
+        "Date this mapping stops being active.",
+        "2026-12-31",
+        "Supports source mapping history.",
+        "No end window is recorded.",
+        "audit; persistence",
+        "ISO date",
+        "For a current/open-ended mapping.",
+    ),
+    rag_row(
+        "search_intent_group_id",
+        "AMBER — Needed for some uses",
+        "Yes in the governed Search mapping",
+        "Yes for Search taxonomy",
+        "Search intent axis such as Brand or Non-Brand.",
+        "brand_search",
+        "Keeps Search leaves explicit instead of one generic Brand Search variable.",
+        "Search taxonomy remains unclassified.",
+        "Search mapping; reports",
+        "brand_search or non_brand_search; a governed deeper Non-Brand child ID is also accepted once explicitly approved (starts draft)",
+        "For non-Search activities.",
+    ),
+    rag_row(
+        "search_platform",
+        "AMBER — Needed for some uses",
+        "Yes in the governed Search mapping",
+        "Yes for Search taxonomy",
+        "Search platform axis.",
+        "google",
+        "Keeps Google and Bing leaves distinct.",
+        "Platform-level Search identity remains unclassified.",
+        "Search mapping; reports",
+        "google or bing",
+        "For non-Search activities.",
+    ),
 ]
 
 
 CONTEXT_RAG = [
-    rag_row("period_start", "RED — Must provide", "Yes", "Yes", "Start date of the native-frequency observation.", "2026-01-05", "Preserves the source frequency and row grain.", "The observation cannot be aligned.", "context_data", "ISO date", "Never."),
-    rag_row("market", "RED — Must provide", "Yes", "Yes", "Market for the observation.", "UK", "Market is explicit, not inferred from file name.", "The observation cannot be assigned.", "context_data", "Stable market code/label", "Never."),
-    rag_row("variable_id", "RED — Must provide", "Yes", "Yes", "Stable identity of the context variable.", "uk_cpi", "Joins observations to meaning and role.", "The variable cannot be used.", "context_data; variable_dictionary", "Stable ID; unique in dictionary", "Never."),
-    rag_row("value", "RED — Must provide", "Yes", "Yes unless state says unavailable", "Observed value at native frequency.", "132.4", "Carries the actual source observation without fake rows.", "The observation is missing; do not silently fill it.", "context_data", "Finite numeric value or governed missing state", "Only when an explicit missingness state is provided by the governed path."),
-    rag_row("native_frequency", "RED — Must provide", "Yes", "Yes", "Frequency at which the source was observed.", "weekly", "Stops monthly or quarterly data being presented as weekly.", "The source frequency is unknown.", "context_data; variable_dictionary", "weekly, monthly, quarterly, yearly, daily, event", "Never."),
-    rag_row("variable_class", "RED — Must provide", "Yes", "Yes", "Type of variable.", "rate_index", "Separates flows, stocks, rates, surveys, and event flags.", "The variable meaning is incomplete.", "variable_dictionary", "flow_count, stock_level, rate_index, survey_measurement, event_flag", "Never for governed variables."),
-    rag_row("role", "RED — Must provide", "Yes", "Yes", "Approved operational future/model role.", "exogenous_forecastable_control", "Prevents an endogenous mediator being independently forecast.", "The variable role is unsafe or blocked.", "variable_dictionary; planning", "Approved role text; see guide", "Never for governed variables."),
-    rag_row("source", "AMBER — Needed for some uses", "Yes", "Yes for adoption", "Source system or owner reference.", "ONS CPI release", "Makes provenance visible.", "Context adoption remains under review.", "variable_dictionary; audit", "Text with version/date", "For an early draft only."),
-    rag_row("scope", "AMBER — Needed for some uses", "Yes", "Yes for adoption", "Geographic or business scope of the variable.", "UK", "Prevents a national series being mistaken for a market series.", "Adoption remains under review.", "variable_dictionary; alignment", "Text", "For an exploratory upload not yet adopted."),
-    rag_row("effective_from", "GREEN — Optional", "Yes", "No", "Date the dictionary mapping starts.", "2026-01-01", "Supports versioned context meaning.", "No mapping start is recorded.", "audit; persistence", "ISO date", "For an always-active mapping."),
-    rag_row("effective_to", "GREEN — Optional", "Yes", "No", "Date the dictionary mapping ends.", "2026-12-31", "Supports versioned context meaning.", "No mapping end is recorded.", "audit; persistence", "ISO date", "For an open-ended mapping."),
-    rag_row("unit", "AMBER — Needed for some uses", "Yes", "Yes for adoption", "Unit of the observed value.", "index", "Prevents rates, counts, and currency being mixed.", "Context adoption remains under review.", "variable_dictionary; economics", "Text", "For a variable whose unit is explicitly not applicable."),
+    rag_row(
+        "period_start",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Start date of the native-frequency observation.",
+        "2026-01-05",
+        "Preserves the source frequency and row grain.",
+        "The observation cannot be aligned.",
+        "context_data",
+        "ISO date",
+        "Never.",
+    ),
+    rag_row(
+        "market",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Market for the observation.",
+        "UK",
+        "Market is explicit, not inferred from file name.",
+        "The observation cannot be assigned.",
+        "context_data",
+        "Stable market code/label",
+        "Never.",
+    ),
+    rag_row(
+        "variable_id",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Stable identity of the context variable.",
+        "uk_cpi",
+        "Joins observations to meaning and role.",
+        "The variable cannot be used.",
+        "context_data; variable_dictionary",
+        "Stable ID; unique in dictionary",
+        "Never.",
+    ),
+    rag_row(
+        "value",
+        "RED — Must provide",
+        "Yes",
+        "Yes unless state says unavailable",
+        "Observed value at native frequency.",
+        "132.4",
+        "Carries the actual source observation without fake rows.",
+        "The observation is missing; do not silently fill it.",
+        "context_data",
+        "Finite numeric value or governed missing state",
+        "Only when an explicit missingness state is provided by the governed path.",
+    ),
+    rag_row(
+        "native_frequency",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Frequency at which the source was observed.",
+        "weekly",
+        "Stops monthly or quarterly data being presented as weekly.",
+        "The source frequency is unknown.",
+        "context_data; variable_dictionary",
+        "weekly, monthly, quarterly, yearly, daily, event",
+        "Never.",
+    ),
+    rag_row(
+        "variable_class",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Type of variable.",
+        "rate_index",
+        "Separates flows, stocks, rates, surveys, and event flags.",
+        "The variable meaning is incomplete.",
+        "variable_dictionary",
+        "flow_count, stock_level, rate_index, survey_measurement, event_flag",
+        "Never for governed variables.",
+    ),
+    rag_row(
+        "role",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Approved operational future/model role.",
+        "exogenous_forecastable_control",
+        "Prevents an endogenous mediator being independently forecast.",
+        "The variable role is unsafe or blocked.",
+        "variable_dictionary; planning",
+        "Approved role text; see guide",
+        "Never for governed variables.",
+    ),
+    rag_row(
+        "source",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for adoption",
+        "Source system or owner reference.",
+        "ONS CPI release",
+        "Makes provenance visible.",
+        "Context adoption remains under review.",
+        "variable_dictionary; audit",
+        "Text with version/date",
+        "For an early draft only.",
+    ),
+    rag_row(
+        "scope",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for adoption",
+        "Geographic or business scope of the variable.",
+        "UK",
+        "Prevents a national series being mistaken for a market series.",
+        "Adoption remains under review.",
+        "variable_dictionary; alignment",
+        "Text",
+        "For an exploratory upload not yet adopted.",
+    ),
+    rag_row(
+        "effective_from",
+        "GREEN — Optional",
+        "Yes",
+        "No",
+        "Date the dictionary mapping starts.",
+        "2026-01-01",
+        "Supports versioned context meaning.",
+        "No mapping start is recorded.",
+        "audit; persistence",
+        "ISO date",
+        "For an always-active mapping.",
+    ),
+    rag_row(
+        "effective_to",
+        "GREEN — Optional",
+        "Yes",
+        "No",
+        "Date the dictionary mapping ends.",
+        "2026-12-31",
+        "Supports versioned context meaning.",
+        "No mapping end is recorded.",
+        "audit; persistence",
+        "ISO date",
+        "For an open-ended mapping.",
+    ),
+    rag_row(
+        "unit",
+        "AMBER — Needed for some uses",
+        "Yes",
+        "Yes for adoption",
+        "Unit of the observed value.",
+        "index",
+        "Prevents rates, counts, and currency being mixed.",
+        "Context adoption remains under review.",
+        "variable_dictionary; economics",
+        "Text",
+        "For a variable whose unit is explicitly not applicable.",
+    ),
 ]
 
 
 EVENT_RAG = [
-    rag_row("event_id", "RED — Must provide", "Yes", "Yes", "Stable event identity.", "black_friday_2026", "Keeps occurrences traceable.", "The event row is invalid.", "events", "Stable ID", "Never."),
-    rag_row("event_name", "RED — Must provide", "Yes", "Yes", "Readable event name.", "Black Friday", "Makes the event understandable.", "The event row is invalid.", "events", "Text", "Never."),
-    rag_row("start_date", "RED — Must provide", "Yes", "Yes", "First date of the event window.", "2026-11-27", "Preserves the factual event window.", "The event cannot be used.", "events", "ISO date", "Never."),
-    rag_row("end_date", "RED — Must provide", "Yes", "Yes", "Last date of the event window.", "2026-11-30", "Preserves the factual event window.", "The event cannot be used.", "events", "ISO date; on/after start", "Never."),
+    rag_row(
+        "event_id",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Stable event identity.",
+        "black_friday_2026",
+        "Keeps occurrences traceable.",
+        "The event row is invalid.",
+        "events",
+        "Stable ID",
+        "Never.",
+    ),
+    rag_row(
+        "event_name",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Readable event name.",
+        "Black Friday",
+        "Makes the event understandable.",
+        "The event row is invalid.",
+        "events",
+        "Text",
+        "Never.",
+    ),
+    rag_row(
+        "start_date",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "First date of the event window.",
+        "2026-11-27",
+        "Preserves the factual event window.",
+        "The event cannot be used.",
+        "events",
+        "ISO date",
+        "Never.",
+    ),
+    rag_row(
+        "end_date",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Last date of the event window.",
+        "2026-11-30",
+        "Preserves the factual event window.",
+        "The event cannot be used.",
+        "events",
+        "ISO date; on/after start",
+        "Never.",
+    ),
 ]
 
 
 EXPERIMENT_RAG = [
-    rag_row("experiment_id", "RED — Must provide", "Yes", "Yes", "Stable experiment identity.", "geo_lift_uk_01", "Links evidence to one experiment.", "The evidence cannot be reviewed.", "experiment_evidence", "Stable ID", "Never."),
-    rag_row("activity_id", "RED — Must provide", "Yes", "Yes", "Activity affected by the experiment.", "paid_search_google_brand", "Links evidence to a governed activity.", "Evidence cannot be mapped.", "experiment_evidence", "Existing activity ID", "Never."),
-    rag_row("market", "RED — Must provide", "Yes", "Yes", "Market in the experiment.", "UK", "Keeps experiment scope explicit.", "Evidence cannot be scoped.", "experiment_evidence", "Stable market code/label", "Never."),
-    rag_row("start_date", "RED — Must provide", "Yes", "Yes", "Experiment start date.", "2026-03-01", "Defines the test window.", "Evidence cannot be checked.", "experiment_evidence", "ISO date", "Never."),
-    rag_row("end_date", "RED — Must provide", "Yes", "Yes", "Experiment end date.", "2026-03-28", "Defines the test window.", "Evidence cannot be checked.", "experiment_evidence", "ISO date; on/after start", "Never."),
+    rag_row(
+        "experiment_id",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Stable experiment identity.",
+        "geo_lift_uk_01",
+        "Links evidence to one experiment.",
+        "The evidence cannot be reviewed.",
+        "experiment_evidence",
+        "Stable ID",
+        "Never.",
+    ),
+    rag_row(
+        "activity_id",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Activity affected by the experiment.",
+        "paid_search_google_brand",
+        "Links evidence to a governed activity.",
+        "Evidence cannot be mapped.",
+        "experiment_evidence",
+        "Existing activity ID",
+        "Never.",
+    ),
+    rag_row(
+        "market",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Market in the experiment.",
+        "UK",
+        "Keeps experiment scope explicit.",
+        "Evidence cannot be scoped.",
+        "experiment_evidence",
+        "Stable market code/label",
+        "Never.",
+    ),
+    rag_row(
+        "start_date",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Experiment start date.",
+        "2026-03-01",
+        "Defines the test window.",
+        "Evidence cannot be checked.",
+        "experiment_evidence",
+        "ISO date",
+        "Never.",
+    ),
+    rag_row(
+        "end_date",
+        "RED — Must provide",
+        "Yes",
+        "Yes",
+        "Experiment end date.",
+        "2026-03-28",
+        "Defines the test window.",
+        "Evidence cannot be checked.",
+        "experiment_evidence",
+        "ISO date; on/after start",
+        "Never.",
+    ),
 ]
 
 
@@ -177,7 +1274,15 @@ def html_table(rows: list[dict[str, str]], extra_class: str = "") -> str:
     body = []
     for row in rows:
         status = row["Status"]
-        cls = "red" if status.startswith("RED") else "amber" if status.startswith("AMBER") else "green" if status.startswith("GREEN") else "grey"
+        cls = (
+            "red"
+            if status.startswith("RED")
+            else "amber"
+            if status.startswith("AMBER")
+            else "green"
+            if status.startswith("GREEN")
+            else "grey"
+        )
         cells = []
         for h in RAG_HEAD:
             if h == "Status":
@@ -201,7 +1306,11 @@ def code_block(text: str) -> str:
 
 
 def mistakes(items: list[str]) -> str:
-    return "<ul class=\"mistakes\">" + "".join(f"<li>{esc(item)}</li>" for item in items) + "</ul>"
+    return (
+        '<ul class="mistakes">'
+        + "".join(f"<li>{esc(item)}</li>" for item in items)
+        + "</ul>"
+    )
 
 
 def domain_section(
@@ -251,67 +1360,260 @@ def build_html() -> str:
     </div>
     """
     faq = [
-        ("What is the safest first upload?", "Upload the three standard domain workbooks using the current templates, with dictionaries completed and source metadata attached. See <a href=\"#workflow\">the workflow</a>."),
-        ("Can one domain use more than one physical file?", "Yes. A logical domain may contain many uploaded files or workbooks. The app merges them only when keys and shared values are compatible."),
-        ("Can one workbook contain several domains?", "Yes, but select the domain explicitly when the workbook contains more than one recognised domain."),
-        ("Is market read from the filename?", "No. Market must be a row-level column in every relevant table."),
-        ("Should I make all data weekly?", "No. Upload the source at its native frequency. A later alignment step needs its own approved method."),
-        ("Are missing values the same as zero?", "No. Missing means unavailable or not observed; zero is a measured zero. Never fill one with the other silently."),
-        ("What does outcomes wide mean?", "Each row is one period and market. Each outcome has its own source column."),
-        ("What does activity tidy-long mean?", "Each row identifies one period, market, and activity, with one or more raw measures in columns."),
-        ("What is source_column?", "It is the exact header in the raw outcomes table that contains the outcome values."),
-        ("Can an ID explain the whole outcome?", "No. The dictionary carries meaning. IDs must be stable and useful, but meaning must never be guessed from an ID."),
-        ("Which Family History segments are in scope?", "New, Winback, and DNA cross-sell. Do not add a fourth FH segment without an approved decision."),
-        ("Can I add DNA self-activated and gifted segments?", "Only when the source and an approved use support them. Do not add them silently."),
-        ("Are GSA and Net Bill Through the same metric?", "No. They are distinct definitions with different date, cohort, maturity, and reconciliation needs."),
-        ("Can I upload weekly Net Bill Through?", "Yes, when it is a supplied governed outcome with an approved definition and completeness metadata. The app does not reconstruct it from raw billing events."),
-        ("What is the completeness sheet for?", "It records the data-as-of date, model window, maturity rule, and owner for an outcome. It is especially important for official NBT use."),
-        ("What are the official UK production NBT outcomes?", "Three separate Family History outcomes: fh_net_billthrough_count_new, fh_net_billthrough_count_dna_cross_sell, and fh_net_billthrough_count_winback. See <a href=\"#uk-nbt-production\">the UK production NBT note</a>."),
-        ("Does production NBT use the same 14-day maturity example shown elsewhere in this guide?", "No. That 14-day example is an illustrative historical-test rule. Official UK production NBT uses its own approved production definition, maturity rule, and evidence bundle supplied with the source pack."),
-        ("Does the downloadable generic sample outcome workbook already use the NBT ids?", "No. The generic sample teaches the pattern using GSA ids. UK production NBT ids and definitions come from the approved UK source pack, not the generic sample."),
-        ("What is model_input_measure?", "The exact raw activity measure selected for modelling, such as spend, clicks, impressions, GRPs, or TVRs."),
-        ("What is model_input_column?", "The model-ready destination column created after tidy activity data is pivoted. It is not the raw measurement column."),
-        ("Does the activity ID need every metadata field?", "No. Use the smallest stable identity that avoids collisions. Keep descriptive fields in the dictionary."),
-        ("Should the same activity ID be reused across markets?", "It may be reused for the same cross-market activity concept, with market remaining part of the row key. Use pooling_group_id for an optional cross-market identity."),
-        ("Does pooling_group_id pool the model?", "No. It records comparable identity only. Pooling is a separate model choice."),
-        ("Do spend and clicks mean the same thing?", "No. Record the model input, spend, and response unit separately. A later governed mapping is required for monetary economics."),
-        ("Should all raw activity measures be modelled?", "No. Keep useful raw measures, but select one model_input_measure per activity for the model input."),
-        ("Do owned and earned activity belong in another domain?", "No. They are activity/media records too. Their ownership, role, and economics must be explicit."),
-        ("How are Brand and Non-Brand Search represented?", "Use separate activity identities and the approved Search taxonomy: Google/Bing × Brand/Non-Brand. Parent totals are calculated from leaves."),
-        ("Can I add a deeper Non-Brand Search child group?", "Only through the governed taxonomy catalogue, starting as draft. A child cannot be fitted at the same model grain as its parent, and it has no planning eligibility or cost-bearing treatment until child-level observed data and governed cost support exist."),
-        ("Can SEO visibility be split by Brand and Non-Brand?", "Yes, using seo_group_id/seo_group_name per market/week. A row with no group supplied stays in one generic seo_visibility group."),
-        ("Are PMax, Demand Gen, and YouTube Paid Search?", "No. They are not automatically classified as Paid Search by platform name."),
-        ("What is a Search cap?", "A budget or delivery ceiling. It is a constraint, not realised spend or delivery, and expected unused cap must remain possible."),
-        ("What is residual Paid Search incrementality?", "A model output from the approved treatment path. It is not a raw source metric or a new upload object."),
-        ("Can Google Trends be generic context?", "Only as an explicitly governed context variable. For Candidate A Brand Demand, use the dedicated anchor upload with its query metadata."),
-        ("Can GSC organic traffic stand in for SEO visibility?", "No. The governed SEO visibility metric is separate from organic Search capture and uses its dedicated observation path."),
-        ("Can monthly context be manually expanded to weeks?", "No. Do not duplicate or invent weekly rows. Use a governed frequency-alignment method when one is approved."),
-        ("What are the context variable classes?", "flow_count, stock_level, rate_index, survey_measurement, and event_flag."),
-        ("How do I upload named events?", "Use the optional events sheet with event_id, event_name, start_date, and end_date. Factual dates stay unchanged; classification is not inferred."),
-        ("Does experiment evidence calibrate the model automatically?", "No. It remains source evidence until a separate reviewed calibration record and method are approved."),
-        ("Is outcome valuation part of the three core workbooks?", "No. FH LTR and DNA revenue valuation are separate governed uploads and are not needed for a count first fit."),
-        ("Can I use an average LTR for future ROI?", "Only as an explicit scenario assumption approved for the project. Do not extrapolate historical values automatically."),
-        ("Does a currency column perform FX conversion?", "No. It identifies the monetary unit. FX translation needs a governed rate set and approved method."),
-        ("What happens when two rows have the same key?", "The standard merge and canonicalisation paths fail closed and ask you to resolve the source grain; they do not silently aggregate."),
-        ("What does a RED field mean?", "The column must exist and the value is required for the stated use. A GREEN field may be optional, but its absence can still limit a feature."),
-        ("Why does the builder show a collision warning?", "Because two candidate rows would produce the same stable ID. Add the next meaningful identity field; do not add a random number."),
-        ("Can I override a suggested ID?", "Yes. The final ID uses the manual override when present, but you remain responsible for uniqueness, stability, and dictionary consistency."),
-        ("Where can I find the exact parser contract?", "See the source files and tests listed in the <a href=\"#review\">review note</a>. This guide explains the analyst-facing boundary."),
+        (
+            "What is the safest first upload?",
+            'Upload the three standard domain workbooks using the current templates, with dictionaries completed and source metadata attached. See <a href="#workflow">the workflow</a>.',
+        ),
+        (
+            "Can one domain use more than one physical file?",
+            "Yes. A logical domain may contain many uploaded files or workbooks. The app merges them only when keys and shared values are compatible.",
+        ),
+        (
+            "Can one workbook contain several domains?",
+            "Yes, but select the domain explicitly when the workbook contains more than one recognised domain.",
+        ),
+        (
+            "Is market read from the filename?",
+            "No. Market must be a row-level column in every relevant table.",
+        ),
+        (
+            "Should I make all data weekly?",
+            "No. Upload the source at its native frequency. A later alignment step needs its own approved method.",
+        ),
+        (
+            "Are missing values the same as zero?",
+            "No. Missing means unavailable or not observed; zero is a measured zero. Never fill one with the other silently.",
+        ),
+        (
+            "What does outcomes wide mean?",
+            "Each row is one period and market. Each outcome has its own source column.",
+        ),
+        (
+            "What does activity tidy-long mean?",
+            "Each row identifies one period, market, and activity, with one or more raw measures in columns.",
+        ),
+        (
+            "What is source_column?",
+            "It is the exact header in the raw outcomes table that contains the outcome values.",
+        ),
+        (
+            "Can an ID explain the whole outcome?",
+            "No. The dictionary carries meaning. IDs must be stable and useful, but meaning must never be guessed from an ID.",
+        ),
+        (
+            "Which Family History segments are in scope?",
+            "New, Winback, and DNA cross-sell. Do not add a fourth FH segment without an approved decision.",
+        ),
+        (
+            "Can I add DNA self-activated and gifted segments?",
+            "Only when the source and an approved use support them. Do not add them silently.",
+        ),
+        (
+            "Are GSA and Net Bill Through the same metric?",
+            "No. They are distinct definitions with different date, cohort, maturity, and reconciliation needs.",
+        ),
+        (
+            "Can I upload weekly Net Bill Through?",
+            "Yes, when it is a supplied governed outcome with an approved definition and completeness metadata. The app does not reconstruct it from raw billing events.",
+        ),
+        (
+            "What is the completeness sheet for?",
+            "It records the data-as-of date, model window, maturity rule, and owner for an outcome. It is especially important for official NBT use.",
+        ),
+        (
+            "What are the official UK production NBT outcomes?",
+            'Three separate Family History outcomes: fh_net_billthrough_count_new, fh_net_billthrough_count_dna_cross_sell, and fh_net_billthrough_count_winback. See <a href="#uk-nbt-production">the UK production NBT note</a>.',
+        ),
+        (
+            "Does production NBT use the same 14-day maturity example shown elsewhere in this guide?",
+            "No. That 14-day example is an illustrative historical-test rule. Official UK production NBT uses its own approved production definition, maturity rule, and evidence bundle supplied with the source pack.",
+        ),
+        (
+            "Does the downloadable generic sample outcome workbook already use the NBT ids?",
+            "No. The generic sample teaches the pattern using GSA ids. UK production NBT ids and definitions come from the approved UK source pack, not the generic sample.",
+        ),
+        (
+            "What is model_input_measure?",
+            "The exact raw activity measure selected for modelling, such as spend, clicks, impressions, GRPs, or TVRs.",
+        ),
+        (
+            "What is model_input_column?",
+            "The model-ready destination column created after tidy activity data is pivoted. It is not the raw measurement column.",
+        ),
+        (
+            "Does the activity ID need every metadata field?",
+            "No. Use the smallest stable identity that avoids collisions. Keep descriptive fields in the dictionary.",
+        ),
+        (
+            "Should the same activity ID be reused across markets?",
+            "It may be reused for the same cross-market activity concept, with market remaining part of the row key. Use pooling_group_id for an optional cross-market identity.",
+        ),
+        (
+            "Does pooling_group_id pool the model?",
+            "No. It records comparable identity only. Pooling is a separate model choice.",
+        ),
+        (
+            "Do spend and clicks mean the same thing?",
+            "No. Record the model input, spend, and response unit separately. A later governed mapping is required for monetary economics.",
+        ),
+        (
+            "Should all raw activity measures be modelled?",
+            "No. Keep useful raw measures, but select one model_input_measure per activity for the model input.",
+        ),
+        (
+            "Do owned and earned activity belong in another domain?",
+            "No. They are activity/media records too. Their ownership, role, and economics must be explicit.",
+        ),
+        (
+            "How are Brand and Non-Brand Search represented?",
+            "Use separate activity identities and the approved Search taxonomy: Google/Bing × Brand/Non-Brand. Parent totals are calculated from leaves.",
+        ),
+        (
+            "Can I add a deeper Non-Brand Search child group?",
+            "Only through the governed taxonomy catalogue, starting as draft. A child cannot be fitted at the same model grain as its parent, and it has no planning eligibility or cost-bearing treatment until child-level observed data and governed cost support exist.",
+        ),
+        (
+            "Can SEO visibility be split by Brand and Non-Brand?",
+            "Yes, using seo_group_id/seo_group_name per market/week. A row with no group supplied stays in one generic seo_visibility group.",
+        ),
+        (
+            "Are PMax, Demand Gen, and YouTube Paid Search?",
+            "No. They are not automatically classified as Paid Search by platform name.",
+        ),
+        (
+            "What is a Search cap?",
+            "A budget or delivery ceiling. It is a constraint, not realised spend or delivery, and expected unused cap must remain possible.",
+        ),
+        (
+            "What is residual Paid Search incrementality?",
+            "A model output from the approved treatment path. It is not a raw source metric or a new upload object.",
+        ),
+        (
+            "Can Google Trends be generic context?",
+            "Only as an explicitly governed context variable. For Candidate A Brand Demand, use the dedicated anchor upload with its query metadata.",
+        ),
+        (
+            "Can GSC organic traffic stand in for SEO visibility?",
+            "No. The governed SEO visibility metric is separate from organic Search capture and uses its dedicated observation path.",
+        ),
+        (
+            "Can monthly context be manually expanded to weeks?",
+            "No. Do not duplicate or invent weekly rows. Use a governed frequency-alignment method when one is approved.",
+        ),
+        (
+            "What are the context variable classes?",
+            "flow_count, stock_level, rate_index, survey_measurement, and event_flag.",
+        ),
+        (
+            "How do I upload named events?",
+            "Use the optional events sheet with event_id, event_name, start_date, and end_date. Factual dates stay unchanged; classification is not inferred.",
+        ),
+        (
+            "Does experiment evidence calibrate the model automatically?",
+            "No. It remains source evidence until a separate reviewed calibration record and method are approved.",
+        ),
+        (
+            "Is outcome valuation part of the three core workbooks?",
+            "No. FH LTR and DNA revenue valuation are separate governed uploads and are not needed for a count first fit.",
+        ),
+        (
+            "Can I use an average LTR for future ROI?",
+            "Only as an explicit scenario assumption approved for the project. Do not extrapolate historical values automatically.",
+        ),
+        (
+            "Does a currency column perform FX conversion?",
+            "No. It identifies the monetary unit. FX translation needs a governed rate set and approved method.",
+        ),
+        (
+            "What happens when two rows have the same key?",
+            "The standard merge and canonicalisation paths fail closed and ask you to resolve the source grain; they do not silently aggregate.",
+        ),
+        (
+            "What does a RED field mean?",
+            "The column must exist and the value is required for the stated use. A GREEN field may be optional, but its absence can still limit a feature.",
+        ),
+        (
+            "Why does the builder show a collision warning?",
+            "Because two candidate rows would produce the same stable ID. Add the next meaningful identity field; do not add a random number.",
+        ),
+        (
+            "Can I override a suggested ID?",
+            "Yes. The final ID uses the manual override when present, but you remain responsible for uniqueness, stability, and dictionary consistency.",
+        ),
+        (
+            "Where can I find the exact parser contract?",
+            'See the source files and tests listed in the <a href="#review">review note</a>. This guide explains the analyst-facing boundary.',
+        ),
     ]
-    faq_html = "".join(f"<details><summary>{esc(q)}</summary><p>{a}</p></details>" for q, a in faq)
+    faq_html = "".join(
+        f"<details><summary>{esc(q)}</summary><p>{a}</p></details>" for q, a in faq
+    )
 
     outcomes = domain_section(
-        "outcomes", "1", "Outcomes", "Outcomes are the measures the model explains. Keep Family History New, DNA cross-sell, and Winback separate. Keep DNA customer-relationship partitions separate from purchase-recipient partitions unless an approved definition says otherwise.",
+        "outcomes",
+        "1",
+        "Outcomes",
+        "Outcomes are the measures the model explains. Keep Family History New, DNA cross-sell, and Winback separate. Keep DNA customer-relationship partitions separate from purchase-recipient partitions unless an approved definition says otherwise.",
         "Required sheets: <code>outcomes</code> and <code>outcome_dictionary</code>. Optional sheet: <code>outcome_completeness</code>. The source table is wide: one row per <code>period_start × market</code>, with one source column per outcome. The dictionary is the meaning layer.",
         "period_start | market | fh_gsa_new | fh_gsa_dna_cross_sell | fh_gsa_winback\n2026-01-05   | UK     | 120        | 18                    | 9",
         "The current v2 dictionary requires: outcome_id, source_column, product, metric_key, metric, segment_dimension, segment, outcome_group_id, outcome_group_label, outcome_family_key, group_aggregation. The code also accepts optional canonical definition fields such as unit, aggregation_type, date_basis, maturity_required, role, eligibility flags, definition_version, event_definition, cohort_or_attribution_basis, completeness_or_maturity_policy, exclusions, reconciliation_source, business_owner, effective_from, effective_to, value_weight, and value_currency.",
         OUTCOME_RAG,
         "The dictionary row with <code>outcome_id=fh_gsa_new</code> points to <code>source_column=fh_gsa_new</code>. The parser checks that this exact column exists in <code>outcomes</code>; it does not infer that “GSA” or “NBT” in an ID means anything. If a group is supplied, its rows describe semantic membership and optional sum reconciliation. Group membership does not automatically make a total fit or become an official report.",
-        ["The two required sheets exist and have exact required headers.", "Every outcomes row has a period_start and market.", "Every dictionary source_column exists in outcomes.", "Outcome IDs are unique and stable.", "Product, metric, segment dimension, and segment are explicit.", "Use the completeness sheet for official/maturity-sensitive outcomes, especially supplied NBT."],
-        ["Add versioned definition, owner, date basis, cohort basis, exclusions, and reconciliation source.", "Add outcome_group fields when a component/total relationship is governed.", "Add outcome_completeness for data-as-of and maturity review.", "Add a separate valuation upload for FH LTR or DNA revenue; do not put rate calculations in the count table."],
-        ["Using NBT as a friendly name for GSA or treating sign-up → NBT → GSA as a universal sequence.", "Putting outcomes in long format when the current standard outcomes contract expects wide rows.", "Using an outcome ID to carry meaning while leaving dictionary fields blank.", "Guessing product or segment from a source-column name.", "Adding self-activated/gifted/unactivated DNA splits without source support and approval.", "Fitting a supplied total and its components together without an explicit treatment.", "Reconstructing weekly NBT from event-level billing data at upload time.", "Using a rate as if it were a count or adding rates across weeks.", "Applying the illustrative 14-day historical-test maturity example as the production NBT default instead of the approved production maturity rule and evidence."],
-        [["fh_gsa_new + product Family History + segment New + metric_key fh_gsa", "metric_key fh_net_billthrough_count but metric says GSA", "The key, label, and definition disagree."], ["DNA New Customer and DNA Existing FH Customer in separate rows", "A DNA combined row silently copied into both segments", "A copied value double-counts and invents support."], ["outcome_group_id blank for an independent outcome", "group_aggregation=sum with no group ID", "The group block must be complete or blank."], ["outcome_completeness row names the exact NBT outcome_id", "Completeness row uses a friendly label not in the dictionary", "Completeness is keyed to the governed definition."], ["GSA and NBT supplied as distinct columns", "One column labelled GSA/NBT", "These are different measures and approvals."]],
-        extra_html="<h3>Optional outcome_completeness schema</h3><p>Use this sheet for freshness, model-window, maturity, and ownership metadata. Official NBT requires it under the approved completeness contract.</p>" + html_table(COMPLETENESS_RAG, "wide") + """
+        [
+            "The two required sheets exist and have exact required headers.",
+            "Every outcomes row has a period_start and market.",
+            "Every dictionary source_column exists in outcomes.",
+            "Outcome IDs are unique and stable.",
+            "Product, metric, segment dimension, and segment are explicit.",
+            "Use the completeness sheet for official/maturity-sensitive outcomes, especially supplied NBT.",
+        ],
+        [
+            "Add versioned definition, owner, date basis, cohort basis, exclusions, and reconciliation source.",
+            "Add outcome_group fields when a component/total relationship is governed.",
+            "Add outcome_completeness for data-as-of and maturity review.",
+            "Add a separate valuation upload for FH LTR or DNA revenue; do not put rate calculations in the count table.",
+        ],
+        [
+            "Using NBT as a friendly name for GSA or treating sign-up → NBT → GSA as a universal sequence.",
+            "Putting outcomes in long format when the current standard outcomes contract expects wide rows.",
+            "Using an outcome ID to carry meaning while leaving dictionary fields blank.",
+            "Guessing product or segment from a source-column name.",
+            "Adding self-activated/gifted/unactivated DNA splits without source support and approval.",
+            "Fitting a supplied total and its components together without an explicit treatment.",
+            "Reconstructing weekly NBT from event-level billing data at upload time.",
+            "Using a rate as if it were a count or adding rates across weeks.",
+            "Applying the illustrative 14-day historical-test maturity example as the production NBT default instead of the approved production maturity rule and evidence.",
+        ],
+        [
+            [
+                "fh_gsa_new + product Family History + segment New + metric_key fh_gsa",
+                "metric_key fh_net_billthrough_count but metric says GSA",
+                "The key, label, and definition disagree.",
+            ],
+            [
+                "DNA New Customer and DNA Existing FH Customer in separate rows",
+                "A DNA combined row silently copied into both segments",
+                "A copied value double-counts and invents support.",
+            ],
+            [
+                "outcome_group_id blank for an independent outcome",
+                "group_aggregation=sum with no group ID",
+                "The group block must be complete or blank.",
+            ],
+            [
+                "outcome_completeness row names the exact NBT outcome_id",
+                "Completeness row uses a friendly label not in the dictionary",
+                "Completeness is keyed to the governed definition.",
+            ],
+            [
+                "GSA and NBT supplied as distinct columns",
+                "One column labelled GSA/NBT",
+                "These are different measures and approvals.",
+            ],
+        ],
+        extra_html="<h3>Optional outcome_completeness schema</h3><p>Use this sheet for freshness, model-window, maturity, and ownership metadata. Official NBT requires it under the approved completeness contract.</p>"
+        + html_table(COMPLETENESS_RAG, "wide")
+        + """
       <h3 id="uk-nbt-production">UK production Net Bill Through (NBT)</h3>
       <div class="callout warning"><b>Production-specific example, not a universal rule.</b> This section describes the approved UK production boundary. It does not change the generic outcome contract above, and it must not be read as a default for every market or project.</div>
       <p>Official UK production configures three separate Family History NBT outcomes — <code>fh_net_billthrough_count_new</code>, <code>fh_net_billthrough_count_dna_cross_sell</code>, and <code>fh_net_billthrough_count_winback</code> — as distinct <code>outcome_id</code>/<code>source_column</code> rows sharing <code>metric_key=fh_net_billthrough_count</code> with New, DNA cross-sell, and Winback as separate <code>segment</code> values, the same New/DNA-cross-sell/Winback pattern already shown for GSA above. GSA remains a distinct secondary/context measure: it is never reconstructed into NBT, and NBT is never reconstructed from GSA or from raw billing events.</p>
@@ -319,33 +1621,183 @@ def build_html() -> str:
       <p>This boundary is recorded in <code>docs/uk_production_onboarding_runbook.md</code> and the approved <code>REQ-NBT-001</code> through <code>REQ-NBT-004</code> requirement records, which are the authority for the exact production definition, maturity rule, and evidence requirements — this guide summarises them for an analyst preparing an upload; it does not restate them as new rules.</p>""",
     )
     activity = domain_section(
-        "activity", "2", "Activity and Media", "Activity data describes what was delivered, spent, or observed. The tidy source is kept separate from the wide model frame so the selected physical measure is visible and reproducible.",
+        "activity",
+        "2",
+        "Activity and Media",
+        "Activity data describes what was delivered, spent, or observed. The tidy source is kept separate from the wide model frame so the selected physical measure is visible and reproducible.",
         "Required sheets: <code>activity_data</code> and <code>activity_dictionary</code>. Raw activity data is tidy/long with at least <code>period_start</code>, <code>market</code>, and <code>activity_id</code>. The dictionary contains base fields plus optional v2 physical-unit and effective-date fields. A single workbook may carry multiple raw measure columns.",
         "period_start | market | activity_id                 | spend | impressions | clicks\n2026-01-05   | UK     | paid_search_google_brand   | 1200  | 180000      | 8200",
         "Base dictionary fields: activity_id, market, pooling_group_id, channel, platform, campaign_type, marketing_objective, funnel_stage, product_advertised, message_type, activity_ownership, intended_model_role, model_input_column, model_input_measure, economic_treatment, planning_eligibility, source. v2 adds model_input_unit, model_input_kind, spend_column, response_unit_column, response_unit, currency, effective_from, and effective_to. Search intent/platform fields exist in the governed activity model, but the current standard source dictionary parser does not map them automatically; use the dedicated mapping/admin boundary and treat this as a review item.",
         ACTIVITY_RAG,
         "For <code>activity_id=paid_search_google_brand</code>, <code>model_input_measure=spend</code> selects the raw <code>spend</code> column. After canonicalisation, the value is written to the wide destination <code>model_input_column=uk_paid_search_google_brand</code>. This is why <b>model_input_measure</b> and <b>model_input_column</b> are different. Spend, delivery, and response-unit fields remain separate. Missing activity rows stay missing; they are not filled as zero.",
-        ["The two required sheets and exact identity columns exist.", "Every raw row has period_start, market, and activity_id.", "Every dictionary key is unique at market × activity_id.", "model_input_measure names a real raw measure column.", "model_input_column is stable and unique in the model frame.", "Ownership, role, economics, planning, and source are explicit."],
-        ["Keep spend, impressions, clicks, GRPs, spots, visits, and other observed measures when useful.", "Record physical units and currency separately.", "Record Search taxonomy only where the dedicated governed mapping supports it.", "Add governed media cost mappings before monetary CPA/ROI."],
-        ["Making a wide activity table when the standard source expects tidy-long rows.", "Putting every metadata field into the ID and creating brittle IDs.", "Using <code>model_input_column</code> as if it were the raw source measure.", "Treating spend as clicks, or clicks as conversions, without an explicit mapping.", "Forcing paid, owned, and earned activity into different logical domains.", "Filling missing delivery with zero.", "Assuming every activity is optimisable because it was fitted.", "Calling PMax, Demand Gen, or YouTube Paid Search merely because the platform is Google.", "Using Brand Search as one generic variable without classification."],
-        [["spend is selected as model_input_measure and unit is GBP", "model_input_measure is uk_paid_search_google_brand", "The raw source column and model-ready destination are different."], ["Google Brand and Bing Brand have separate activity IDs", "Google/Bing stored only in a free-text file name", "Platform identity must be explicit."], ["pooling_group_id shared by comparable markets", "assuming shared pooling_group_id means pooled estimation", "Pooling is a model choice, not an ID effect."], ["paid_search_cap recorded as a constraint object", "cap copied into realised spend", "A cap is not guaranteed spend."], ["owned SEO activity marked earned/demand_capture", "SEO visibility relabelled as paid delivery", "SEO visibility and organic capture are distinct."], ["missing row left absent", "missing row filled with 0", "Absence is not an observed zero."]],
+        [
+            "The two required sheets and exact identity columns exist.",
+            "Every raw row has period_start, market, and activity_id.",
+            "Every dictionary key is unique at market × activity_id.",
+            "model_input_measure names a real raw measure column.",
+            "model_input_column is stable and unique in the model frame.",
+            "Ownership, role, economics, planning, and source are explicit.",
+        ],
+        [
+            "Keep spend, impressions, clicks, GRPs, spots, visits, and other observed measures when useful.",
+            "Record physical units and currency separately.",
+            "Record Search taxonomy only where the dedicated governed mapping supports it.",
+            "Add governed media cost mappings before monetary CPA/ROI.",
+        ],
+        [
+            "Making a wide activity table when the standard source expects tidy-long rows.",
+            "Putting every metadata field into the ID and creating brittle IDs.",
+            "Using <code>model_input_column</code> as if it were the raw source measure.",
+            "Treating spend as clicks, or clicks as conversions, without an explicit mapping.",
+            "Forcing paid, owned, and earned activity into different logical domains.",
+            "Filling missing delivery with zero.",
+            "Assuming every activity is optimisable because it was fitted.",
+            "Calling PMax, Demand Gen, or YouTube Paid Search merely because the platform is Google.",
+            "Using Brand Search as one generic variable without classification.",
+        ],
+        [
+            [
+                "spend is selected as model_input_measure and unit is GBP",
+                "model_input_measure is uk_paid_search_google_brand",
+                "The raw source column and model-ready destination are different.",
+            ],
+            [
+                "Google Brand and Bing Brand have separate activity IDs",
+                "Google/Bing stored only in a free-text file name",
+                "Platform identity must be explicit.",
+            ],
+            [
+                "pooling_group_id shared by comparable markets",
+                "assuming shared pooling_group_id means pooled estimation",
+                "Pooling is a model choice, not an ID effect.",
+            ],
+            [
+                "paid_search_cap recorded as a constraint object",
+                "cap copied into realised spend",
+                "A cap is not guaranteed spend.",
+            ],
+            [
+                "owned SEO activity marked earned/demand_capture",
+                "SEO visibility relabelled as paid delivery",
+                "SEO visibility and organic capture are distinct.",
+            ],
+            [
+                "missing row left absent",
+                "missing row filled with 0",
+                "Absence is not an observed zero.",
+            ],
+        ],
     )
     context = domain_section(
-        "context", "3", "Context and External Factors", "Context data records controls, signals, and events at their native source frequency. Its role is explicit because future planning treats exogenous controls, endogenous mediators, latent baseline states, cost assumptions, and decisions differently.",
+        "context",
+        "3",
+        "Context and External Factors",
+        "Context data records controls, signals, and events at their native source frequency. Its role is explicit because future planning treats exogenous controls, endogenous mediators, latent baseline states, cost assumptions, and decisions differently.",
         "Required sheets: <code>context_data</code> and <code>variable_dictionary</code>. Optional sheet: <code>events</code>. Context data is tidy/long with <code>period_start</code>, <code>market</code>, <code>variable_id</code>, <code>value</code>, and <code>native_frequency</code>. Monthly or quarterly data may remain monthly or quarterly. Do not manually make fake weekly rows.",
         "period_start | market | variable_id | value | native_frequency\n2026-01-01   | UK     | uk_cpi      | 132.4 | monthly",
         "The current variable dictionary requires variable_id, variable_class, native_frequency, and role. v2 adds source, scope, effective_from, effective_to, and unit. Events use event_id, event_name, start_date, and end_date. The current closed variable classes are flow_count, stock_level, rate_index, survey_measurement, and event_flag.",
         CONTEXT_RAG,
         "The row with <code>variable_id=uk_cpi</code> joins to a dictionary row with <code>variable_class=rate_index</code>, <code>native_frequency=monthly</code>, and an approved role such as <code>exogenous_forecastable_control</code>. The parser preserves native frequency and pivots observations; it does not invent a weekly value. A later alignment method must be approved and documented.",
-        ["The two required sheets exist and use exact headers.", "Every context observation has period_start, market, variable_id, value, and native_frequency.", "Every variable has class, native frequency, and role.", "Mixed frequency is disclosed rather than silently converted.", "Missingness and observed zero are distinguishable.", "Events use factual dates and are kept separate from continuous variables."],
-        ["Add source, scope, unit, and effective dates.", "Add a named events sheet for campaigns, holidays, or other governed occurrences.", "Add dedicated Google Trends Candidate A metadata when using a Brand Demand anchor.", "Add dedicated SEO visibility observations for GSC-derived ranking visibility."],
-        ["Copying monthly data into each week.", "Treating unavailable as zero.", "Using one variable ID for measures with different units or meanings.", "Forecasting an endogenous mediator as an independent future control.", "Using an ordinary external forecast for the latent baseline.", "Assuming the current app has a default monthly-to-weekly conversion.", "Putting a named event into a continuous value column with no event identity.", "Treating Google Trends 0 as confirmed zero demand."],
-        [["uk_cpi is monthly and stays monthly", "uk_cpi repeated into four weekly rows", "The source frequency must remain truthful."], ["variable_class=rate_index", "variable_class=consumer_signal without an approved class", "Use the closed vocabulary for governed context."], ["role=exogenous_forecastable_control for CPI", "role=exogenous_forecastable_control for branded-search demand", "An endogenous mediator must be generated by the scenario model."], ["event_id and factual start/end dates", "event flag silently inferred from a promotion name", "Event treatment is separately governed."], ["suppressed value state recorded", "suppressed converted to 0", "Suppressed is not observed zero."]],
-        extra_html="<h3>Optional events schema</h3><p>Events are a separate optional table. Keep factual dates and event identity; do not infer event family or response treatment.</p>" + html_table(EVENT_RAG, "wide"),
+        [
+            "The two required sheets exist and use exact headers.",
+            "Every context observation has period_start, market, variable_id, value, and native_frequency.",
+            "Every variable has class, native frequency, and role.",
+            "Mixed frequency is disclosed rather than silently converted.",
+            "Missingness and observed zero are distinguishable.",
+            "Events use factual dates and are kept separate from continuous variables.",
+        ],
+        [
+            "Add source, scope, unit, and effective dates.",
+            "Add a named events sheet for campaigns, holidays, or other governed occurrences.",
+            "Add dedicated Google Trends Candidate A metadata when using a Brand Demand anchor.",
+            "Add dedicated SEO visibility observations for GSC-derived ranking visibility.",
+        ],
+        [
+            "Copying monthly data into each week.",
+            "Treating unavailable as zero.",
+            "Using one variable ID for measures with different units or meanings.",
+            "Forecasting an endogenous mediator as an independent future control.",
+            "Using an ordinary external forecast for the latent baseline.",
+            "Assuming the current app has a default monthly-to-weekly conversion.",
+            "Putting a named event into a continuous value column with no event identity.",
+            "Treating Google Trends 0 as confirmed zero demand.",
+        ],
+        [
+            [
+                "uk_cpi is monthly and stays monthly",
+                "uk_cpi repeated into four weekly rows",
+                "The source frequency must remain truthful.",
+            ],
+            [
+                "variable_class=rate_index",
+                "variable_class=consumer_signal without an approved class",
+                "Use the closed vocabulary for governed context.",
+            ],
+            [
+                "role=exogenous_forecastable_control for CPI",
+                "role=exogenous_forecastable_control for branded-search demand",
+                "An endogenous mediator must be generated by the scenario model.",
+            ],
+            [
+                "event_id and factual start/end dates",
+                "event flag silently inferred from a promotion name",
+                "Event treatment is separately governed.",
+            ],
+            [
+                "suppressed value state recorded",
+                "suppressed converted to 0",
+                "Suppressed is not observed zero.",
+            ],
+        ],
+        extra_html="<h3>Optional events schema</h3><p>Events are a separate optional table. Keep factual dates and event identity; do not infer event family or response treatment.</p>"
+        + html_table(EVENT_RAG, "wide"),
     )
     search_table = simple_table(
         ["Object", "Unit", "Role / treatment", "Upload or source boundary"],
-        [["search_demand", "index or count", "demand_capture context; not paid", "Candidate A Google Trends anchor or another governed demand source"], ["paid_search_spend", "currency", "intervention / paid cost", "activity data + cost mapping"], ["paid_search_delivery", "clicks or impressions", "descriptive delivery; not a second fitted spend", "activity data + physical mapping"], ["paid_search_cap", "currency or delivery unit", "constraint/context; not realised spend", "separate governed cap object / Candidate A inputs"], ["organic_search_capture", "response count", "demand_capture; earned", "activity or dedicated source"], ["direct_navigation_capture", "response count", "demand_capture; owned", "activity or dedicated source"], ["residual Paid Search incrementality", "model output", "treatment result", "never a raw upload column"]],
+        [
+            [
+                "search_demand",
+                "index or count",
+                "demand_capture context; not paid",
+                "Candidate A Google Trends anchor or another governed demand source",
+            ],
+            [
+                "paid_search_spend",
+                "currency",
+                "intervention / paid cost",
+                "activity data + cost mapping",
+            ],
+            [
+                "paid_search_delivery",
+                "clicks or impressions",
+                "descriptive delivery; not a second fitted spend",
+                "activity data + physical mapping",
+            ],
+            [
+                "paid_search_cap",
+                "currency or delivery unit",
+                "constraint/context; not realised spend",
+                "separate governed cap object / Candidate A inputs",
+            ],
+            [
+                "organic_search_capture",
+                "response count",
+                "demand_capture; earned",
+                "activity or dedicated source",
+            ],
+            [
+                "direct_navigation_capture",
+                "response count",
+                "demand_capture; owned",
+                "activity or dedicated source",
+            ],
+            [
+                "residual Paid Search incrementality",
+                "model output",
+                "treatment result",
+                "never a raw upload column",
+            ],
+        ],
         "compact",
     )
     advanced = f"""
@@ -384,7 +1836,35 @@ def build_html() -> str:
       {simple_table(["Word", "Means", "Does not mean"], [["raw", "what the source supplied", "a model-ready wide frame"], ["dictionary", "what a field means and how it is governed", "a licence to infer missing values"], ["canonical", "the explicit transformation boundary", "a silent fill, frequency conversion, or approval"]], "compact")}
     </section>
     """
-    glossary = simple_table(["Term", "Plain-English meaning"], [["activity_id", "Stable identity at market × activity grain."], ["model_input_measure", "Raw column selected for the model."], ["model_input_column", "Destination column after activity pivot."], ["outcome_id", "Stable outcome-definition identity."], ["variable_id", "Stable context-variable identity."], ["native frequency", "Frequency the source actually uses."], ["pooling_group_id", "Optional comparison identity, not a pooling instruction."], ["cap", "A budget/delivery ceiling, not realised spend."], ["missing", "No usable observed value; not the same as zero."], ["maturity rule", "When an outcome period is complete enough to use."], ["RAG", "Red/amber/green status with written consequences."], ["source version", "Version of the file or upstream source used."], ["residual incrementality", "A model output after the governed pathway treatment."], ["evidence status", "Strength/readiness of evidence; not reporting approval."]], "compact")
+    glossary = simple_table(
+        ["Term", "Plain-English meaning"],
+        [
+            ["activity_id", "Stable identity at market × activity grain."],
+            ["model_input_measure", "Raw column selected for the model."],
+            ["model_input_column", "Destination column after activity pivot."],
+            ["outcome_id", "Stable outcome-definition identity."],
+            ["variable_id", "Stable context-variable identity."],
+            ["native frequency", "Frequency the source actually uses."],
+            [
+                "pooling_group_id",
+                "Optional comparison identity, not a pooling instruction.",
+            ],
+            ["cap", "A budget/delivery ceiling, not realised spend."],
+            ["missing", "No usable observed value; not the same as zero."],
+            ["maturity rule", "When an outcome period is complete enough to use."],
+            ["RAG", "Red/amber/green status with written consequences."],
+            ["source version", "Version of the file or upstream source used."],
+            [
+                "residual incrementality",
+                "A model output after the governed pathway treatment.",
+            ],
+            [
+                "evidence status",
+                "Strength/readiness of evidence; not reporting approval.",
+            ],
+        ],
+        "compact",
+    )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Ancestry MMM Data Upload Guide</title>
 <style>
@@ -400,13 +1880,41 @@ def clean_token_formula(cell_ref: str) -> str:
     raw = f"LOWER(TRIM({cell_ref}))"
     expression = raw
     replacements = [
-        " ", "!", "#", "$", "%", "&", "'", "(", ")", "*", "+", ",",
-        "-", ".", "/", ":", ";", "<", "=", ">", "?", "@", "[", "\\",
-        "]", "^", "`", "{", "|", "}", "~",
+        " ",
+        "!",
+        "#",
+        "$",
+        "%",
+        "&",
+        "'",
+        "(",
+        ")",
+        "*",
+        "+",
+        ",",
+        "-",
+        ".",
+        "/",
+        ":",
+        ";",
+        "<",
+        "=",
+        ">",
+        "?",
+        "@",
+        "[",
+        "\\",
+        "]",
+        "^",
+        "`",
+        "{",
+        "|",
+        "}",
+        "~",
     ]
     for character in replacements:
         expression = f'SUBSTITUTE({expression},"{character}","_")'
-    for character in (chr(0x2013), chr(0x2014), chr(0x2019), chr(0x201c), chr(0x201d)):
+    for character in (chr(0x2013), chr(0x2014), chr(0x2019), chr(0x201C), chr(0x201D)):
         expression = f'SUBSTITUTE({expression},"{character}","_")'
     expression = f'SUBSTITUTE({expression},CHAR(9),"_")'
     expression = f'SUBSTITUTE({expression},CHAR(160),"_")'
@@ -429,7 +1937,9 @@ def trim_token_formula(collapsed_cell: str) -> str:
     )
 
 
-def add_hidden_token_columns(ws, input_columns: list[str], rows: range, start_col: int = 12) -> list[str]:
+def add_hidden_token_columns(
+    ws, input_columns: list[str], rows: range, start_col: int = 12
+) -> list[str]:
     """Add staged classic-function helper formulas outside the visible table."""
     token_columns = []
     for offset, input_col in enumerate(input_columns):
@@ -441,9 +1951,15 @@ def add_hidden_token_columns(ws, input_columns: list[str], rows: range, start_co
         ws.cell(7, start_col + offset * 3 + 1).value = f"_{input_col}_collapsed"
         ws.cell(7, start_col + offset * 3 + 2).value = f"_{input_col}_token"
         for row in rows:
-            ws.cell(row, start_col + offset * 3).value = f'={clean_token_formula(f"{input_col}{row}")}'
-            ws.cell(row, start_col + offset * 3 + 1).value = collapse_token_formula(f"{clean_col}{row}")
-            ws.cell(row, start_col + offset * 3 + 2).value = trim_token_formula(f"{collapsed_col}{row}")
+            ws.cell(
+                row, start_col + offset * 3
+            ).value = f"={clean_token_formula(f'{input_col}{row}')}"
+            ws.cell(row, start_col + offset * 3 + 1).value = collapse_token_formula(
+                f"{clean_col}{row}"
+            )
+            ws.cell(row, start_col + offset * 3 + 2).value = trim_token_formula(
+                f"{collapsed_col}{row}"
+            )
         for helper_col in (clean_col, collapsed_col, token_col):
             ws.column_dimensions[helper_col].hidden = True
             ws.column_dimensions[helper_col].width = 2
@@ -488,14 +2004,42 @@ def set_title(ws, title: str, subtitle: str, purpose: str) -> None:
     ws.merge_cells("A4:F4")
 
 
-def add_rag_reference(wb: Workbook, rows: list[dict[str, str]], id_fields: dict[str, str]) -> None:
+def add_rag_reference(
+    wb: Workbook, rows: list[dict[str, str]], id_fields: dict[str, str]
+) -> None:
     ws = wb.create_sheet("Reference")
-    ws.append(["Dictionary field", "Meaning", "RAG status", "Enter/select value", "Used in suggested ID?", "Why or not part of ID", "Column must exist?", "Value must be filled in?", "Allowed values / format", "Can be blank when..."])
+    ws.append(
+        [
+            "Dictionary field",
+            "Meaning",
+            "RAG status",
+            "Enter/select value",
+            "Used in suggested ID?",
+            "Why or not part of ID",
+            "Column must exist?",
+            "Value must be filled in?",
+            "Allowed values / format",
+            "Can be blank when...",
+        ]
+    )
     for row in rows:
         field = row["Field name"]
         use = id_fields.get(field, "no")
         why = id_fields.get(f"{field}__why", "Dictionary meaning, not stable identity")
-        ws.append([field, row["Plain-English meaning"], row["Status"], "", use, why, row["Column must exist?"], row["Value must be filled in?"], row["Allowed values / format"], row["Can be blank when..."]])
+        ws.append(
+            [
+                field,
+                row["Plain-English meaning"],
+                row["Status"],
+                "",
+                use,
+                why,
+                row["Column must exist?"],
+                row["Value must be filled in?"],
+                row["Allowed values / format"],
+                row["Can be blank when..."],
+            ]
+        )
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:J{ws.max_row}"
     ws.sheet_view.showGridLines = False
@@ -503,29 +2047,59 @@ def add_rag_reference(wb: Workbook, rows: list[dict[str, str]], id_fields: dict[
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="12304A")
         cell.alignment = Alignment(wrap_text=True, vertical="top")
-    for col, width in {"A":28,"B":42,"C":25,"D":28,"E":23,"F":48,"G":18,"H":25,"I":48,"J":40}.items():
+    for col, width in {
+        "A": 28,
+        "B": 42,
+        "C": 25,
+        "D": 28,
+        "E": 23,
+        "F": 48,
+        "G": 18,
+        "H": 25,
+        "I": 48,
+        "J": 40,
+    }.items():
         ws.column_dimensions[col].width = width
     for i in range(2, ws.max_row + 1):
         status = str(ws.cell(i, 3).value)
-        ws.cell(i, 3).fill = PatternFill("solid", fgColor="FCE4E4" if status.startswith("RED") else "FFF1CC" if status.startswith("AMBER") else "E3F4E6")
+        ws.cell(i, 3).fill = PatternFill(
+            "solid",
+            fgColor="FCE4E4"
+            if status.startswith("RED")
+            else "FFF1CC"
+            if status.startswith("AMBER")
+            else "E3F4E6",
+        )
         for c in range(1, 11):
             ws.cell(i, c).alignment = Alignment(wrap_text=True, vertical="top")
     notes = wb.create_sheet("Read me")
     notes["A1"] = "How to use this builder"
     notes["A1"].font = Font(size=16, bold=True, color="12304A")
     notes["A3"] = "1. Complete the editable cells in the Candidate rows sheet."
-    notes["A4"] = "2. Use the suggested ID first. It is based on meaningful identity fields, not every dictionary field."
-    notes["A5"] = "3. If the warning says collision, add the next meaningful AMBER identity field. Do not add a random number."
-    notes["A6"] = "4. Use Manual override ID only when the governed ID already exists. Final ID uses the override when present."
-    notes["A7"] = "5. Excel calculates formulas when the file opens. No VBA is used. The formulas use broadly compatible Excel text and conditional functions."
-    notes["A9"] = "Important: an ID is not a business definition. Keep the dictionary fields complete even when a field is not part of the ID."
+    notes["A4"] = (
+        "2. Use the suggested ID first. It is based on meaningful identity fields, not every dictionary field."
+    )
+    notes["A5"] = (
+        "3. If the warning says collision, add the next meaningful AMBER identity field. Do not add a random number."
+    )
+    notes["A6"] = (
+        "4. Use Manual override ID only when the governed ID already exists. Final ID uses the override when present."
+    )
+    notes["A7"] = (
+        "5. Excel calculates formulas when the file opens. No VBA is used. The formulas use broadly compatible Excel text and conditional functions."
+    )
+    notes["A9"] = (
+        "Important: an ID is not a business definition. Keep the dictionary fields complete even when a field is not part of the ID."
+    )
     notes.column_dimensions["A"].width = 120
     for row in range(3, 10):
         notes[f"A{row}"].alignment = Alignment(wrap_text=True, vertical="top")
     notes.sheet_view.showGridLines = False
 
 
-def add_candidate_table(ws, headers: list[str], rows: list[list[object]], tab_name: str = "Candidates") -> None:
+def add_candidate_table(
+    ws, headers: list[str], rows: list[list[object]], tab_name: str = "Candidates"
+) -> None:
     while ws.max_row < 6:
         ws.cell(ws.max_row + 1, 1).value = ""
     ws.append(headers)
@@ -534,7 +2108,9 @@ def add_candidate_table(ws, headers: list[str], rows: list[list[object]], tab_na
     end_col = chr(64 + len(headers))
     ref = f"A7:{end_col}{ws.max_row}"
     tab = Table(displayName=tab_name, ref=ref)
-    tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True, showColumnStripes=False)
+    tab.tableStyleInfo = TableStyleInfo(
+        name="TableStyleMedium2", showRowStripes=True, showColumnStripes=False
+    )
     ws.add_table(tab)
     for cell in ws[7]:
         cell.font = Font(bold=True, color="FFFFFF")
@@ -544,7 +2120,9 @@ def add_candidate_table(ws, headers: list[str], rows: list[list[object]], tab_na
 
 
 def add_dropdown(ws, cell_range: str, values: list[str], title: str) -> None:
-    dv = DataValidation(type="list", formula1='"' + ",".join(values) + '"', allow_blank=True)
+    dv = DataValidation(
+        type="list", formula1='"' + ",".join(values) + '"', allow_blank=True
+    )
     dv.error = "Choose a value from the approved list or leave it blank when the field is optional."
     dv.errorTitle = title
     dv.prompt = "Select an approved value."
@@ -572,42 +2150,212 @@ def build_outcome_workbook(path: Path) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "ID Builder"
-    set_title(ws, "Outcome ID Builder", "Formula-driven, no VBA · v2 outcome dictionary companion", "Enter one candidate definition per row. The ID is an identity aid; the dictionary remains the source of meaning.")
-    headers = ["product", "metric_key", "segment_dimension", "segment", "outcome_id (existing)", "Manual override ID", "Suggested ID", "Final ID", "Collision / completeness warning", "Dictionary row preview"]
+    set_title(
+        ws,
+        "Outcome ID Builder",
+        "Formula-driven, no VBA · v2 outcome dictionary companion",
+        "Enter one candidate definition per row. The ID is an identity aid; the dictionary remains the source of meaning.",
+    )
+    headers = [
+        "product",
+        "metric_key",
+        "segment_dimension",
+        "segment",
+        "outcome_id (existing)",
+        "Manual override ID",
+        "Suggested ID",
+        "Final ID",
+        "Collision / completeness warning",
+        "Dictionary row preview",
+    ]
     rows = [
-        ["Family History", "fh_gsa", "fh_customer_segment", "New", "", "", "", "", "", ""],
-        ["Family History", "fh_gsa", "fh_customer_segment", "DNA_CrossSell", "", "", "", "", "", ""],
-        ["Family History", "fh_gsa", "fh_customer_segment", "Winback", "", "", "", "", "", ""],
-        ["DNA", "dna_kit_sale", "dna_customer_relationship", "New Customer", "", "", "", "", "", ""],
-        ["DNA", "dna_kit_sale", "dna_customer_relationship", "Existing FH Customer", "", "", "", "", ""],
+        [
+            "Family History",
+            "fh_gsa",
+            "fh_customer_segment",
+            "New",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
+        [
+            "Family History",
+            "fh_gsa",
+            "fh_customer_segment",
+            "DNA_CrossSell",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
+        [
+            "Family History",
+            "fh_gsa",
+            "fh_customer_segment",
+            "Winback",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
+        [
+            "DNA",
+            "dna_kit_sale",
+            "dna_customer_relationship",
+            "New Customer",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
+        [
+            "DNA",
+            "dna_kit_sale",
+            "dna_customer_relationship",
+            "Existing FH Customer",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
         ["", "", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", "", ""],
     ]
     add_candidate_table(ws, headers, rows, "OutcomeCandidates")
-    token_columns = add_hidden_token_columns(ws, ["A", "B", "D"], range(8, 8 + len(rows)))
+    token_columns = add_hidden_token_columns(
+        ws, ["A", "B", "D"], range(8, 8 + len(rows))
+    )
     for r in range(8, 8 + len(rows)):
         ws.cell(r, 7).value = join_token_columns(token_columns, r)
-        ws.cell(r, 8).value = f'=IF(TRIM(F{r})<>F{r},TRIM(F{r}),IF(TRIM(F{r})<>"",F{r},G{r}))'
-        ws.cell(r, 9).value = f'=IF(H{r}="","RED: complete product, metric_key, and segment before finalising",IF(COUNTIF($H$8:$H$25,H{r})>1,"AMBER: duplicate final ID — add a meaningful identity distinction",IF(E{r}<>"",IF(E{r}<>H{r},"AMBER: existing ID differs from built ID — review dictionary lineage","OK: existing ID matches"),"OK: unique in this builder")))'
-        ws.cell(r, 10).value = f'=IF(H{r}="","", "outcome_id="&H{r}&" | product="&A{r}&" | metric_key="&B{r}&" | segment_dimension="&C{r}&" | segment="&D{r})'
-    common_candidate_style(ws, {"A":20,"B":22,"C":26,"D":24,"E":25,"F":24,"G":30,"H":30,"I":55,"J":105})
+        ws.cell(
+            r, 8
+        ).value = f'=IF(TRIM(F{r})<>F{r},TRIM(F{r}),IF(TRIM(F{r})<>"",F{r},G{r}))'
+        ws.cell(
+            r, 9
+        ).value = f'=IF(H{r}="","RED: complete product, metric_key, and segment before finalising",IF(COUNTIF($H$8:$H$25,H{r})>1,"AMBER: duplicate final ID — add a meaningful identity distinction",IF(E{r}<>"",IF(E{r}<>H{r},"AMBER: existing ID differs from built ID — review dictionary lineage","OK: existing ID matches"),"OK: unique in this builder")))'
+        ws.cell(
+            r, 10
+        ).value = f'=IF(H{r}="","", "outcome_id="&H{r}&" | product="&A{r}&" | metric_key="&B{r}&" | segment_dimension="&C{r}&" | segment="&D{r})'
+    common_candidate_style(
+        ws,
+        {
+            "A": 20,
+            "B": 22,
+            "C": 26,
+            "D": 24,
+            "E": 25,
+            "F": 24,
+            "G": 30,
+            "H": 30,
+            "I": 55,
+            "J": 105,
+        },
+    )
     add_dropdown(ws, "A8:A25", ["Family History", "DNA"], "Product")
-    add_dropdown(ws, "B8:B25", ["fh_gsa", "fh_signup", "fh_net_billthrough_count", "fh_net_billthrough_rate", "dna_kit_sale", "custom"], "Metric key")
-    add_dropdown(ws, "C8:C25", ["fh_customer_segment", "dna_customer_relationship", "dna_purchase_recipient", "combined", "custom", "unspecified"], "Segment dimension")
+    add_dropdown(
+        ws,
+        "B8:B25",
+        [
+            "fh_gsa",
+            "fh_signup",
+            "fh_net_billthrough_count",
+            "fh_net_billthrough_rate",
+            "dna_kit_sale",
+            "custom",
+        ],
+        "Metric key",
+    )
+    add_dropdown(
+        ws,
+        "C8:C25",
+        [
+            "fh_customer_segment",
+            "dna_customer_relationship",
+            "dna_purchase_recipient",
+            "combined",
+            "custom",
+            "unspecified",
+        ],
+        "Segment dimension",
+    )
     for cell in ws["I"][7:]:
         cell.alignment = Alignment(wrap_text=True, vertical="top")
-    ws.conditional_formatting.add("I8:I25", FormulaRule(formula=['ISNUMBER(SEARCH("RED",I8))'], fill=PatternFill("solid", fgColor="FCE4E4")))
-    ws.conditional_formatting.add("I8:I25", FormulaRule(formula=['ISNUMBER(SEARCH("AMBER",I8))'], fill=PatternFill("solid", fgColor="FFF1CC")))
-    ws.conditional_formatting.add("I8:I25", FormulaRule(formula=['LEFT(I8,2)="OK"'], fill=PatternFill("solid", fgColor="E3F4E6")))
-    add_rag_reference(wb, OUTCOME_RAG, {"product": "yes", "metric_key": "yes", "segment_dimension": "only if needed", "segment": "yes", "product__why": "Defines a stable product axis.", "metric_key__why": "Defines the metric identity.", "segment_dimension__why": "Use when the same segment value can mean different things.", "segment__why": "Defines the segment identity."})
+    ws.conditional_formatting.add(
+        "I8:I25",
+        FormulaRule(
+            formula=['ISNUMBER(SEARCH("RED",I8))'],
+            fill=PatternFill("solid", fgColor="FCE4E4"),
+        ),
+    )
+    ws.conditional_formatting.add(
+        "I8:I25",
+        FormulaRule(
+            formula=['ISNUMBER(SEARCH("AMBER",I8))'],
+            fill=PatternFill("solid", fgColor="FFF1CC"),
+        ),
+    )
+    ws.conditional_formatting.add(
+        "I8:I25",
+        FormulaRule(
+            formula=['LEFT(I8,2)="OK"'], fill=PatternFill("solid", fgColor="E3F4E6")
+        ),
+    )
+    add_rag_reference(
+        wb,
+        OUTCOME_RAG,
+        {
+            "product": "yes",
+            "metric_key": "yes",
+            "segment_dimension": "only if needed",
+            "segment": "yes",
+            "product__why": "Defines a stable product axis.",
+            "metric_key__why": "Defines the metric identity.",
+            "segment_dimension__why": "Use when the same segment value can mean different things.",
+            "segment__why": "Defines the segment identity.",
+        },
+    )
     ex = wb.create_sheet("Examples")
     ex.append(["Example", "Outcome identity", "Why"])
-    ex.append(["Good", "fh_gsa_new", "Stable product + metric + segment identity; meaning is still in the dictionary."])
-    ex.append(["Good", "dna_kit_sale_new_customer", "DNA relationship partition is explicit when source supports it."])
+    ex.append(
+        [
+            "Good",
+            "fh_gsa_new",
+            "Stable product + metric + segment identity; meaning is still in the dictionary.",
+        ]
+    )
+    ex.append(
+        [
+            "Good",
+            "dna_kit_sale_new_customer",
+            "DNA relationship partition is explicit when source supports it.",
+        ]
+    )
     ex.append(["Invalid", "gsa", "Too little identity; product and segment collide."])
-    ex.append(["Invalid", "fh_gsa_2026_01_05_uk", "Time and market are row/source scope, not a new outcome definition."])
-    ex.append(["Review", "fh_gsa_dna_cross_sell", "Use the approved project spelling/lineage; do not infer from a friendly label."])
+    ex.append(
+        [
+            "Invalid",
+            "fh_gsa_2026_01_05_uk",
+            "Time and market are row/source scope, not a new outcome definition.",
+        ]
+    )
+    ex.append(
+        [
+            "Review",
+            "fh_gsa_dna_cross_sell",
+            "Use the approved project spelling/lineage; do not infer from a friendly label.",
+        ]
+    )
     ex.column_dimensions["A"].width = 16
     ex.column_dimensions["B"].width = 38
     ex.column_dimensions["C"].width = 95
@@ -624,39 +2372,196 @@ def build_activity_workbook(path: Path) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "ID Builder"
-    set_title(ws, "Activity ID Builder", "Formula-driven, no VBA · progressive collision checks", "Use the smallest stable identity that distinguishes an activity. Keep measures, units, and descriptive fields in the dictionary.")
-    headers = ["channel", "platform", "campaign_type", "search_platform", "search_intent_group_id", "activity_id (existing)", "Manual override ID", "Suggested ID", "Final ID", "Collision / completeness warning", "Dictionary row preview"]
+    set_title(
+        ws,
+        "Activity ID Builder",
+        "Formula-driven, no VBA · progressive collision checks",
+        "Use the smallest stable identity that distinguishes an activity. Keep measures, units, and descriptive fields in the dictionary.",
+    )
+    headers = [
+        "channel",
+        "platform",
+        "campaign_type",
+        "search_platform",
+        "search_intent_group_id",
+        "activity_id (existing)",
+        "Manual override ID",
+        "Suggested ID",
+        "Final ID",
+        "Collision / completeness warning",
+        "Dictionary row preview",
+    ]
     rows = [
-        ["Paid Search", "Google", "Brand", "google", "brand_search", "", "", "", "", "", ""],
-        ["Paid Search", "Bing", "Brand", "bing", "brand_search", "", "", "", "", "", ""],
-        ["Paid Search", "Google", "Non-Brand", "google", "non_brand_search", "", "", "", "", "", ""],
-        ["Paid Search", "Bing", "Non-Brand", "bing", "non_brand_search", "", "", "", "", "", ""],
+        [
+            "Paid Search",
+            "Google",
+            "Brand",
+            "google",
+            "brand_search",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
+        [
+            "Paid Search",
+            "Bing",
+            "Brand",
+            "bing",
+            "brand_search",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
+        [
+            "Paid Search",
+            "Google",
+            "Non-Brand",
+            "google",
+            "non_brand_search",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
+        [
+            "Paid Search",
+            "Bing",
+            "Non-Brand",
+            "bing",
+            "non_brand_search",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
         ["TV", "Example broadcaster", "Brand", "", "", "", "", "", "", "", ""],
         ["SEO", "Google Search Console", "Visibility", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", "", "", ""],
     ]
     add_candidate_table(ws, headers, rows, "ActivityCandidates")
-    token_columns = add_hidden_token_columns(ws, ["A", "B", "C", "D", "E"], range(8, 8 + len(rows)))
+    token_columns = add_hidden_token_columns(
+        ws, ["A", "B", "C", "D", "E"], range(8, 8 + len(rows))
+    )
     for r in range(8, 8 + len(rows)):
         ws.cell(r, 8).value = join_token_columns(token_columns, r)
-        ws.cell(r, 9).value = f'=IF(TRIM(G{r})<>G{r},TRIM(G{r}),IF(TRIM(G{r})<>"",G{r},H{r}))'
-        ws.cell(r, 10).value = f'=IF(I{r}="","RED: complete channel and a meaningful activity distinction",IF(COUNTIF($I$8:$I$25,I{r})>1,"AMBER: duplicate final ID — add the next meaningful field; do not add a random number",IF(F{r}<>"",IF(F{r}<>I{r},"AMBER: existing ID differs from built ID — review lineage","OK: existing ID matches"),"OK: unique in this builder")))'
-        ws.cell(r, 11).value = f'=IF(I{r}="","", "activity_id="&I{r}&" | channel="&A{r}&" | platform="&B{r}&" | campaign_type="&C{r}&" | search_platform="&D{r}&" | search_intent_group_id="&E{r})'
-    common_candidate_style(ws, {"A":20,"B":25,"C":20,"D":20,"E":26,"F":29,"G":24,"H":32,"I":32,"J":65,"K":125})
+        ws.cell(
+            r, 9
+        ).value = f'=IF(TRIM(G{r})<>G{r},TRIM(G{r}),IF(TRIM(G{r})<>"",G{r},H{r}))'
+        ws.cell(
+            r, 10
+        ).value = f'=IF(I{r}="","RED: complete channel and a meaningful activity distinction",IF(COUNTIF($I$8:$I$25,I{r})>1,"AMBER: duplicate final ID — add the next meaningful field; do not add a random number",IF(F{r}<>"",IF(F{r}<>I{r},"AMBER: existing ID differs from built ID — review lineage","OK: existing ID matches"),"OK: unique in this builder")))'
+        ws.cell(
+            r, 11
+        ).value = f'=IF(I{r}="","", "activity_id="&I{r}&" | channel="&A{r}&" | platform="&B{r}&" | campaign_type="&C{r}&" | search_platform="&D{r}&" | search_intent_group_id="&E{r})'
+    common_candidate_style(
+        ws,
+        {
+            "A": 20,
+            "B": 25,
+            "C": 20,
+            "D": 20,
+            "E": 26,
+            "F": 29,
+            "G": 24,
+            "H": 32,
+            "I": 32,
+            "J": 65,
+            "K": 125,
+        },
+    )
     add_dropdown(ws, "D8:D25", ["google", "bing"], "Search platform")
-    add_dropdown(ws, "E8:E25", ["brand_search", "non_brand_search"], "Search intent group")
-    ws.conditional_formatting.add("J8:J25", FormulaRule(formula=['ISNUMBER(SEARCH("RED",J8))'], fill=PatternFill("solid", fgColor="FCE4E4")))
-    ws.conditional_formatting.add("J8:J25", FormulaRule(formula=['ISNUMBER(SEARCH("AMBER",J8))'], fill=PatternFill("solid", fgColor="FFF1CC")))
-    ws.conditional_formatting.add("J8:J25", FormulaRule(formula=['LEFT(J8,2)="OK"'], fill=PatternFill("solid", fgColor="E3F4E6")))
-    add_rag_reference(wb, ACTIVITY_RAG, {"channel": "yes", "platform": "only if needed", "campaign_type": "only if needed", "search_platform": "only if needed", "search_intent_group_id": "only if needed", "channel__why": "Starts the stable activity identity.", "platform__why": "Distinguishes platforms when channel alone collides.", "campaign_type__why": "Adds the next meaningful distinction when needed.", "search_platform__why": "Separates Google and Bing Search leaves.", "search_intent_group_id__why": "Separates Brand and Non-Brand Search leaves."})
+    add_dropdown(
+        ws, "E8:E25", ["brand_search", "non_brand_search"], "Search intent group"
+    )
+    ws.conditional_formatting.add(
+        "J8:J25",
+        FormulaRule(
+            formula=['ISNUMBER(SEARCH("RED",J8))'],
+            fill=PatternFill("solid", fgColor="FCE4E4"),
+        ),
+    )
+    ws.conditional_formatting.add(
+        "J8:J25",
+        FormulaRule(
+            formula=['ISNUMBER(SEARCH("AMBER",J8))'],
+            fill=PatternFill("solid", fgColor="FFF1CC"),
+        ),
+    )
+    ws.conditional_formatting.add(
+        "J8:J25",
+        FormulaRule(
+            formula=['LEFT(J8,2)="OK"'], fill=PatternFill("solid", fgColor="E3F4E6")
+        ),
+    )
+    add_rag_reference(
+        wb,
+        ACTIVITY_RAG,
+        {
+            "channel": "yes",
+            "platform": "only if needed",
+            "campaign_type": "only if needed",
+            "search_platform": "only if needed",
+            "search_intent_group_id": "only if needed",
+            "channel__why": "Starts the stable activity identity.",
+            "platform__why": "Distinguishes platforms when channel alone collides.",
+            "campaign_type__why": "Adds the next meaningful distinction when needed.",
+            "search_platform__why": "Separates Google and Bing Search leaves.",
+            "search_intent_group_id__why": "Separates Brand and Non-Brand Search leaves.",
+        },
+    )
     ex = wb.create_sheet("Examples")
     ex.append(["Check", "Good", "Invalid / risky", "Reason"])
-    ex.append(["Raw vs model-ready", "model_input_measure=spend; model_input_column=uk_paid_search_google_brand", "model_input_measure=uk_paid_search_google_brand", "The first is a raw source header; the second is a destination."])
-    ex.append(["Search leaves", "Google Brand, Bing Brand, Google Non-Brand, Bing Non-Brand", "One generic Brand Search activity", "Parent totals are calculated from explicit leaves."])
-    ex.append(["Identity", "paid_search_google_brand", "paid_search_2026_01_05_uk_12345", "Do not encode time or random numbers into stable identity."])
-    ex.append(["Capacity", "paid_search_cap as separate governed cap", "cap copied into spend", "A cap is a constraint, not realised spend."])
-    ex.append(["Measures", "spend + clicks + impressions retained; one selected input", "all measures silently summed", "Raw measures have different meanings and units."])
+    ex.append(
+        [
+            "Raw vs model-ready",
+            "model_input_measure=spend; model_input_column=uk_paid_search_google_brand",
+            "model_input_measure=uk_paid_search_google_brand",
+            "The first is a raw source header; the second is a destination.",
+        ]
+    )
+    ex.append(
+        [
+            "Search leaves",
+            "Google Brand, Bing Brand, Google Non-Brand, Bing Non-Brand",
+            "One generic Brand Search activity",
+            "Parent totals are calculated from explicit leaves.",
+        ]
+    )
+    ex.append(
+        [
+            "Identity",
+            "paid_search_google_brand",
+            "paid_search_2026_01_05_uk_12345",
+            "Do not encode time or random numbers into stable identity.",
+        ]
+    )
+    ex.append(
+        [
+            "Capacity",
+            "paid_search_cap as separate governed cap",
+            "cap copied into spend",
+            "A cap is a constraint, not realised spend.",
+        ]
+    )
+    ex.append(
+        [
+            "Measures",
+            "spend + clicks + impressions retained; one selected input",
+            "all measures silently summed",
+            "Raw measures have different meanings and units.",
+        ]
+    )
     ex.column_dimensions["A"].width = 22
     ex.column_dimensions["B"].width = 52
     ex.column_dimensions["C"].width = 52
@@ -674,29 +2579,126 @@ def build_context_workbook(path: Path) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "ID Builder"
-    set_title(ws, "Context Variable ID Builder", "Formula-driven, no VBA · stable variable identity", "Build a stable variable ID from meaning. Do not encode source, frequency, unit, or effective dates unless they represent a genuinely different variable.")
-    headers = ["variable_class", "variable name / concept", "variable_id (existing)", "Manual override ID", "Suggested ID", "Final ID", "Collision / completeness warning", "Dictionary row preview"]
-    rows = [["rate_index", "UK CPI", "", "", "", "", "", ""], ["flow_count", "UK unemployment claims", "", "", "", "", ""], ["stock_level", "UK active subscribers", "", "", "", "", ""], ["survey_measurement", "Brand consideration", "", "", "", "", ""], ["event_flag", "Black Friday", "", "", "", "", ""], ["", "", "", "", "", "", ""], ["", "", "", "", "", "", ""], ["", "", "", "", "", "", ""]]
+    set_title(
+        ws,
+        "Context Variable ID Builder",
+        "Formula-driven, no VBA · stable variable identity",
+        "Build a stable variable ID from meaning. Do not encode source, frequency, unit, or effective dates unless they represent a genuinely different variable.",
+    )
+    headers = [
+        "variable_class",
+        "variable name / concept",
+        "variable_id (existing)",
+        "Manual override ID",
+        "Suggested ID",
+        "Final ID",
+        "Collision / completeness warning",
+        "Dictionary row preview",
+    ]
+    rows = [
+        ["rate_index", "UK CPI", "", "", "", "", "", ""],
+        ["flow_count", "UK unemployment claims", "", "", "", "", ""],
+        ["stock_level", "UK active subscribers", "", "", "", "", ""],
+        ["survey_measurement", "Brand consideration", "", "", "", "", ""],
+        ["event_flag", "Black Friday", "", "", "", "", ""],
+        ["", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", ""],
+    ]
     add_candidate_table(ws, headers, rows, "ContextCandidates")
     token_columns = add_hidden_token_columns(ws, ["A", "B"], range(8, 8 + len(rows)))
     for r in range(8, 8 + len(rows)):
         ws.cell(r, 5).value = join_token_columns(token_columns, r)
-        ws.cell(r, 6).value = f'=IF(TRIM(D{r})<>D{r},TRIM(D{r}),IF(TRIM(D{r})<>"",D{r},E{r}))'
-        ws.cell(r, 7).value = f'=IF(F{r}="","RED: complete variable class and concept",IF(COUNTIF($F$8:$F$25,F{r})>1,"AMBER: duplicate final ID — distinguish the actual variable, not its source frequency",IF(C{r}<>"",IF(C{r}<>F{r},"AMBER: existing ID differs from built ID — review lineage","OK: existing ID matches"),"OK: unique in this builder")))'
-        ws.cell(r, 8).value = f'=IF(F{r}="","", "variable_id="&F{r}&" | variable_class="&A{r}&" | concept="&B{r})'
-    common_candidate_style(ws, {"A":24,"B":34,"C":27,"D":24,"E":32,"F":32,"G":70,"H":110})
-    add_dropdown(ws, "A8:A25", ["flow_count", "stock_level", "rate_index", "survey_measurement", "event_flag"], "Variable class")
-    ws.conditional_formatting.add("G8:G25", FormulaRule(formula=['ISNUMBER(SEARCH("RED",G8))'], fill=PatternFill("solid", fgColor="FCE4E4")))
-    ws.conditional_formatting.add("G8:G25", FormulaRule(formula=['ISNUMBER(SEARCH("AMBER",G8))'], fill=PatternFill("solid", fgColor="FFF1CC")))
-    ws.conditional_formatting.add("G8:G25", FormulaRule(formula=['LEFT(G8,2)="OK"'], fill=PatternFill("solid", fgColor="E3F4E6")))
-    add_rag_reference(wb, CONTEXT_RAG, {"variable_class": "yes", "variable_id": "yes", "variable_class__why": "Keeps different kinds of variable separate.", "variable_id__why": "Stable identity used by the source dictionary and observations."})
+        ws.cell(
+            r, 6
+        ).value = f'=IF(TRIM(D{r})<>D{r},TRIM(D{r}),IF(TRIM(D{r})<>"",D{r},E{r}))'
+        ws.cell(
+            r, 7
+        ).value = f'=IF(F{r}="","RED: complete variable class and concept",IF(COUNTIF($F$8:$F$25,F{r})>1,"AMBER: duplicate final ID — distinguish the actual variable, not its source frequency",IF(C{r}<>"",IF(C{r}<>F{r},"AMBER: existing ID differs from built ID — review lineage","OK: existing ID matches"),"OK: unique in this builder")))'
+        ws.cell(
+            r, 8
+        ).value = f'=IF(F{r}="","", "variable_id="&F{r}&" | variable_class="&A{r}&" | concept="&B{r})'
+    common_candidate_style(
+        ws, {"A": 24, "B": 34, "C": 27, "D": 24, "E": 32, "F": 32, "G": 70, "H": 110}
+    )
+    add_dropdown(
+        ws,
+        "A8:A25",
+        ["flow_count", "stock_level", "rate_index", "survey_measurement", "event_flag"],
+        "Variable class",
+    )
+    ws.conditional_formatting.add(
+        "G8:G25",
+        FormulaRule(
+            formula=['ISNUMBER(SEARCH("RED",G8))'],
+            fill=PatternFill("solid", fgColor="FCE4E4"),
+        ),
+    )
+    ws.conditional_formatting.add(
+        "G8:G25",
+        FormulaRule(
+            formula=['ISNUMBER(SEARCH("AMBER",G8))'],
+            fill=PatternFill("solid", fgColor="FFF1CC"),
+        ),
+    )
+    ws.conditional_formatting.add(
+        "G8:G25",
+        FormulaRule(
+            formula=['LEFT(G8,2)="OK"'], fill=PatternFill("solid", fgColor="E3F4E6")
+        ),
+    )
+    add_rag_reference(
+        wb,
+        CONTEXT_RAG,
+        {
+            "variable_class": "yes",
+            "variable_id": "yes",
+            "variable_class__why": "Keeps different kinds of variable separate.",
+            "variable_id__why": "Stable identity used by the source dictionary and observations.",
+        },
+    )
     ex = wb.create_sheet("Examples")
     ex.append(["Check", "Good", "Invalid / risky", "Reason"])
-    ex.append(["Stable ID", "rate_index_uk_cpi", "rate_index_uk_cpi_monthly_gbp_2026", "Frequency, unit, and dates belong in the dictionary unless they change the variable itself."])
-    ex.append(["Frequency", "native_frequency=monthly", "monthly value copied to weekly rows", "Preserve source frequency and align later by a governed method."])
-    ex.append(["Missingness", "unavailable_source", "unavailable changed to 0", "Missingness is not observed zero."])
-    ex.append(["Role", "CPI = exogenous_forecastable_control", "branded-search demand = exogenous control", "An endogenous mediator must be model-generated."])
-    ex.append(["Event", "event_id + factual dates", "event flag inferred from a campaign name", "Named-event treatment is a separate governed path."])
+    ex.append(
+        [
+            "Stable ID",
+            "rate_index_uk_cpi",
+            "rate_index_uk_cpi_monthly_gbp_2026",
+            "Frequency, unit, and dates belong in the dictionary unless they change the variable itself.",
+        ]
+    )
+    ex.append(
+        [
+            "Frequency",
+            "native_frequency=monthly",
+            "monthly value copied to weekly rows",
+            "Preserve source frequency and align later by a governed method.",
+        ]
+    )
+    ex.append(
+        [
+            "Missingness",
+            "unavailable_source",
+            "unavailable changed to 0",
+            "Missingness is not observed zero.",
+        ]
+    )
+    ex.append(
+        [
+            "Role",
+            "CPI = exogenous_forecastable_control",
+            "branded-search demand = exogenous control",
+            "An endogenous mediator must be model-generated.",
+        ]
+    )
+    ex.append(
+        [
+            "Event",
+            "event_id + factual dates",
+            "event flag inferred from a campaign name",
+            "Named-event treatment is a separate governed path.",
+        ]
+    )
     ex.column_dimensions["A"].width = 22
     ex.column_dimensions["B"].width = 52
     ex.column_dimensions["C"].width = 52
@@ -786,8 +2788,12 @@ Logical domain does not mean one file. `source_pack_adoption.py` accepts multipl
 
 def main() -> None:
     DOCS.mkdir(exist_ok=True)
-    (DOCS / "data_upload_guide_schema_inventory.md").write_text(build_inventory(), encoding="utf-8")
-    (DOCS / "Ancestry_MMM_Data_Upload_Guide.html").write_text(build_html(), encoding="utf-8")
+    (DOCS / "data_upload_guide_schema_inventory.md").write_text(
+        build_inventory(), encoding="utf-8"
+    )
+    (DOCS / "Ancestry_MMM_Data_Upload_Guide.html").write_text(
+        build_html(), encoding="utf-8"
+    )
     build_outcome_workbook(DOCS / "Ancestry_MMM_Outcome_ID_Builder.xlsx")
     build_activity_workbook(DOCS / "Ancestry_MMM_Activity_ID_Builder.xlsx")
     build_context_workbook(DOCS / "Ancestry_MMM_Context_Variable_ID_Builder.xlsx")

@@ -28,7 +28,9 @@ from ancestry_mmm.core.seo_visibility import SEO_GROUP_BRAND, SEO_GROUP_NON_BRAN
 
 def _guide_module():
     path = Path(__file__).parents[2] / "scripts" / "build_data_upload_guide_assets.py"
-    spec = importlib.util.spec_from_file_location("build_data_upload_guide_assets", path)
+    spec = importlib.util.spec_from_file_location(
+        "build_data_upload_guide_assets", path
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -42,7 +44,13 @@ def guide():
 
 
 def test_variable_class_dropdown_matches_governed_classes(guide):
-    dropdown_values = {"flow_count", "stock_level", "rate_index", "survey_measurement", "event_flag"}
+    dropdown_values = {
+        "flow_count",
+        "stock_level",
+        "rate_index",
+        "survey_measurement",
+        "event_flag",
+    }
     assert dropdown_values == set(VARIABLE_CLASSES)
 
 
@@ -53,7 +61,9 @@ def test_activity_ownership_rag_lists_every_governed_value(guide):
 
 
 def test_planning_eligibility_rag_lists_every_governed_value(guide):
-    row = next(r for r in guide.ACTIVITY_RAG if r["Field name"] == "planning_eligibility")
+    row = next(
+        r for r in guide.ACTIVITY_RAG if r["Field name"] == "planning_eligibility"
+    )
     for value in PLANNING_ELIGIBILITY:
         assert value in row["Allowed values / format"]
 
