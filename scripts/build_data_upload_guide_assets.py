@@ -18,9 +18,100 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter
 
+from ancestry_mmm.core.activities import (
+    ECONOMIC_TREATMENTS,
+    FUNNEL_STAGES,
+    MARKETING_OBJECTIVE_SUGGESTIONS,
+    MODEL_ROLES,
+    OWNERSHIP,
+    PLANNING_ELIGIBILITY,
+)
+from ancestry_mmm.core.coverage import (
+    DOMAIN_ACTIVITY_AND_MEDIA,
+    DOMAIN_CONTEXT_AND_EXTERNAL_FACTORS,
+    VARIABLE_CLASSES,
+)
+from ancestry_mmm.core.outcomes import (
+    KNOWN_PRODUCTS,
+    METRIC_KEY_CUSTOM,
+    METRIC_REGISTRY,
+    OUTCOME_GROUP_AGGREGATIONS,
+    OUTCOME_ROLES,
+    SEGMENT_DIMENSIONS,
+)
+from ancestry_mmm.core.search_intent_taxonomy import (
+    SEARCH_INTENT_GROUP_ID_BRAND,
+    SEARCH_INTENT_GROUP_ID_NON_BRAND,
+    SEARCH_PLATFORMS,
+)
+from ancestry_mmm.data.templates import (
+    OUTCOME_DICTIONARY_V2_COLUMNS,
+    STANDARD_SHEET_SPECS,
+    _ACTIVITY_V2_EXTRA_COLUMNS,
+    _CONTEXT_V2_EXTRA_COLUMNS,
+    _OUTCOME_DEFINITION_OPTIONAL_COLUMNS,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
+
+# --- Dictionary Builder governed contracts ----------------------------------
+#
+# Derived directly from the live schema/core modules (never hand-copied) so
+# the builders cannot silently drift from what the parser actually accepts.
+# See docs/Ancestry_MMM_Upload_Schema_Necessity_Review.md for why each
+# "omitted" field below is left out of the builder rather than asked for.
+
+ACTIVITY_DICTIONARY_BASE_COLUMNS = next(
+    spec.required_columns
+    for spec in STANDARD_SHEET_SPECS[DOMAIN_ACTIVITY_AND_MEDIA]
+    if spec.sheet_name == "activity_dictionary"
+)
+CONTEXT_DICTIONARY_BASE_COLUMNS = next(
+    spec.required_columns
+    for spec in STANDARD_SHEET_SPECS[DOMAIN_CONTEXT_AND_EXTERNAL_FACTORS]
+    if spec.sheet_name == "variable_dictionary"
+)
+
+# Confirmed inert/unenforced today (necessity review) -- omitted from the
+# BUILDER's analyst-facing questions. Outcome's two fields are genuinely
+# optional columns with no bundling requirement, so they are dropped from
+# DICTIONARY_OUTPUT entirely. Activity's five write-only columns and
+# Context's `unit` cannot be safely dropped from DICTIONARY_OUTPUT the same
+# way: `standard_sheet_specs` requires the *entire* v2 extra-column set as
+# headers once any one v2 marker is present (confirmed by feeding this
+# builder's own output through `parse_standard_workbook` -- dropping them
+# made the parser reject the whole sheet as "missing required column(s)").
+# Since Activity/Context DICTIONARY_OUTPUT must keep other v2 columns
+# (currency/effective_from/effective_to; source/scope), these stay present
+# as blank columns -- not asked for in BUILDER, but not deleted either.
+OUTCOME_OMITTED_OPTIONAL_COLUMNS = {"date_basis", "maturity_required"}
+ACTIVITY_OMITTED_V2_COLUMNS: set[str] = set()
+CONTEXT_OMITTED_V2_COLUMNS: set[str] = set()
+ACTIVITY_WRITE_ONLY_V2_COLUMNS = {
+    "model_input_unit",
+    "model_input_kind",
+    "spend_column",
+    "response_unit_column",
+    "response_unit",
+}
+CONTEXT_UNUSED_V2_COLUMNS = {"unit"}
+
+OUTCOME_DICTIONARY_OUTPUT_COLUMNS = list(OUTCOME_DICTIONARY_V2_COLUMNS) + [
+    c
+    for c in _OUTCOME_DEFINITION_OPTIONAL_COLUMNS
+    if c not in OUTCOME_OMITTED_OPTIONAL_COLUMNS
+]
+ACTIVITY_DICTIONARY_OUTPUT_COLUMNS = list(ACTIVITY_DICTIONARY_BASE_COLUMNS) + [
+    c for c in _ACTIVITY_V2_EXTRA_COLUMNS if c not in ACTIVITY_OMITTED_V2_COLUMNS
+]
+CONTEXT_DICTIONARY_OUTPUT_COLUMNS = list(CONTEXT_DICTIONARY_BASE_COLUMNS) + [
+    c for c in _CONTEXT_V2_EXTRA_COLUMNS if c not in CONTEXT_OMITTED_V2_COLUMNS
+]
+
+OUTCOME_METRIC_KEY_CHOICES = [*METRIC_REGISTRY.keys(), METRIC_KEY_CUSTOM]
+TRUE_FALSE_BLANK = ["TRUE", "FALSE"]
 
 
 RAG_HEAD = [
@@ -1313,6 +1404,38 @@ def mistakes(items: list[str]) -> str:
     )
 
 
+def bullet_list(items: list[str]) -> str:
+    return "<ul>" + "".join(f"<li>{item}</li>" for item in items) + "</ul>"
+
+
+def dictionary_builder_section(
+    filename: str,
+    dictionary_sheet: str,
+    what_it_does: str,
+    fill_in: list[str],
+    generated: list[str],
+    dropdown_fields: list[str],
+    allowed_values_note: str,
+    optional_advanced: list[str],
+    data_sheet_note: str,
+) -> str:
+    return f"""
+    <div class="callout builder">
+      <h3>Dictionary Builder: <code>{esc(filename)}</code></h3>
+      <p><b>What the builder does.</b> {what_it_does}</p>
+      <p><b>What you need to fill in:</b></p>
+      {bullet_list(fill_in)}
+      <p><b>What is generated automatically:</b></p>
+      {bullet_list(generated)}
+      <p><b>Which fields use dropdowns:</b> {", ".join(f"<code>{esc(f)}</code>" for f in dropdown_fields)}.</p>
+      <p><b>Exact acceptable values:</b> {allowed_values_note} See the workbook's own <code>ALLOWED_VALUES</code> sheet for the full, current list.</p>
+      <p><b>Which fields are optional / advanced:</b></p>
+      {bullet_list(optional_advanced)}
+      <p><b>Where the output goes.</b> Copy the <code>DICTIONARY_OUTPUT</code> sheet's rows straight into the <code>{esc(dictionary_sheet)}</code> sheet of the standard upload workbook. {data_sheet_note}</p>
+    </div>
+    """
+
+
 def domain_section(
     anchor: str,
     number: str,
@@ -1330,6 +1453,7 @@ def domain_section(
     common_mistakes: list[str],
     valid_invalid: list[list[str]],
     extra_html: str = "",
+    builder_html: str = "",
 ) -> str:
     required_table = simple_table(
         ["Field", "What it means", "What to enter", "Example"], required_rows, "wide"
@@ -1360,6 +1484,7 @@ def domain_section(
       <div class="callout"><b>Do I need this file?</b> {need_it}</div>
       <h3>What does one row mean?</h3><p>{grain}</p>
       <h3>Sheets in this workbook</h3><p>{sheets_note}</p>
+      {builder_html}
       <h3>Example</h3>{code_block(raw_example)}<p>{connection}</p>
       <h3>Fields you must fill in</h3>{required_table}
       {"<h3>Fields you may need</h3>" + conditional_table if conditional_table else ""}
@@ -1554,12 +1679,16 @@ def build_html() -> str:
             "Read the exact message — it names the specific problem, such as a missing required column, a duplicate row, or the wrong sheet name. Fix that one thing and upload again. The app never guesses a fix or silently patches your file for you.",
         ),
         (
-            "Why does the ID builder show a collision warning?",
+            "Why does the Dictionary Builder show a collision warning?",
             "Because two rows would end up with the exact same ID. Add one more distinguishing detail — don't just add a random number.",
         ),
         (
-            "Can I override the ID the builder suggests?",
-            "Yes, using the override column. You're still responsible for keeping it unique and consistent with the dictionary.",
+            "Can I override the ID the Dictionary Builder suggests?",
+            "Yes, using the Manual override ID column. You're still responsible for keeping it unique and consistent with the dictionary.",
+        ),
+        (
+            "Do I have to use the Dictionary Builders, or can I fill in the dictionary sheets by hand?",
+            "You can do either — the builders are a convenience, not a requirement. Each one produces a normal <code>DICTIONARY_OUTPUT</code> sheet that you copy into the standard upload workbook; the parser can't tell the difference.",
         ),
         (
             "Where can I find the exact technical contract behind this guide?",
@@ -1620,7 +1749,7 @@ def build_html() -> str:
         [
             [
                 "segment_dimension",
-                "Only if the same segment word could mean different things in different places.",
+                "Only worth choosing deliberately if the same segment word could mean different things in different places — the app does require some value here, so write unspecified if none of the other options apply.",
                 "Which approved vocabulary the segment value comes from.",
             ],
             [
@@ -1698,6 +1827,31 @@ def build_html() -> str:
         "<p>Production NBT needs its own completeness evidence supplied with the source pack — the approved definition, what's excluded, where it reconciles to, the data-as-of date, and a source fingerprint. This is a stricter, separate rule from the illustrative 14-day example used elsewhere in this guide for exploratory work. The full rule is recorded in <code>docs/uk_production_onboarding_runbook.md</code> and requirement records <code>REQ-NBT-001</code> through <code>REQ-NBT-004</code>; this guide only summarises them for someone preparing an upload.</p>"
         + "<h3>Optional outcome completeness sheet (<code>outcome_completeness</code>)</h3><p>Use the outcome completeness sheet for freshness, model-window, maturity, and ownership information. Required for official NBT use.</p>"
         + html_table(COMPLETENESS_RAG, "wide"),
+        builder_html=dictionary_builder_section(
+            "Ancestry_MMM_Outcome_Dictionary_Builder.xlsx",
+            "outcome_dictionary",
+            "Turns product, metric, and segment choices into a complete, upload-ready <code>outcome_dictionary</code> row and generates a stable <code>outcome_id</code> for you.",
+            [
+                "product, metric_key, segment, and metric — the same identity fields described above.",
+                "source_column, if it needs to differ from the generated outcome_id (it defaults to the same value).",
+            ],
+            [
+                "outcome_id — built from product, metric_key, and segment, the same way as the identity fields above.",
+                "unit and aggregation_type are not asked for at all — the app fills them in automatically from metric_key for every registered metric.",
+                "segment_dimension defaults to unspecified if you leave it blank — a real, accepted value, not a fabricated one. The live parser does require some value here (confirmed by testing this builder's output against it), so this default keeps a blank cell safe.",
+            ],
+            ["product", "metric_key", "segment_dimension", "group_aggregation", "role"],
+            "product is Family History or DNA; metric_key is an approved registry key or custom; group_aggregation is sum or none; role is primary, secondary, funnel_intermediate, or diagnostic.",
+            [
+                "segment_dimension — only fill this in if the same segment word could mean different things in different places; otherwise the builder defaults it to unspecified for you.",
+                "The four outcome-group fields — only needed if this outcome is one component of a governed semantic total.",
+                "The five eligibility on/off switches — only needed to override the sensible role-based defaults.",
+                "The seven official-approval fields — only needed to get this outcome approved for production reporting.",
+                "value_weight / value_currency — only needed for ROI or monetary value reporting.",
+                "date_basis and maturity_required are not offered by this builder: the app does not currently read either field (see the schema-necessity review). If your project needs them recorded anyway, add the columns and values by hand after copying the output.",
+            ],
+            "The actual weekly KPI numbers still go in the <code>outcomes</code> sheet, not this builder.",
+        ),
     )
 
     activity = domain_section(
@@ -1721,6 +1875,18 @@ def build_html() -> str:
                 "The channel or reporting family.",
                 "Plain text — be specific, not a generic label.",
                 "Paid Search",
+            ],
+            [
+                "market",
+                "The market this activity_dictionary row applies to.",
+                "The same market code used on the activity_data sheet.",
+                "UK",
+            ],
+            [
+                "activity_ownership",
+                "Who controls or supplies the activity.",
+                "paid, owned, earned, or external_event — this is a required choice; it cannot be left blank.",
+                "paid",
             ],
             [
                 "intended_model_role",
@@ -1761,13 +1927,8 @@ def build_html() -> str:
         ],
         [
             [
-                "activity_ownership",
-                "Rarely changes anything — only matters if this is an external event.",
-                "paid, owned, earned, or external_event.",
-            ],
-            [
                 "campaign_type",
-                "Only needed to separate Brand and Non-Brand Paid Search.",
+                "Only needed to separate Brand and Non-Brand Paid Search — but the upload does currently reject a truly empty cell, so write not specified if it doesn't apply.",
                 "Brand or Non-Brand.",
             ],
             [
@@ -1779,7 +1940,7 @@ def build_html() -> str:
         [
             [
                 "platform, funnel_stage, product_advertised, marketing_objective, message_type, pooling_group_id",
-                "Useful for reporting and dashboards, but the model and the optimiser don't read them. Fill in what you have; don't worry about getting them perfect.",
+                "Useful for reporting and dashboards, but the model and the optimiser don't read them. Fill in what you have; don't worry about getting them perfect. Except for pooling_group_id, the upload does currently reject a truly empty cell in these columns — write not specified (or unclassified for funnel_stage) rather than leaving one blank.",
             ],
         ],
         ACTIVITY_RAG,
@@ -1811,6 +1972,34 @@ def build_html() -> str:
             ],
         ],
         extra_html='<div class="callout warning"><b>These five columns currently have no effect: <code>model_input_unit</code>, <code>model_input_kind</code>, <code>spend_column</code>, <code>response_unit_column</code>, <code>response_unit</code>.</b> They exist in the template, but today the app does not automatically apply them from this sheet — filling them in here changes nothing in the model. The real place to set units and cost mappings is inside the app, in Channel Media Units and Curve Generation, after your data is uploaded. You can leave these blank for your first upload.</div>',
+        builder_html=dictionary_builder_section(
+            "Ancestry_MMM_Activity_Dictionary_Builder.xlsx",
+            "activity_dictionary",
+            "Turns business-facing choices — channel, market, and (for Paid Search) Brand/Non-Brand and platform — into a complete, upload-ready <code>activity_dictionary</code> row and generates a stable <code>activity_id</code>.",
+            [
+                "channel, market, activity_ownership, intended_model_role, model_input_measure, economic_treatment, planning_eligibility, and source.",
+                "model_input_column, if it needs to differ from the generated activity_id (it defaults to the same value).",
+                "platform, campaign_type, and — for Paid Search only — search_platform and search_intent_group_id — fill these in only when they help distinguish one activity from another (Google vs Bing, Brand vs Non-Brand). If you leave platform or campaign_type blank, DICTIONARY_OUTPUT fills in not specified for you, since the live parser currently rejects a truly empty value. search_platform and search_intent_group_id are not uploaded columns themselves; see the note below.",
+            ],
+            [
+                "activity_id — built from channel plus whichever of platform, campaign_type, search_platform, and search_intent_group_id you filled in, the same way as the standalone identity fields above.",
+            ],
+            [
+                "activity_ownership",
+                "intended_model_role",
+                "economic_treatment",
+                "planning_eligibility",
+                "funnel_stage",
+                "search_platform",
+                "search_intent_group_id",
+            ],
+            "activity_ownership is paid, owned, earned, or external_event; intended_model_role is intervention, mediator, demand_capture, control, or event; economic_treatment is paid_media_cost, fully_loaded_cost, campaign_cost, response_only, or not_applicable; planning_eligibility is optimisable, scenario_only, fixed, or excluded.",
+            [
+                "pooling_group_id, funnel_stage, marketing_objective, product_advertised, and message_type — the necessity review confirmed the model, canonicalisation, and optimiser never read their values; only reporting rollups and the causal-graph display do. Fill in what you have. If you leave one blank, the DICTIONARY_OUTPUT sheet automatically fills in a harmless placeholder (unclassified for funnel_stage, not specified for the others) — testing this builder's output against the live parser confirmed a truly empty value is currently rejected for these columns, even though nothing meaningful reads them.",
+                "currency, effective_from, effective_to — optional provenance metadata.",
+            ],
+            "This builder does not ask for model_input_unit, model_input_kind, spend_column, response_unit_column, or response_unit — the necessity review confirmed these five columns are currently write-only in the standard upload path (see the callout above). Their column headers still appear, blank, in DICTIONARY_OUTPUT, because the current schema requires them once other v2 columns are present — this builder just never asks you to fill them in. The actual weekly activity numbers still go in the <code>activity_data</code> sheet, not this builder. search_platform and search_intent_group_id here only help build a clear activity_id; they are not activity_dictionary columns today, and the governed Search-taxonomy mapping still has to be set up separately after upload.",
+        ),
     )
 
     context = domain_section(
@@ -1895,6 +2084,26 @@ def build_html() -> str:
         ],
         extra_html="<h3>Optional events sheet</h3><p>A separate table for named dates — keep the real dates and a name; the app never guesses what kind of event it is or what effect it has.</p>"
         + html_table(EVENT_RAG, "wide"),
+        builder_html=dictionary_builder_section(
+            "Ancestry_MMM_Context_Dictionary_Builder.xlsx",
+            "variable_dictionary",
+            "Turns a variable's class and concept into a complete, upload-ready <code>variable_dictionary</code> row and generates a stable <code>variable_id</code>.",
+            [
+                "variable_class and a short concept name — used to build the id.",
+                "native_frequency — how often the variable is actually published.",
+                "role — free text today (see the caveat below); a short example is offered, not a fixed list.",
+            ],
+            [
+                "variable_id — built from variable_class and the concept name, the same way as the identity field above.",
+            ],
+            ["variable_class"],
+            "variable_class is one of the five approved classes: flow_count, stock_level, rate_index, survey_measurement, or event_flag.",
+            [
+                "source, scope — only needed once this variable is reviewed for wider use (“adoption”), not for a first upload.",
+                "effective_from, effective_to — optional provenance metadata.",
+            ],
+            '<div class="callout warning"><b>Read this before filling in variable_class, native_frequency, and role.</b> The schema-necessity review found that the app\'s real governance screen (Page 15, Data Coverage) does not read the uploaded variable_class or native_frequency at all — it re-asks for both and defaults them itself regardless of what you upload here. role has no enforced list anywhere in the code today, so this builder offers it as free text rather than inventing a dropdown. Filling these in is still required for the upload to be accepted, but expect to confirm variable_class and native_frequency again on Page 15 after upload. This is a documented application limitation, not something this builder can fix. The actual observations still go in the <code>context_data</code> sheet, not this builder.</div>',
+        ),
     )
 
     add_later_reference = simple_table(
@@ -2047,7 +2256,7 @@ def build_html() -> str:
 <style>
 :root{{--ink:#18212b;--muted:#5d6b78;--blue:#0b5cab;--navy:#12304a;--wash:#f3f7fb;--line:#d9e2ea;--red:#fce4e4;--amber:#fff1cc;--green:#e3f4e6;--grey:#edf0f2;--shadow:0 8px 24px rgba(19,48,74,.09)}}
 *{{box-sizing:border-box}} html{{scroll-behavior:smooth}} body{{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;color:var(--ink);line-height:1.55;background:#fff}} a{{color:var(--blue)}} a:visited{{color:#5b2a86}} code{{background:#eef3f7;color:#173b5e;border-radius:4px;padding:.1em .3em;font-size:.93em;overflow-wrap:anywhere}} footer a:visited{{color:#fff}} .skip{{position:absolute;left:-9999px}} .skip:focus{{left:1rem;top:1rem;background:#fff;padding:.5rem;z-index:10}}
-.layout{{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100vh}} aside{{position:sticky;top:0;height:100vh;overflow:auto;background:var(--navy);color:#fff;padding:1.25rem}} aside h2{{font-size:1.1rem;color:#fff;margin:.2rem 0 1rem}} aside p{{font-size:.82rem;color:#c9d8e5}} nav a{{display:block;color:#e0edf7;text-decoration:none;padding:.32rem .2rem;font-size:.88rem}} nav a:hover,nav a:focus{{color:#fff;background:rgba(255,255,255,.1);border-radius:4px}} .search{{width:100%;padding:.55rem;border-radius:5px;border:1px solid #6e91aa;margin:.4rem 0 1rem}} main{{min-width:0}} .hero{{background:linear-gradient(135deg,#eaf4ff,#fff);padding:4rem clamp(1rem,5vw,5rem) 3.25rem;border-bottom:1px solid var(--line)}} .hero h1{{font-size:clamp(2rem,4vw,3.6rem);line-height:1.08;color:var(--navy);max-width:850px;margin:.2rem 0 1rem}} .hero p{{max-width:780px;font-size:1.08rem}} .badge{{display:inline-block;background:#dbeeff;color:#084d8d;padding:.25rem .55rem;border-radius:999px;font-weight:700;font-size:.78rem}} .section{{padding:3rem clamp(1rem,5vw,5rem);max-width:1500px}} .section:nth-of-type(even){{background:#fff}} .domain{{border-top:1px solid var(--line)}} h2{{font-size:2rem;color:var(--navy);margin:.15rem 0 1.1rem}} h3{{color:#234f72;margin-top:1.8rem}} .eyebrow{{text-transform:uppercase;letter-spacing:.12em;font-size:.76rem;color:var(--blue);font-weight:800;margin:0}} .callout{{border-left:5px solid var(--blue);background:var(--wash);padding:1rem 1.2rem;margin:1.2rem 0}} .warning{{border-left-color:#c67a00;background:#fff8e7}} .table-wrap{{overflow:auto;margin:1rem 0 1.25rem;border:1px solid var(--line);border-radius:7px}} table{{border-collapse:collapse;width:100%;background:#fff;font-size:.87rem}} th,td{{border-bottom:1px solid var(--line);padding:.55rem .65rem;text-align:left;vertical-align:top}} th{{background:#eaf1f6;color:var(--navy);font-weight:800;position:sticky;top:0;z-index:1}} tr:last-child td{{border-bottom:0}} .rag td:nth-child(2){{font-weight:800;min-width:150px}} .rag-red{{background:var(--red)}} .rag-amber{{background:var(--amber)}} .rag-green{{background:var(--green)}} .rag-grey{{background:var(--grey)}} .compact{{max-width:1100px}} .wide{{max-width:1400px}} pre{{overflow:auto;background:#f5f8fb;color:#17222d;border:1px solid #b8c7d3;padding:1rem;border-radius:6px;font-size:.86rem}} pre code{{background:transparent;color:#17222d;padding:0}} .mistakes{{padding-left:1.2rem}} .mistakes li{{margin:.35rem 0}} .steps{{counter-reset:step;list-style:none;padding:0;display:grid;gap:.7rem;max-width:850px}} .steps li{{counter-increment:step;display:flex;gap:.7rem;background:var(--wash);padding:.75rem;border-radius:6px}} .steps li::before{{content:counter(step);background:var(--blue);color:#fff;width:1.6rem;height:1.6rem;border-radius:50%;display:inline-grid;place-items:center;font-weight:800;flex:0 0 auto}} .diagram{{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;background:#fff;padding:1rem;border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow);margin:1rem 0 2rem}} .diagram-box{{border:2px solid var(--blue);border-radius:7px;padding:.75rem;min-width:180px;background:#f7fbff}} .diagram-box span{{display:block;font-size:.8rem;color:var(--muted);margin-top:.35rem}} .diagram-box.model{{border-color:#258b4d;background:#f5fff7}} .diagram-box.activity{{border-color:#8c5a00;background:#fffbf0}} .diagram-box.context{{border-color:#7846a7;background:#fbf7ff}} .arrow{{font-size:.77rem;color:var(--muted);text-align:center}} details{{border:1px solid var(--line);border-radius:6px;margin:.55rem 0;padding:.7rem 1rem;max-width:1400px}} summary{{cursor:pointer;font-weight:700;color:var(--navy)}} .back{{display:inline-block;margin-top:1.3rem;font-size:.85rem}} footer{{padding:2rem clamp(1rem,5vw,5rem);background:var(--navy);color:#d9e7f2;font-size:.85rem}} footer a{{color:#fff}}
+.layout{{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100vh}} aside{{position:sticky;top:0;height:100vh;overflow:auto;background:var(--navy);color:#fff;padding:1.25rem}} aside h2{{font-size:1.1rem;color:#fff;margin:.2rem 0 1rem}} aside p{{font-size:.82rem;color:#c9d8e5}} nav a{{display:block;color:#e0edf7;text-decoration:none;padding:.32rem .2rem;font-size:.88rem}} nav a:hover,nav a:focus{{color:#fff;background:rgba(255,255,255,.1);border-radius:4px}} .search{{width:100%;padding:.55rem;border-radius:5px;border:1px solid #6e91aa;margin:.4rem 0 1rem}} main{{min-width:0}} .hero{{background:linear-gradient(135deg,#eaf4ff,#fff);padding:4rem clamp(1rem,5vw,5rem) 3.25rem;border-bottom:1px solid var(--line)}} .hero h1{{font-size:clamp(2rem,4vw,3.6rem);line-height:1.08;color:var(--navy);max-width:850px;margin:.2rem 0 1rem}} .hero p{{max-width:780px;font-size:1.08rem}} .badge{{display:inline-block;background:#dbeeff;color:#084d8d;padding:.25rem .55rem;border-radius:999px;font-weight:700;font-size:.78rem}} .section{{padding:3rem clamp(1rem,5vw,5rem);max-width:1500px}} .section:nth-of-type(even){{background:#fff}} .domain{{border-top:1px solid var(--line)}} h2{{font-size:2rem;color:var(--navy);margin:.15rem 0 1.1rem}} h3{{color:#234f72;margin-top:1.8rem}} .eyebrow{{text-transform:uppercase;letter-spacing:.12em;font-size:.76rem;color:var(--blue);font-weight:800;margin:0}} .callout{{border-left:5px solid var(--blue);background:var(--wash);padding:1rem 1.2rem;margin:1.2rem 0}} .warning{{border-left-color:#c67a00;background:#fff8e7}} .builder{{border-left-color:#1a7a4c;background:#f1faf5}} .builder h3{{margin-top:.2rem}} .builder ul{{margin:.3rem 0 .8rem;padding-left:1.2rem}} .builder li{{margin:.25rem 0}} .table-wrap{{overflow:auto;margin:1rem 0 1.25rem;border:1px solid var(--line);border-radius:7px}} table{{border-collapse:collapse;width:100%;background:#fff;font-size:.87rem}} th,td{{border-bottom:1px solid var(--line);padding:.55rem .65rem;text-align:left;vertical-align:top}} th{{background:#eaf1f6;color:var(--navy);font-weight:800;position:sticky;top:0;z-index:1}} tr:last-child td{{border-bottom:0}} .rag td:nth-child(2){{font-weight:800;min-width:150px}} .rag-red{{background:var(--red)}} .rag-amber{{background:var(--amber)}} .rag-green{{background:var(--green)}} .rag-grey{{background:var(--grey)}} .compact{{max-width:1100px}} .wide{{max-width:1400px}} pre{{overflow:auto;background:#f5f8fb;color:#17222d;border:1px solid #b8c7d3;padding:1rem;border-radius:6px;font-size:.86rem}} pre code{{background:transparent;color:#17222d;padding:0}} .mistakes{{padding-left:1.2rem}} .mistakes li{{margin:.35rem 0}} .steps{{counter-reset:step;list-style:none;padding:0;display:grid;gap:.7rem;max-width:850px}} .steps li{{counter-increment:step;display:flex;gap:.7rem;background:var(--wash);padding:.75rem;border-radius:6px}} .steps li::before{{content:counter(step);background:var(--blue);color:#fff;width:1.6rem;height:1.6rem;border-radius:50%;display:inline-grid;place-items:center;font-weight:800;flex:0 0 auto}} .diagram{{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;background:#fff;padding:1rem;border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow);margin:1rem 0 2rem}} .diagram-box{{border:2px solid var(--blue);border-radius:7px;padding:.75rem;min-width:180px;background:#f7fbff}} .diagram-box span{{display:block;font-size:.8rem;color:var(--muted);margin-top:.35rem}} .diagram-box.model{{border-color:#258b4d;background:#f5fff7}} .diagram-box.activity{{border-color:#8c5a00;background:#fffbf0}} .diagram-box.context{{border-color:#7846a7;background:#fbf7ff}} .arrow{{font-size:.77rem;color:var(--muted);text-align:center}} details{{border:1px solid var(--line);border-radius:6px;margin:.55rem 0;padding:.7rem 1rem;max-width:1400px}} summary{{cursor:pointer;font-weight:700;color:var(--navy)}} .back{{display:inline-block;margin-top:1.3rem;font-size:.85rem}} footer{{padding:2rem clamp(1rem,5vw,5rem);background:var(--navy);color:#d9e7f2;font-size:.85rem}} footer a{{color:#fff}}
 @media(max-width:900px){{.layout{{display:block}} aside{{position:relative;height:auto}} nav{{columns:2}} .hero{{padding-top:2.5rem}} .section{{padding-top:2.3rem;padding-bottom:2.3rem}}}} @media print{{aside,.search,.skip,.back{{display:none!important}}.layout{{display:block}}.hero{{padding:1rem 0;border:0}}.section{{padding:1rem 0;break-inside:auto}}details{{break-inside:avoid}}pre{{white-space:pre-wrap}}a{{color:#000;text-decoration:none}}}}
 </style></head><body><a class="skip" href="#main">Skip to content</a><div class="layout"><aside><h2>Ancestry MMM</h2><p>Data Upload Guide</p><input class="search" id="guideSearch" type="search" placeholder="Filter sections" aria-label="Filter guide sections"><nav id="toc"><a href="#top">Overview</a><a href="#workflow">What do I need?</a><a href="#outcomes">1. Outcomes</a><a href="#activity">2. Activity and Media</a><a href="#context">3. Context</a><a href="#ltr">FH LTR / DNA revenue</a><a href="#advanced">Add these later</a><a href="#faq">FAQ</a><a href="#glossary">Glossary</a><a href="#review">Source and review</a></nav></aside><main id="main"><header class="hero" id="top"><span class="badge">Version 2 · source-pack contract</span><h1>Ancestry MMM data upload guide</h1><p>This guide helps a first-time analyst prepare data the application can use. For every field, it tells you if you need it, what it means, what to type, and what happens if you skip it.</p><div class="callout"><b>Most important:</b> uploading a file successfully does not mean it's approved for reporting, planning, or optimisation. Those are separate, later steps.</div>{relationship}</header>{workflow}{outcomes}{activity}{context}{advanced}<section id="faq" class="section"><p class="eyebrow">Questions analysts ask</p><h2>FAQ</h2><p>If a question isn't answered here, check the “Fields you may need” table for that section, or the full technical reference at the end of each section.</p>{faq_html}</section><section id="glossary" class="section"><p class="eyebrow">Quick reference</p><h2>Glossary</h2>{glossary}</section><section id="review" class="section"><p class="eyebrow">Traceability</p><h2>Source and review</h2><p>This guide was built and checked against the current application code, not copied from an older version. The exact files, requirement IDs, and review results are recorded in <code>Ancestry_MMM_Data_Upload_Guide_REVIEW.md</code> and <code>Ancestry_MMM_Data_Upload_Guide_Simplification_Report.md</code>.</p><p>Primary implementation references include <code>ancestry_mmm/data/templates.py</code>, <code>template_downloads.py</code>, <code>loader.py</code>, <code>source_pack_adoption.py</code>, the Data Upload and Model Training pages, and the upload/template tests. Approved requirement IDs include REQ-DATAIN-001, REQ-COVERAGE-001, REQ-ACTIVITY-001, REQ-OUT-001/002/003, REQ-NBT-001/002/003/004, REQ-SEARCH-001/002/004/005, REQ-SEO-001, REQ-EVENT-001, REQ-EXPMODE-001, REQ-CALIB-001, REQ-ECON-002/003, REQ-FUTURE-001, and REQ-FX-001–006. The UK production NBT boundary is recorded in <code>docs/uk_production_onboarding_runbook.md</code>.</p><a class="back" href="#top">↑ Back to top</a></section></main></div><footer><p><b>Internal analyst guide.</b> No external libraries, fonts, images, or network calls are required. Print this page or open it locally in a browser.</p></footer><script>(function(){{const input=document.getElementById('guideSearch');const links=[...document.querySelectorAll('#toc a')];const sections=[...document.querySelectorAll('main .section, main .hero')];input.addEventListener('input',function(){{const q=input.value.toLowerCase().trim();sections.forEach(s=>{{s.hidden=!!q&&!s.innerText.toLowerCase().includes(q)}});links.forEach(a=>{{const id=a.getAttribute('href').slice(1),s=document.getElementById(id);a.hidden=!!q&&(!s||s.hidden)}})}})}})();</script></body></html>"""
 
@@ -2181,99 +2390,6 @@ def set_title(ws, title: str, subtitle: str, purpose: str) -> None:
     ws.merge_cells("A4:F4")
 
 
-def add_rag_reference(
-    wb: Workbook, rows: list[dict[str, str]], id_fields: dict[str, str]
-) -> None:
-    ws = wb.create_sheet("Reference")
-    ws.append(
-        [
-            "Dictionary field",
-            "Meaning",
-            "RAG status",
-            "Enter/select value",
-            "Used in suggested ID?",
-            "Why or not part of ID",
-            "Column must exist?",
-            "Value must be filled in?",
-            "Allowed values / format",
-            "Can be blank when...",
-        ]
-    )
-    for row in rows:
-        field = row["Field name"]
-        use = id_fields.get(field, "no")
-        why = id_fields.get(f"{field}__why", "Dictionary meaning, not stable identity")
-        ws.append(
-            [
-                field,
-                row["Plain-English meaning"],
-                row["Status"],
-                "",
-                use,
-                why,
-                row["Column must exist?"],
-                row["Value must be filled in?"],
-                row["Allowed values / format"],
-                row["Can be blank when..."],
-            ]
-        )
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:J{ws.max_row}"
-    ws.sheet_view.showGridLines = False
-    for cell in ws[1]:
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="12304A")
-        cell.alignment = Alignment(wrap_text=True, vertical="top")
-    for col, width in {
-        "A": 28,
-        "B": 42,
-        "C": 25,
-        "D": 28,
-        "E": 23,
-        "F": 48,
-        "G": 18,
-        "H": 25,
-        "I": 48,
-        "J": 40,
-    }.items():
-        ws.column_dimensions[col].width = width
-    for i in range(2, ws.max_row + 1):
-        status = str(ws.cell(i, 3).value)
-        ws.cell(i, 3).fill = PatternFill(
-            "solid",
-            fgColor="FCE4E4"
-            if status.startswith("RED")
-            else "FFF1CC"
-            if status.startswith("AMBER")
-            else "E3F4E6",
-        )
-        for c in range(1, 11):
-            ws.cell(i, c).alignment = Alignment(wrap_text=True, vertical="top")
-    notes = wb.create_sheet("Read me")
-    notes["A1"] = "How to use this builder"
-    notes["A1"].font = Font(size=16, bold=True, color="12304A")
-    notes["A3"] = "1. Complete the editable cells in the Candidate rows sheet."
-    notes["A4"] = (
-        "2. Use the suggested ID first. It is based on meaningful identity fields, not every dictionary field."
-    )
-    notes["A5"] = (
-        "3. If the warning says collision, add the next meaningful AMBER identity field. Do not add a random number."
-    )
-    notes["A6"] = (
-        "4. Use Manual override ID only when the governed ID already exists. Final ID uses the override when present."
-    )
-    notes["A7"] = (
-        "5. Excel calculates formulas when the file opens. No VBA is used. The formulas use broadly compatible Excel text and conditional functions."
-    )
-    notes["A9"] = (
-        "Important: an ID is not a business definition. Keep the dictionary fields complete even when a field is not part of the ID."
-    )
-    notes.column_dimensions["A"].width = 120
-    for row in range(3, 10):
-        notes[f"A{row}"].alignment = Alignment(wrap_text=True, vertical="top")
-    notes.sheet_view.showGridLines = False
-
-
 def add_candidate_table(
     ws, headers: list[str], rows: list[list[object]], tab_name: str = "Candidates"
 ) -> None:
@@ -2282,7 +2398,7 @@ def add_candidate_table(
     ws.append(headers)
     for row in rows:
         ws.append(row)
-    end_col = chr(64 + len(headers))
+    end_col = get_column_letter(len(headers))
     ref = f"A7:{end_col}{ws.max_row}"
     tab = Table(displayName=tab_name, ref=ref)
     tab.tableStyleInfo = TableStyleInfo(
@@ -2323,567 +2439,1326 @@ def common_candidate_style(ws, widths: dict[str, int]) -> None:
     ws.page_setup.fitToWidth = 1
 
 
-def build_outcome_workbook(path: Path) -> None:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "ID Builder"
-    set_title(
-        ws,
-        "Outcome ID Builder",
-        "Formula-driven, no VBA · v2 outcome dictionary companion",
-        "Enter one candidate definition per row. The ID is an identity aid; the dictionary remains the source of meaning.",
+def add_soft_dropdown(ws, cell_range: str, values: list[str], title: str) -> None:
+    """A dropdown that offers suggestions without blocking free text -- for
+    fields the app treats as an unenforced/suggested vocabulary, not a
+    closed enum (e.g. marketing_objective)."""
+    dv = DataValidation(
+        type="list",
+        formula1='"' + ",".join(values) + '"',
+        allow_blank=True,
+        showErrorMessage=False,
     )
-    headers = [
-        "product",
-        "metric_key",
-        "segment_dimension",
-        "segment",
-        "outcome_id (existing)",
-        "Manual override ID",
-        "Suggested ID",
-        "Final ID",
-        "Collision / completeness warning",
-        "Dictionary row preview",
-    ]
-    rows = [
-        [
-            "Family History",
-            "fh_gsa",
-            "fh_customer_segment",
-            "New",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-        ],
-        [
-            "Family History",
-            "fh_gsa",
-            "fh_customer_segment",
-            "DNA_CrossSell",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-        ],
-        [
-            "Family History",
-            "fh_gsa",
-            "fh_customer_segment",
-            "Winback",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-        ],
-        [
-            "DNA",
-            "dna_kit_sale",
-            "dna_customer_relationship",
-            "New Customer",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-        ],
-        [
-            "DNA",
-            "dna_kit_sale",
-            "dna_customer_relationship",
-            "Existing FH Customer",
-            "",
-            "",
-            "",
-            "",
-            "",
-        ],
-        ["", "", "", "", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", "", "", "", ""],
-    ]
-    add_candidate_table(ws, headers, rows, "OutcomeCandidates")
-    token_columns = add_hidden_token_columns(
-        ws, ["A", "B", "D"], range(8, 8 + len(rows))
-    )
-    for r in range(8, 8 + len(rows)):
-        ws.cell(r, 7).value = join_token_columns(token_columns, r)
-        ws.cell(
-            r, 8
-        ).value = f'=IF(TRIM(F{r})<>F{r},TRIM(F{r}),IF(TRIM(F{r})<>"",F{r},G{r}))'
-        ws.cell(
-            r, 9
-        ).value = f'=IF(H{r}="","RED: complete product, metric_key, and segment before finalising",IF(COUNTIF($H$8:$H$25,H{r})>1,"AMBER: duplicate final ID — add a meaningful identity distinction",IF(E{r}<>"",IF(E{r}<>H{r},"AMBER: existing ID differs from built ID — review dictionary lineage","OK: existing ID matches"),"OK: unique in this builder")))'
-        ws.cell(
-            r, 10
-        ).value = f'=IF(H{r}="","", "outcome_id="&H{r}&" | product="&A{r}&" | metric_key="&B{r}&" | segment_dimension="&C{r}&" | segment="&D{r})'
-    common_candidate_style(
-        ws,
-        {
-            "A": 20,
-            "B": 22,
-            "C": 26,
-            "D": 24,
-            "E": 25,
-            "F": 24,
-            "G": 30,
-            "H": 30,
-            "I": 55,
-            "J": 105,
-        },
-    )
-    add_dropdown(ws, "A8:A25", ["Family History", "DNA"], "Product")
-    add_dropdown(
-        ws,
-        "B8:B25",
-        [
-            "fh_gsa",
-            "fh_signup",
-            "fh_net_billthrough_count",
-            "fh_net_billthrough_rate",
-            "dna_kit_sale",
-            "custom",
-        ],
-        "Metric key",
-    )
-    add_dropdown(
-        ws,
-        "C8:C25",
-        [
-            "fh_customer_segment",
-            "dna_customer_relationship",
-            "dna_purchase_recipient",
-            "combined",
-            "custom",
-            "unspecified",
-        ],
-        "Segment dimension",
-    )
-    for cell in ws["I"][7:]:
-        cell.alignment = Alignment(wrap_text=True, vertical="top")
+    dv.prompt = "Choose a suggestion, or type your own text -- this field is not a closed list in the app."
+    dv.promptTitle = title
+    ws.add_data_validation(dv)
+    dv.add(cell_range)
+
+
+def color_header_range(ws, row: int, start_col: int, end_col: int, color: str) -> None:
+    for c in range(start_col, end_col + 1):
+        cell = ws.cell(row, c)
+        cell.fill = PatternFill("solid", fgColor=color)
+        cell.font = Font(bold=True, color="FFFFFF")
+
+
+def add_status_conditional_formatting(ws, cell_range: str, first_cell: str) -> None:
     ws.conditional_formatting.add(
-        "I8:I25",
+        cell_range,
         FormulaRule(
-            formula=['ISNUMBER(SEARCH("RED",I8))'],
+            formula=[f'ISNUMBER(SEARCH("Missing",{first_cell}))'],
             fill=PatternFill("solid", fgColor="FCE4E4"),
         ),
     )
     ws.conditional_formatting.add(
-        "I8:I25",
+        cell_range,
         FormulaRule(
-            formula=['ISNUMBER(SEARCH("AMBER",I8))'],
+            formula=[
+                f'OR(ISNUMBER(SEARCH("Duplicate",{first_cell})),ISNUMBER(SEARCH("differs",{first_cell})))'
+            ],
             fill=PatternFill("solid", fgColor="FFF1CC"),
         ),
     )
     ws.conditional_formatting.add(
-        "I8:I25",
+        cell_range,
         FormulaRule(
-            formula=['LEFT(I8,2)="OK"'], fill=PatternFill("solid", fgColor="E3F4E6")
+            formula=[f'{first_cell}="Ready"'],
+            fill=PatternFill("solid", fgColor="E3F4E6"),
         ),
     )
-    add_rag_reference(
-        wb,
-        OUTCOME_RAG,
-        {
-            "product": "yes",
-            "metric_key": "yes",
-            "segment_dimension": "only if needed",
-            "segment": "yes",
-            "product__why": "Defines a stable product axis.",
-            "metric_key__why": "Defines the metric identity.",
-            "segment_dimension__why": "Use when the same segment value can mean different things.",
-            "segment__why": "Defines the segment identity.",
-        },
-    )
-    ex = wb.create_sheet("Examples")
-    ex.append(["Example", "Outcome identity", "Why"])
-    ex.append(
-        [
-            "Good",
-            "fh_gsa_new",
-            "Stable product + metric + segment identity; meaning is still in the dictionary.",
-        ]
-    )
-    ex.append(
-        [
-            "Good",
-            "dna_kit_sale_new_customer",
-            "DNA relationship partition is explicit when source supports it.",
-        ]
-    )
-    ex.append(["Invalid", "gsa", "Too little identity; product and segment collide."])
-    ex.append(
-        [
-            "Invalid",
-            "fh_gsa_2026_01_05_uk",
-            "Time and market are row/source scope, not a new outcome definition.",
-        ]
-    )
-    ex.append(
-        [
-            "Review",
-            "fh_gsa_dna_cross_sell",
-            "Use the approved project spelling/lineage; do not infer from a friendly label.",
-        ]
-    )
-    ex.column_dimensions["A"].width = 16
-    ex.column_dimensions["B"].width = 38
-    ex.column_dimensions["C"].width = 95
+
+
+def write_start_here(
+    ws, title: str, subtitle: str, sections: list[tuple[str, list[str]]]
+) -> None:
+    ws["A1"] = title
+    ws["A1"].font = Font(size=18, bold=True, color="12304A")
+    ws["A2"] = subtitle
+    ws["A2"].font = Font(italic=True, color="5D6B78")
+    row = 4
+    for heading, lines in sections:
+        cell = ws.cell(row, 1, heading)
+        cell.font = Font(bold=True, size=13, color="12304A")
+        row += 1
+        for line in lines:
+            cell = ws.cell(row, 1, line)
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            row += 1
+        row += 1
+    ws.column_dimensions["A"].width = 130
+    ws.sheet_view.showGridLines = False
+
+
+def write_allowed_values(wb: Workbook, rows: list[list[str]]):
+    ws = wb.create_sheet("ALLOWED_VALUES")
+    ws.append(["Field", "Accepted value", "Plain-English meaning", "When to use"])
+    for row in rows:
+        ws.append(row)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="12304A")
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:D{ws.max_row}"
+    for col, width in {"A": 28, "B": 26, "C": 55, "D": 48}.items():
+        ws.column_dimensions[col].width = width
+    for r in range(1, ws.max_row + 1):
+        for c in range(1, 5):
+            ws.cell(r, c).alignment = Alignment(wrap_text=True, vertical="top")
+    ws.sheet_view.showGridLines = False
+    return ws
+
+
+def write_examples(wb: Workbook, headers: list[str], rows: list[list[str]]):
+    ex = wb.create_sheet("EXAMPLES")
+    ex.append(headers)
+    for row in rows:
+        ex.append(row)
     for c in ex[1]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor="12304A")
     ex.sheet_view.showGridLines = False
+    for idx in range(1, len(headers) + 1):
+        ex.column_dimensions[get_column_letter(idx)].width = 46
+    for r in range(1, ex.max_row + 1):
+        for c in range(1, len(headers) + 1):
+            ex.cell(r, c).alignment = Alignment(wrap_text=True, vertical="top")
+    return ex
+
+
+def builder_ref(col: str) -> str:
+    """A DICTIONARY_OUTPUT formula template that copies one BUILDER column."""
+    return "='BUILDER'!" + col + "{r}"
+
+
+def builder_ref_or_default(col: str, default: str) -> str:
+    """Like `builder_ref`, but falls back to a safe literal when BUILDER's
+    cell is blank -- for columns the live parser requires to be non-blank
+    even though the necessity review found nothing meaningful reads the
+    value (confirmed by feeding builder output through the real parser)."""
+    return (
+        "=IF(TRIM('BUILDER'!" + col + '{r})<>"",'
+        "'BUILDER'!" + col + '{r},"' + default + '")'
+    )
+
+
+def add_dictionary_output_sheet(
+    wb: Workbook,
+    output_columns: list[str],
+    column_map: dict[str, str | None],
+    data_rows: range,
+):
+    """Build the clean, upload-ready DICTIONARY_OUTPUT sheet.
+
+    `column_map` maps an output column name to a formula template containing
+    a literal ``{r}`` row placeholder (build one with `builder_ref`, or write
+    a custom fallback formula by hand); a column absent from the map, or
+    mapped to `None`, is written as a blank literal (used for fields the app
+    derives automatically, such as unit/aggregation_type). Every non-blank
+    cell is a live formula referencing BUILDER, so DICTIONARY_OUTPUT updates
+    automatically as the analyst edits the BUILDER sheet.
+    """
+    ws = wb.create_sheet("DICTIONARY_OUTPUT")
+    ws.append(list(output_columns))
+    for r in data_rows:
+        row_values = []
+        for col in output_columns:
+            template = column_map.get(col)
+            row_values.append("" if template is None else template.format(r=r))
+        ws.append(row_values)
+    end_col = get_column_letter(len(output_columns))
+    tab = Table(displayName="DictionaryOutput", ref=f"A1:{end_col}{ws.max_row}")
+    tab.tableStyleInfo = TableStyleInfo(
+        name="TableStyleMedium2", showRowStripes=True, showColumnStripes=False
+    )
+    ws.add_table(tab)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="12304A")
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+    for idx in range(1, len(output_columns) + 1):
+        ws.column_dimensions[get_column_letter(idx)].width = 24
+    ws.freeze_panes = "A2"
+    ws.sheet_view.showGridLines = False
+    return ws
+
+
+def build_outcome_dictionary_builder(path: Path) -> None:
+    wb = Workbook()
+    start_here = wb.active
+    start_here.title = "START_HERE"
+    write_start_here(
+        start_here,
+        "Outcome / KPI Dictionary Builder",
+        "Formula-driven, no VBA -- builds a complete outcome_dictionary row and its outcome_id",
+        [
+            (
+                "What this builder is for",
+                [
+                    "Use this workbook to define one row per KPI (outcome) you want the model to explain -- things like GSA, sign-ups, or Net Bill Through, split by segment.",
+                    "It asks only for the choices you genuinely have to make, builds a stable outcome_id for you, and produces a clean row ready to paste into the outcome_dictionary sheet of the standard Outcomes upload workbook.",
+                ],
+            ),
+            (
+                "What you need to fill in",
+                [
+                    "Go to the BUILDER sheet. Fill in product, metric_key, segment, and metric for every KPI row -- these are the fields outcome_id is built from.",
+                    "Only fill in the amber (Fields you may need) columns if they apply: outcome grouping, eligibility overrides, or value reporting. Leave them blank otherwise -- the app already has sensible defaults.",
+                    "Only fill in the grey (official-approval) columns once you are ready to get this outcome approved for production reporting.",
+                ],
+            ),
+            (
+                "What is generated automatically",
+                [
+                    "Generated ID -- built from product + metric_key + segment.",
+                    "Final ID -- the Generated ID, unless you type something in Manual override.",
+                    "Row status -- plain-English text telling you if the row is Ready, missing something, or a duplicate.",
+                    "The DICTIONARY_OUTPUT sheet -- every column the upload expects, in the right order, computed live from your BUILDER entries.",
+                ],
+            ),
+            (
+                "What is required, conditional, and optional",
+                [
+                    "Required (white columns): product, metric_key, segment, metric.",
+                    "Conditional (amber columns, fill in only when it applies): segment_dimension, the four outcome-group fields, role and the five eligibility switches, value_weight/value_currency.",
+                    "Optional / advanced (grey columns, official approval only): definition_version, event_definition, cohort_or_attribution_basis, completeness_or_maturity_policy, exclusions, reconciliation_source, business_owner, effective_from, effective_to.",
+                    "Not asked at all: unit and aggregation_type. The app derives both automatically from metric_key for every registered metric -- DICTIONARY_OUTPUT leaves them blank on purpose, and that is correct.",
+                    "Not included in this builder: date_basis and maturity_required. The schema-necessity review confirmed the app does not currently read either field for anything (see docs/Ancestry_MMM_Upload_Schema_Necessity_Review.md). If your project needs them recorded anyway, add the columns and values by hand after copying the output.",
+                ],
+            ),
+            (
+                "How dropdowns work",
+                [
+                    "product, metric_key, segment_dimension, group_aggregation, role, and the TRUE/FALSE eligibility switches are dropdowns built from the app's own governed lists. Click a cell in one of those columns and choose from the list, or see the ALLOWED_VALUES sheet for the full, current set with plain-English explanations.",
+                ],
+            ),
+            (
+                "How validation works",
+                [
+                    "The Row status column recalculates automatically as you type. It tells you in plain English whether a row is Ready, missing a required field, or a duplicate outcome_id -- fix the thing it names, then check again.",
+                ],
+            ),
+            (
+                "Where the final dictionary output goes",
+                [
+                    "Select every data row of the DICTIONARY_OUTPUT sheet, copy, and Paste Special > Values into the outcome_dictionary sheet of the standard Outcomes upload workbook.",
+                ],
+            ),
+            (
+                "Where the actual weekly KPI numbers go",
+                [
+                    "This builder never asks for your weekly numbers. Those go in the outcomes sheet of the same Outcomes upload workbook -- one column per outcome_id, one row per period_start x market.",
+                ],
+            ),
+        ],
+    )
+
+    builder = wb.create_sheet("BUILDER")
+    headers = [
+        "product",
+        "metric_key",
+        "segment",
+        "metric",
+        "source_column",
+        "outcome_id (existing)",
+        "Manual override",
+        "Generated ID",
+        "Final ID",
+        "Row status",
+        "segment_dimension",
+        "outcome_group_id",
+        "outcome_group_label",
+        "outcome_family_key",
+        "group_aggregation",
+        "role",
+        "included_in_fit",
+        "include_in_default_reporting",
+        "include_in_official_total",
+        "include_in_value",
+        "include_in_optimisation",
+        "value_weight",
+        "value_currency",
+        "definition_version",
+        "event_definition",
+        "cohort_or_attribution_basis",
+        "completeness_or_maturity_policy",
+        "exclusions",
+        "reconciliation_source",
+        "business_owner",
+        "effective_from",
+        "effective_to",
+    ]
+    example_rows = [
+        ["Family History", "fh_gsa", "New", "GSA"],
+        ["Family History", "fh_gsa", "DNA_CrossSell", "GSA"],
+        ["Family History", "fh_gsa", "Winback", "GSA"],
+        ["Family History", "fh_net_billthrough_count", "New", "Net bill-through count"],
+        ["DNA", "dna_kit_sale", "New Customer", "Kit sale"],
+    ]
+    pad = len(headers) - 4
+    example_rows = [row + [""] * pad for row in example_rows]
+    rows = example_rows + [[""] * len(headers) for _ in range(20)]
+    add_candidate_table(builder, headers, rows, "OutcomeCandidates")
+    first_row, last_row = 8, 7 + len(rows)
+    data_rows = range(first_row, last_row + 1)
+
+    def col(name: str) -> str:
+        return get_column_letter(headers.index(name) + 1)
+
+    token_columns = add_hidden_token_columns(
+        builder,
+        [col("product"), col("metric_key"), col("segment")],
+        data_rows,
+        start_col=len(headers) + 3,
+    )
+    generated_col, final_col, status_col = (
+        col("Generated ID"),
+        col("Final ID"),
+        col("Row status"),
+    )
+    existing_col, override_col = col("outcome_id (existing)"), col("Manual override")
+    p, m, s, mt = col("product"), col("metric_key"), col("segment"), col("metric")
+    for r in data_rows:
+        builder[f"{generated_col}{r}"] = join_token_columns(token_columns, r)
+        builder[f"{final_col}{r}"] = (
+            f'=IF(TRIM({override_col}{r})<>"",TRIM({override_col}{r}),{generated_col}{r})'
+        )
+        builder[f"{status_col}{r}"] = (
+            f'=IF(OR({p}{r}="",{m}{r}="",{s}{r}="",{mt}{r}=""),'
+            '"Missing required field — fill in product, metric_key, segment, and metric before this row can be used.",'
+            f'IF({generated_col}{r}="","Missing required field — product, metric_key, and segment must combine into an ID.",'
+            f"IF(COUNTIF(${final_col}${first_row}:${final_col}${last_row},{final_col}{r})>1,"
+            '"Duplicate outcome ID — two rows currently build the same outcome_id; add a distinguishing detail.",'
+            f'IF(AND({existing_col}{r}<>"",{existing_col}{r}<>{final_col}{r}),'
+            '"Existing outcome_id differs from the built ID — review before using.","Ready"))))'
+        )
+
+    widths = {get_column_letter(i): 20 for i in range(1, len(headers) + 1)}
+    widths[status_col] = 48
+    widths[col("metric")] = 26
+    common_candidate_style(builder, widths)
+    color_header_range(
+        builder,
+        7,
+        headers.index("segment_dimension") + 1,
+        headers.index("value_currency") + 1,
+        "8C6A00",
+    )
+    color_header_range(
+        builder,
+        7,
+        headers.index("definition_version") + 1,
+        headers.index("effective_to") + 1,
+        "5D6B78",
+    )
+
+    add_dropdown(
+        builder, f"{p}{first_row}:{p}{last_row}", list(KNOWN_PRODUCTS), "Product"
+    )
+    add_dropdown(
+        builder,
+        f"{m}{first_row}:{m}{last_row}",
+        OUTCOME_METRIC_KEY_CHOICES,
+        "Metric key",
+    )
+    add_dropdown(
+        builder,
+        f"{col('segment_dimension')}{first_row}:{col('segment_dimension')}{last_row}",
+        list(SEGMENT_DIMENSIONS),
+        "Segment dimension",
+    )
+    add_dropdown(
+        builder,
+        f"{col('group_aggregation')}{first_row}:{col('group_aggregation')}{last_row}",
+        list(OUTCOME_GROUP_AGGREGATIONS),
+        "Group aggregation",
+    )
+    add_dropdown(
+        builder,
+        f"{col('role')}{first_row}:{col('role')}{last_row}",
+        list(OUTCOME_ROLES),
+        "Role",
+    )
+    for flag in (
+        "included_in_fit",
+        "include_in_default_reporting",
+        "include_in_official_total",
+        "include_in_value",
+        "include_in_optimisation",
+    ):
+        add_dropdown(
+            builder,
+            f"{col(flag)}{first_row}:{col(flag)}{last_row}",
+            TRUE_FALSE_BLANK,
+            flag,
+        )
+    add_status_conditional_formatting(
+        builder,
+        f"{status_col}{first_row}:{status_col}{last_row}",
+        f"{status_col}{first_row}",
+    )
+
+    source_column_col = col("source_column")
+    column_map = {
+        "outcome_id": builder_ref(final_col),
+        "source_column": (
+            "=IF(TRIM('BUILDER'!" + source_column_col + '{r})<>"",'
+            "'BUILDER'!" + source_column_col + "{r},'BUILDER'!" + final_col + "{r})"
+        ),
+        "product": builder_ref(p),
+        "metric_key": builder_ref(m),
+        "metric": builder_ref(mt),
+        "segment_dimension": builder_ref_or_default(
+            col("segment_dimension"), "unspecified"
+        ),
+        "segment": builder_ref(s),
+        "outcome_group_id": builder_ref(col("outcome_group_id")),
+        "outcome_group_label": builder_ref(col("outcome_group_label")),
+        "outcome_family_key": builder_ref(col("outcome_family_key")),
+        "group_aggregation": builder_ref(col("group_aggregation")),
+        "unit": None,
+        "aggregation_type": None,
+        "role": builder_ref(col("role")),
+        "included_in_fit": builder_ref(col("included_in_fit")),
+        "include_in_default_reporting": builder_ref(
+            col("include_in_default_reporting")
+        ),
+        "include_in_official_total": builder_ref(col("include_in_official_total")),
+        "include_in_value": builder_ref(col("include_in_value")),
+        "include_in_optimisation": builder_ref(col("include_in_optimisation")),
+        "definition_version": builder_ref(col("definition_version")),
+        "event_definition": builder_ref(col("event_definition")),
+        "cohort_or_attribution_basis": builder_ref(col("cohort_or_attribution_basis")),
+        "completeness_or_maturity_policy": builder_ref(
+            col("completeness_or_maturity_policy")
+        ),
+        "exclusions": builder_ref(col("exclusions")),
+        "reconciliation_source": builder_ref(col("reconciliation_source")),
+        "business_owner": builder_ref(col("business_owner")),
+        "effective_from": builder_ref(col("effective_from")),
+        "effective_to": builder_ref(col("effective_to")),
+        "value_weight": builder_ref(col("value_weight")),
+        "value_currency": builder_ref(col("value_currency")),
+    }
+    add_dictionary_output_sheet(
+        wb, OUTCOME_DICTIONARY_OUTPUT_COLUMNS, column_map, data_rows
+    )
+
+    allowed_rows: list[list[str]] = []
+    for value in KNOWN_PRODUCTS:
+        allowed_rows.append(
+            [
+                "product",
+                value,
+                f"The {value} product line.",
+                "Every outcome must belong to one product.",
+            ]
+        )
+    for key, definition in METRIC_REGISTRY.items():
+        allowed_rows.append(
+            [
+                "metric_key",
+                key,
+                f"{definition.display_name} ({definition.product or 'any product'}).",
+                "Use the registered key whenever the metric already exists.",
+            ]
+        )
+    allowed_rows.append(
+        [
+            "metric_key",
+            METRIC_KEY_CUSTOM,
+            "A genuinely new measure not yet in the registry.",
+            "Only when no registered key matches.",
+        ]
+    )
+    for value in SEGMENT_DIMENSIONS:
+        allowed_rows.append(
+            [
+                "segment_dimension",
+                value,
+                "Which approved vocabulary the segment value comes from.",
+                "Only if the same segment word could mean different things in different places.",
+            ]
+        )
+    for value in OUTCOME_GROUP_AGGREGATIONS:
+        allowed_rows.append(
+            [
+                "group_aggregation",
+                value,
+                "sum = components add to a governed total; none = descriptive grouping only.",
+                "Only if this outcome is part of a governed semantic group.",
+            ]
+        )
+    for value in OUTCOME_ROLES:
+        allowed_rows.append(
+            [
+                "role",
+                value,
+                "Drives the default eligibility switches when they are left blank.",
+                "Only if the primary default does not match this outcome.",
+            ]
+        )
+    for flag in (
+        "included_in_fit",
+        "include_in_default_reporting",
+        "include_in_official_total",
+        "include_in_value",
+        "include_in_optimisation",
+    ):
+        allowed_rows.append(
+            [
+                flag,
+                "TRUE",
+                "This outcome is included for this purpose.",
+                "Only to override the role-based default.",
+            ]
+        )
+        allowed_rows.append(
+            [
+                flag,
+                "FALSE",
+                "This outcome is excluded for this purpose.",
+                "Only to override the role-based default.",
+            ]
+        )
+    for field in (
+        "segment",
+        "metric",
+        "source_column",
+        "outcome_group_id",
+        "outcome_group_label",
+        "outcome_family_key",
+        "value_weight",
+        "value_currency",
+        "definition_version",
+        "event_definition",
+        "cohort_or_attribution_basis",
+        "completeness_or_maturity_policy",
+        "exclusions",
+        "reconciliation_source",
+        "business_owner",
+        "effective_from",
+        "effective_to",
+    ):
+        allowed_rows.append(
+            [
+                field,
+                "Free text — no fixed list",
+                "Not a governed enum.",
+                "Enter as plain text; there is no dropdown.",
+            ]
+        )
+    write_allowed_values(wb, allowed_rows)
+
+    write_examples(
+        wb,
+        ["Example", "Outcome identity", "Why"],
+        [
+            [
+                "Good",
+                "fh_gsa_new",
+                "Stable product + metric_key + segment identity; meaning is still in the dictionary.",
+            ],
+            [
+                "Good",
+                "dna_kit_sale_new_customer",
+                "DNA relationship partition is explicit when source supports it.",
+            ],
+            ["Invalid", "gsa", "Too little identity; product and segment collide."],
+            [
+                "Invalid",
+                "fh_gsa_2026_01_05_uk",
+                "Time and market are row/source scope, not a new outcome definition.",
+            ],
+            [
+                "Review",
+                "fh_gsa_dna_cross_sell",
+                "Use the approved project spelling/lineage; do not infer from a friendly label.",
+            ],
+        ],
+    )
+
     wb.calculation.fullCalcOnLoad = True
     wb.calculation.forceFullCalc = True
     wb.save(path)
 
 
-def build_activity_workbook(path: Path) -> None:
+def build_activity_dictionary_builder(path: Path) -> None:
     wb = Workbook()
-    ws = wb.active
-    ws.title = "ID Builder"
-    set_title(
-        ws,
-        "Activity ID Builder",
-        "Formula-driven, no VBA · progressive collision checks",
-        "Use the smallest stable identity that distinguishes an activity. Keep measures, units, and descriptive fields in the dictionary.",
+    start_here = wb.active
+    start_here.title = "START_HERE"
+    write_start_here(
+        start_here,
+        "Activity / Media Dictionary Builder",
+        "Formula-driven, no VBA -- builds a complete activity_dictionary row and its activity_id",
+        [
+            (
+                "What this builder is for",
+                [
+                    "Use this workbook to define one row per activity (a channel/platform/campaign-type combination such as Paid Search - Google - Brand) that you have spend, clicks, or impressions for.",
+                    "It builds a stable activity_id for you from the fields that genuinely distinguish one activity from another, and produces a clean row ready to paste into the activity_dictionary sheet of the standard Activity and Media upload workbook.",
+                ],
+            ),
+            (
+                "What you need to fill in",
+                [
+                    "Go to the BUILDER sheet. Fill in channel, market, activity_ownership, intended_model_role, model_input_measure, economic_treatment, planning_eligibility, and source for every activity row.",
+                    "For Paid Search activities you want split by Brand/Non-Brand and Google/Bing, also fill in campaign_type, search_platform, and search_intent_group_id -- these help build a clear id.",
+                    "Only fill in the grey (optional/advanced) columns if you have the information handy -- they are reporting metadata, not fit or planning inputs.",
+                ],
+            ),
+            (
+                "What is generated automatically",
+                [
+                    "Generated ID -- built from channel plus whichever of platform, campaign_type, search_platform, and search_intent_group_id you filled in.",
+                    "Final ID -- the Generated ID, unless you type something in Manual override.",
+                    "Row status -- plain-English text telling you if the row is Ready, missing something, or a duplicate.",
+                    "The DICTIONARY_OUTPUT sheet -- every column the upload expects, in the right order, computed live from your BUILDER entries.",
+                ],
+            ),
+            (
+                "What is required, conditional, and optional",
+                [
+                    "Required (white columns): channel, market, activity_ownership, intended_model_role, model_input_measure, economic_treatment, planning_eligibility, source.",
+                    "Conditional (amber columns, Paid Search identity only): platform, campaign_type, search_platform, search_intent_group_id.",
+                    "Optional / advanced (grey columns): pooling_group_id, funnel_stage, marketing_objective, product_advertised, message_type, currency, effective_from, effective_to. The schema-necessity review confirmed the model, canonicalisation, and optimiser never read these values -- only reporting rollups and the causal-graph display do. Leave the BUILDER cell blank if you don't have the information; DICTIONARY_OUTPUT automatically writes a harmless placeholder (unclassified for funnel_stage, not specified for the rest, pooling_group_id genuinely blank) instead of a truly empty cell, because the live upload currently rejects an empty value in those columns even though nothing meaningful reads it.",
+                    "Not asked at all in this builder: model_input_unit, model_input_kind, spend_column, response_unit_column, response_unit. The necessity review confirmed these five v2 dictionary columns are currently write-only in the standard upload path -- filling them in does nothing today, and the real place to set units and cost mappings is inside the app, in Channel Media Units and Curve Generation, after your data is uploaded. Their column headers still appear (blank) in DICTIONARY_OUTPUT: once other v2 columns like currency are present, the current schema requires the full v2 column set to exist, so removing these headers entirely would make the whole row rejected. This builder never asks you to fill them in.",
+                ],
+            ),
+            (
+                "How dropdowns work",
+                [
+                    "activity_ownership, intended_model_role, economic_treatment, planning_eligibility, funnel_stage, search_platform, and search_intent_group_id are dropdowns built from the app's own governed lists. campaign_type and marketing_objective offer suggestions but also accept free text, matching how the app actually treats them. See the ALLOWED_VALUES sheet for the full, current set with plain-English explanations.",
+                ],
+            ),
+            (
+                "How validation works",
+                [
+                    "The Row status column recalculates automatically as you type. It tells you in plain English whether a row is Ready, missing a required field, or a duplicate activity_id -- fix the thing it names, then check again.",
+                ],
+            ),
+            (
+                "Where the final dictionary output goes",
+                [
+                    "Select every data row of the DICTIONARY_OUTPUT sheet, copy, and Paste Special > Values into the activity_dictionary sheet of the standard Activity and Media upload workbook.",
+                ],
+            ),
+            (
+                "Where the actual weekly activity numbers go",
+                [
+                    "This builder never asks for your weekly spend, clicks, or impressions. Those go in the activity_data sheet of the same upload workbook, one row per period_start x market x activity_id.",
+                ],
+            ),
+        ],
     )
+
+    builder = wb.create_sheet("BUILDER")
     headers = [
         "channel",
+        "market",
+        "activity_ownership",
+        "intended_model_role",
+        "model_input_column",
+        "model_input_measure",
+        "economic_treatment",
+        "planning_eligibility",
+        "source",
+        "activity_id (existing)",
+        "Manual override",
+        "Generated ID",
+        "Final ID",
+        "Row status",
         "platform",
         "campaign_type",
         "search_platform",
         "search_intent_group_id",
-        "activity_id (existing)",
-        "Manual override ID",
-        "Suggested ID",
-        "Final ID",
-        "Collision / completeness warning",
-        "Dictionary row preview",
+        "pooling_group_id",
+        "funnel_stage",
+        "marketing_objective",
+        "product_advertised",
+        "message_type",
+        "currency",
+        "effective_from",
+        "effective_to",
     ]
-    rows = [
+    example_rows = [
         [
             "Paid Search",
-            "Google",
-            "Brand",
-            "google",
-            "brand_search",
+            "UK",
+            "paid",
+            "intervention",
             "",
-            "",
-            "",
-            "",
-            "",
-            "",
+            "spend",
+            "paid_media_cost",
+            "optimisable",
+            "Google Ads export",
         ],
         [
             "Paid Search",
-            "Bing",
-            "Brand",
-            "bing",
-            "brand_search",
+            "UK",
+            "paid",
+            "intervention",
             "",
-            "",
-            "",
-            "",
-            "",
-            "",
+            "spend",
+            "paid_media_cost",
+            "optimisable",
+            "Bing Ads export",
         ],
         [
-            "Paid Search",
-            "Google",
-            "Non-Brand",
-            "google",
-            "non_brand_search",
+            "TV",
+            "UK",
+            "paid",
+            "intervention",
             "",
-            "",
-            "",
-            "",
-            "",
-            "",
+            "spend",
+            "paid_media_cost",
+            "optimisable",
+            "Broadcaster invoice",
         ],
         [
-            "Paid Search",
-            "Bing",
-            "Non-Brand",
-            "bing",
-            "non_brand_search",
+            "SEO",
+            "UK",
+            "owned",
+            "demand_capture",
             "",
-            "",
-            "",
-            "",
-            "",
-            "",
+            "clicks",
+            "response_only",
+            "scenario_only",
+            "Google Search Console",
         ],
-        ["TV", "Example broadcaster", "Brand", "", "", "", "", "", "", "", ""],
-        ["SEO", "Google Search Console", "Visibility", "", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", "", "", "", "", ""],
     ]
-    add_candidate_table(ws, headers, rows, "ActivityCandidates")
+    pad = len(headers) - 9
+    example_rows = [row + [""] * pad for row in example_rows]
+    example_rows[0][headers.index("platform")] = "Google"
+    example_rows[0][headers.index("campaign_type")] = "Brand"
+    example_rows[0][headers.index("search_platform")] = "google"
+    example_rows[0][headers.index("search_intent_group_id")] = (
+        SEARCH_INTENT_GROUP_ID_BRAND
+    )
+    example_rows[1][headers.index("platform")] = "Bing"
+    example_rows[1][headers.index("campaign_type")] = "Brand"
+    example_rows[1][headers.index("search_platform")] = "bing"
+    example_rows[1][headers.index("search_intent_group_id")] = (
+        SEARCH_INTENT_GROUP_ID_BRAND
+    )
+    rows = example_rows + [[""] * len(headers) for _ in range(20)]
+    add_candidate_table(builder, headers, rows, "ActivityCandidates")
+    first_row, last_row = 8, 7 + len(rows)
+    data_rows = range(first_row, last_row + 1)
+
+    def col(name: str) -> str:
+        return get_column_letter(headers.index(name) + 1)
+
+    id_inputs = [
+        col("channel"),
+        col("platform"),
+        col("campaign_type"),
+        col("search_platform"),
+        col("search_intent_group_id"),
+    ]
     token_columns = add_hidden_token_columns(
-        ws, ["A", "B", "C", "D", "E"], range(8, 8 + len(rows))
+        builder, id_inputs, data_rows, start_col=len(headers) + 3
     )
-    for r in range(8, 8 + len(rows)):
-        ws.cell(r, 8).value = join_token_columns(token_columns, r)
-        ws.cell(
-            r, 9
-        ).value = f'=IF(TRIM(G{r})<>G{r},TRIM(G{r}),IF(TRIM(G{r})<>"",G{r},H{r}))'
-        ws.cell(
-            r, 10
-        ).value = f'=IF(I{r}="","RED: complete channel and a meaningful activity distinction",IF(COUNTIF($I$8:$I$25,I{r})>1,"AMBER: duplicate final ID — add the next meaningful field; do not add a random number",IF(F{r}<>"",IF(F{r}<>I{r},"AMBER: existing ID differs from built ID — review lineage","OK: existing ID matches"),"OK: unique in this builder")))'
-        ws.cell(
-            r, 11
-        ).value = f'=IF(I{r}="","", "activity_id="&I{r}&" | channel="&A{r}&" | platform="&B{r}&" | campaign_type="&C{r}&" | search_platform="&D{r}&" | search_intent_group_id="&E{r})'
-    common_candidate_style(
-        ws,
-        {
-            "A": 20,
-            "B": 25,
-            "C": 20,
-            "D": 20,
-            "E": 26,
-            "F": 29,
-            "G": 24,
-            "H": 32,
-            "I": 32,
-            "J": 65,
-            "K": 125,
-        },
+    generated_col, final_col, status_col = (
+        col("Generated ID"),
+        col("Final ID"),
+        col("Row status"),
     )
-    add_dropdown(ws, "D8:D25", ["google", "bing"], "Search platform")
+    existing_col, override_col = col("activity_id (existing)"), col("Manual override")
+    ch, mk, own, role, mim, mms, econ, plan, src = (
+        col("channel"),
+        col("market"),
+        col("activity_ownership"),
+        col("intended_model_role"),
+        col("model_input_column"),
+        col("model_input_measure"),
+        col("economic_treatment"),
+        col("planning_eligibility"),
+        col("source"),
+    )
+    for r in data_rows:
+        builder[f"{generated_col}{r}"] = join_token_columns(token_columns, r)
+        builder[f"{final_col}{r}"] = (
+            f'=IF(TRIM({override_col}{r})<>"",TRIM({override_col}{r}),{generated_col}{r})'
+        )
+        builder[f"{status_col}{r}"] = (
+            f'=IF(OR({ch}{r}="",{mk}{r}="",{own}{r}="",{role}{r}="",{mms}{r}="",{econ}{r}="",{plan}{r}="",{src}{r}=""),'
+            '"Missing required field — fill in channel, market, activity_ownership, intended_model_role, model_input_measure, economic_treatment, planning_eligibility, and source.",'
+            f'IF({generated_col}{r}="","Missing required field — channel must be filled in to build an ID.",'
+            f"IF(COUNTIF(${final_col}${first_row}:${final_col}${last_row},{final_col}{r})>1,"
+            '"Duplicate activity ID — two rows currently build the same activity_id; add the next meaningful field, not a random number.",'
+            f'IF(AND({existing_col}{r}<>"",{existing_col}{r}<>{final_col}{r}),'
+            '"Existing activity_id differs from the built ID — review before using.","Ready"))))'
+        )
+
+    widths = {get_column_letter(i): 20 for i in range(1, len(headers) + 1)}
+    widths[status_col] = 48
+    widths[col("channel")] = 16
+    common_candidate_style(builder, widths)
+    color_header_range(
+        builder,
+        7,
+        headers.index("platform") + 1,
+        headers.index("search_intent_group_id") + 1,
+        "8C6A00",
+    )
+    color_header_range(
+        builder,
+        7,
+        headers.index("pooling_group_id") + 1,
+        headers.index("effective_to") + 1,
+        "5D6B78",
+    )
+
     add_dropdown(
-        ws, "E8:E25", ["brand_search", "non_brand_search"], "Search intent group"
+        builder,
+        f"{own}{first_row}:{own}{last_row}",
+        list(OWNERSHIP),
+        "activity_ownership",
     )
-    ws.conditional_formatting.add(
-        "J8:J25",
-        FormulaRule(
-            formula=['ISNUMBER(SEARCH("RED",J8))'],
-            fill=PatternFill("solid", fgColor="FCE4E4"),
+    add_dropdown(
+        builder,
+        f"{role}{first_row}:{role}{last_row}",
+        list(MODEL_ROLES),
+        "intended_model_role",
+    )
+    add_dropdown(
+        builder,
+        f"{econ}{first_row}:{econ}{last_row}",
+        list(ECONOMIC_TREATMENTS),
+        "economic_treatment",
+    )
+    add_dropdown(
+        builder,
+        f"{plan}{first_row}:{plan}{last_row}",
+        list(PLANNING_ELIGIBILITY),
+        "planning_eligibility",
+    )
+    add_dropdown(
+        builder,
+        f"{col('search_platform')}{first_row}:{col('search_platform')}{last_row}",
+        list(SEARCH_PLATFORMS),
+        "search_platform",
+    )
+    add_dropdown(
+        builder,
+        f"{col('search_intent_group_id')}{first_row}:{col('search_intent_group_id')}{last_row}",
+        [SEARCH_INTENT_GROUP_ID_BRAND, SEARCH_INTENT_GROUP_ID_NON_BRAND],
+        "search_intent_group_id",
+    )
+    add_dropdown(
+        builder,
+        f"{col('funnel_stage')}{first_row}:{col('funnel_stage')}{last_row}",
+        list(FUNNEL_STAGES),
+        "funnel_stage",
+    )
+    add_soft_dropdown(
+        builder,
+        f"{col('campaign_type')}{first_row}:{col('campaign_type')}{last_row}",
+        ["Brand", "Non-Brand"],
+        "campaign_type",
+    )
+    add_soft_dropdown(
+        builder,
+        f"{col('marketing_objective')}{first_row}:{col('marketing_objective')}{last_row}",
+        list(MARKETING_OBJECTIVE_SUGGESTIONS),
+        "marketing_objective",
+    )
+    add_status_conditional_formatting(
+        builder,
+        f"{status_col}{first_row}:{status_col}{last_row}",
+        f"{status_col}{first_row}",
+    )
+
+    column_map = {
+        "activity_id": builder_ref(final_col),
+        "market": builder_ref(mk),
+        "pooling_group_id": builder_ref(col("pooling_group_id")),
+        "channel": builder_ref(ch),
+        "platform": builder_ref_or_default(col("platform"), "not specified"),
+        "campaign_type": builder_ref_or_default(col("campaign_type"), "not specified"),
+        "marketing_objective": builder_ref_or_default(
+            col("marketing_objective"), "not specified"
         ),
-    )
-    ws.conditional_formatting.add(
-        "J8:J25",
-        FormulaRule(
-            formula=['ISNUMBER(SEARCH("AMBER",J8))'],
-            fill=PatternFill("solid", fgColor="FFF1CC"),
+        "funnel_stage": builder_ref_or_default(col("funnel_stage"), "unclassified"),
+        "product_advertised": builder_ref_or_default(
+            col("product_advertised"), "not specified"
         ),
-    )
-    ws.conditional_formatting.add(
-        "J8:J25",
-        FormulaRule(
-            formula=['LEFT(J8,2)="OK"'], fill=PatternFill("solid", fgColor="E3F4E6")
+        "message_type": builder_ref_or_default(col("message_type"), "not specified"),
+        "activity_ownership": builder_ref(own),
+        "intended_model_role": builder_ref(role),
+        "model_input_column": (
+            "=IF(TRIM('BUILDER'!" + mim + '{r})<>"",'
+            "'BUILDER'!" + mim + "{r},'BUILDER'!" + final_col + "{r})"
         ),
+        "model_input_measure": builder_ref(mms),
+        "economic_treatment": builder_ref(econ),
+        "planning_eligibility": builder_ref(plan),
+        "source": builder_ref(src),
+        "currency": builder_ref(col("currency")),
+        "effective_from": builder_ref(col("effective_from")),
+        "effective_to": builder_ref(col("effective_to")),
+    }
+    add_dictionary_output_sheet(
+        wb, ACTIVITY_DICTIONARY_OUTPUT_COLUMNS, column_map, data_rows
     )
-    add_rag_reference(
+
+    allowed_rows: list[list[str]] = (
+        [
+            [
+                "activity_ownership",
+                v,
+                "Who controls or supplies the activity.",
+                "Always -- keeps paid, owned, earned, and events distinct.",
+            ]
+            for v in OWNERSHIP
+        ]
+        + [
+            [
+                "intended_model_role",
+                v,
+                "Intended role in the model.",
+                "Always -- separates treatments, controls, mediators, and demand capture.",
+            ]
+            for v in MODEL_ROLES
+        ]
+        + [
+            [
+                "economic_treatment",
+                v,
+                "How cost/value is treated.",
+                "Always -- keeps economics separate from physical measurement.",
+            ]
+            for v in ECONOMIC_TREATMENTS
+        ]
+        + [
+            [
+                "planning_eligibility",
+                v,
+                "Whether planning or optimisation may use the activity.",
+                "Always -- fit does not automatically grant planning rights.",
+            ]
+            for v in PLANNING_ELIGIBILITY
+        ]
+        + [
+            [
+                "funnel_stage",
+                v,
+                "Approved funnel position (reporting only).",
+                "Only if you track funnel-stage reporting.",
+            ]
+            for v in FUNNEL_STAGES
+        ]
+        + [
+            [
+                "search_platform",
+                v,
+                "Governed platform axis for Paid Search identity.",
+                "Only for Paid Search activities you want split by platform.",
+            ]
+            for v in SEARCH_PLATFORMS
+        ]
+        + [
+            [
+                "search_intent_group_id",
+                SEARCH_INTENT_GROUP_ID_BRAND,
+                "Brand Search intent.",
+                "Only for Paid Search activities you want split by Brand/Non-Brand.",
+            ],
+            [
+                "search_intent_group_id",
+                SEARCH_INTENT_GROUP_ID_NON_BRAND,
+                "Non-Brand Search intent.",
+                "Only for Paid Search activities you want split by Brand/Non-Brand.",
+            ],
+        ]
+        + [
+            [
+                "campaign_type",
+                "Brand / Non-Brand",
+                "Suggested values only -- not a closed enum in the app.",
+                "Free text is also accepted; the app never rejects an unrecognised value.",
+            ],
+            [
+                "marketing_objective",
+                ", ".join(MARKETING_OBJECTIVE_SUGGESTIONS),
+                "Suggested values only -- not a closed enum in the app.",
+                "Free text is also accepted.",
+            ],
+        ]
+        + [
+            [
+                field,
+                "Free text — no fixed list",
+                "Not a governed enum.",
+                "Enter as plain text; there is no dropdown.",
+            ]
+            for field in (
+                "channel",
+                "market",
+                "source",
+                "model_input_measure",
+                "product_advertised",
+                "message_type",
+                "pooling_group_id",
+                "currency",
+                "effective_from",
+                "effective_to",
+            )
+        ]
+    )
+    write_allowed_values(wb, allowed_rows)
+
+    write_examples(
         wb,
-        ACTIVITY_RAG,
-        {
-            "channel": "yes",
-            "platform": "only if needed",
-            "campaign_type": "only if needed",
-            "search_platform": "only if needed",
-            "search_intent_group_id": "only if needed",
-            "channel__why": "Starts the stable activity identity.",
-            "platform__why": "Distinguishes platforms when channel alone collides.",
-            "campaign_type__why": "Adds the next meaningful distinction when needed.",
-            "search_platform__why": "Separates Google and Bing Search leaves.",
-            "search_intent_group_id__why": "Separates Brand and Non-Brand Search leaves.",
-        },
-    )
-    ex = wb.create_sheet("Examples")
-    ex.append(["Check", "Good", "Invalid / risky", "Reason"])
-    ex.append(
+        ["Check", "Good", "Invalid / risky", "Reason"],
         [
-            "Raw vs model-ready",
-            "model_input_measure=spend; model_input_column=uk_paid_search_google_brand",
-            "model_input_measure=uk_paid_search_google_brand",
-            "The first is a raw source header; the second is a destination.",
-        ]
+            [
+                "Raw vs model-ready",
+                "model_input_measure=spend; model_input_column=uk_paid_search_google_brand",
+                "model_input_measure=uk_paid_search_google_brand",
+                "The first is a raw source header; the second is a destination.",
+            ],
+            [
+                "Search leaves",
+                "Google Brand, Bing Brand, Google Non-Brand, Bing Non-Brand",
+                "One generic Brand Search activity",
+                "Parent totals are calculated from explicit leaves.",
+            ],
+            [
+                "Identity",
+                "paid_search_google_brand",
+                "paid_search_2026_01_05_uk_12345",
+                "Do not encode time or random numbers into stable identity.",
+            ],
+            [
+                "Capacity",
+                "paid_search_cap as separate governed cap",
+                "cap copied into spend",
+                "A cap is a constraint, not realised spend.",
+            ],
+            [
+                "Measures",
+                "spend + clicks + impressions retained; one selected input",
+                "all measures silently summed",
+                "Raw measures have different meanings and units.",
+            ],
+        ],
     )
-    ex.append(
-        [
-            "Search leaves",
-            "Google Brand, Bing Brand, Google Non-Brand, Bing Non-Brand",
-            "One generic Brand Search activity",
-            "Parent totals are calculated from explicit leaves.",
-        ]
-    )
-    ex.append(
-        [
-            "Identity",
-            "paid_search_google_brand",
-            "paid_search_2026_01_05_uk_12345",
-            "Do not encode time or random numbers into stable identity.",
-        ]
-    )
-    ex.append(
-        [
-            "Capacity",
-            "paid_search_cap as separate governed cap",
-            "cap copied into spend",
-            "A cap is a constraint, not realised spend.",
-        ]
-    )
-    ex.append(
-        [
-            "Measures",
-            "spend + clicks + impressions retained; one selected input",
-            "all measures silently summed",
-            "Raw measures have different meanings and units.",
-        ]
-    )
-    ex.column_dimensions["A"].width = 22
-    ex.column_dimensions["B"].width = 52
-    ex.column_dimensions["C"].width = 52
-    ex.column_dimensions["D"].width = 72
-    for c in ex[1]:
-        c.font = Font(bold=True, color="FFFFFF")
-        c.fill = PatternFill("solid", fgColor="12304A")
-    ex.sheet_view.showGridLines = False
+
     wb.calculation.fullCalcOnLoad = True
     wb.calculation.forceFullCalc = True
     wb.save(path)
 
 
-def build_context_workbook(path: Path) -> None:
+def build_context_dictionary_builder(path: Path) -> None:
     wb = Workbook()
-    ws = wb.active
-    ws.title = "ID Builder"
-    set_title(
-        ws,
-        "Context Variable ID Builder",
-        "Formula-driven, no VBA · stable variable identity",
-        "Build a stable variable ID from meaning. Do not encode source, frequency, unit, or effective dates unless they represent a genuinely different variable.",
+    start_here = wb.active
+    start_here.title = "START_HERE"
+    write_start_here(
+        start_here,
+        "Context / External Factor Dictionary Builder",
+        "Formula-driven, no VBA -- builds a complete variable_dictionary row and its variable_id",
+        [
+            (
+                "What this builder is for",
+                [
+                    "Use this workbook to define one row per context variable -- things outside your control that might explain changes in an outcome, like CPI, seasonality, or a named event flag.",
+                    "It builds a stable variable_id for you from the variable's class and concept, and produces a clean row ready to paste into the variable_dictionary sheet of the standard Context and External Factors upload workbook.",
+                ],
+            ),
+            (
+                "What you need to fill in",
+                [
+                    "Go to the BUILDER sheet. Fill in variable_class, concept, native_frequency, and role for every variable row.",
+                    'Only fill in source and scope once this variable is reviewed for wider use ("adoption") -- not needed for a first upload.',
+                ],
+            ),
+            (
+                "What is generated automatically",
+                [
+                    "Generated ID -- built from variable_class and the concept name.",
+                    "Final ID -- the Generated ID, unless you type something in Manual override.",
+                    "Row status -- plain-English text telling you if the row is Ready, missing something, or a duplicate.",
+                    "The DICTIONARY_OUTPUT sheet -- every column the upload expects, in the right order, computed live from your BUILDER entries.",
+                ],
+            ),
+            (
+                "What is required, conditional, and optional",
+                [
+                    "Required (white columns): variable_class, concept (used only to build the id -- not an upload column itself), native_frequency, role.",
+                    "Conditional (amber columns): source, scope -- only needed once this variable is reviewed for wider use.",
+                    "Optional (grey columns): effective_from, effective_to.",
+                    "Not asked at all in this builder: unit. The schema-necessity review found it is stored and never read again, and is not even included in the app's own adoption completeness check. Its column header still appears (blank) in DICTIONARY_OUTPUT: once source/scope are present, the current schema requires the full v2 column set to exist, so removing this header entirely would make the whole row rejected. This builder never asks you to fill it in.",
+                ],
+            ),
+            (
+                "Read this before filling in variable_class, native_frequency, and role",
+                [
+                    "The schema-necessity review found that the app's real governance screen (Page 15, Data Coverage) does not read the uploaded variable_class or native_frequency at all -- it re-asks for both and defaults them itself regardless of what you upload here.",
+                    "role has no enforced list anywhere in the code today, so this builder offers it as plain free text rather than inventing a dropdown.",
+                    "Filling these in is still required for the upload to be accepted, but expect to confirm variable_class and native_frequency again on Page 15 after upload. This is a documented application limitation, not something this builder can fix -- see docs/Ancestry_MMM_Upload_Schema_Necessity_Review.md.",
+                ],
+            ),
+            (
+                "How dropdowns work",
+                [
+                    "variable_class is a dropdown built from the app's own governed list of five classes. native_frequency offers common suggestions but also accepts free text, since the app has no enforced frequency enum. role is plain free text. See the ALLOWED_VALUES sheet for the full list.",
+                ],
+            ),
+            (
+                "How validation works",
+                [
+                    "The Row status column recalculates automatically as you type. It tells you in plain English whether a row is Ready, missing a required field, or a duplicate variable_id -- fix the thing it names, then check again.",
+                ],
+            ),
+            (
+                "Where the final dictionary output goes",
+                [
+                    "Select every data row of the DICTIONARY_OUTPUT sheet, copy, and Paste Special > Values into the variable_dictionary sheet of the standard Context and External Factors upload workbook.",
+                ],
+            ),
+            (
+                "Where the actual observations go",
+                [
+                    "This builder never asks for your actual observed values. Those go in the context_data sheet of the same upload workbook, one row per period_start x market x variable_id, at whatever frequency the source actually publishes.",
+                ],
+            ),
+        ],
     )
+
+    builder = wb.create_sheet("BUILDER")
     headers = [
         "variable_class",
-        "variable name / concept",
+        "concept (not an upload column)",
+        "native_frequency",
+        "role",
         "variable_id (existing)",
-        "Manual override ID",
-        "Suggested ID",
+        "Manual override",
+        "Generated ID",
         "Final ID",
-        "Collision / completeness warning",
-        "Dictionary row preview",
+        "Row status",
+        "source",
+        "scope",
+        "effective_from",
+        "effective_to",
     ]
-    rows = [
-        ["rate_index", "UK CPI", "", "", "", "", "", ""],
-        ["flow_count", "UK unemployment claims", "", "", "", "", ""],
-        ["stock_level", "UK active subscribers", "", "", "", "", ""],
-        ["survey_measurement", "Brand consideration", "", "", "", "", ""],
-        ["event_flag", "Black Friday", "", "", "", "", ""],
-        ["", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", ""],
+    example_rows = [
+        ["rate_index", "UK CPI", "monthly", "exogenous_forecastable_control"],
+        [
+            "flow_count",
+            "UK unemployment claims",
+            "monthly",
+            "exogenous_forecastable_control",
+        ],
+        [
+            "stock_level",
+            "UK active subscribers",
+            "weekly",
+            "exogenous_forecastable_control",
+        ],
+        [
+            "survey_measurement",
+            "Brand consideration",
+            "monthly",
+            "exogenous_forecastable_control",
+        ],
+        ["event_flag", "Black Friday", "weekly", "exogenous_forecastable_control"],
     ]
-    add_candidate_table(ws, headers, rows, "ContextCandidates")
-    token_columns = add_hidden_token_columns(ws, ["A", "B"], range(8, 8 + len(rows)))
-    for r in range(8, 8 + len(rows)):
-        ws.cell(r, 5).value = join_token_columns(token_columns, r)
-        ws.cell(
-            r, 6
-        ).value = f'=IF(TRIM(D{r})<>D{r},TRIM(D{r}),IF(TRIM(D{r})<>"",D{r},E{r}))'
-        ws.cell(
-            r, 7
-        ).value = f'=IF(F{r}="","RED: complete variable class and concept",IF(COUNTIF($F$8:$F$25,F{r})>1,"AMBER: duplicate final ID — distinguish the actual variable, not its source frequency",IF(C{r}<>"",IF(C{r}<>F{r},"AMBER: existing ID differs from built ID — review lineage","OK: existing ID matches"),"OK: unique in this builder")))'
-        ws.cell(
-            r, 8
-        ).value = f'=IF(F{r}="","", "variable_id="&F{r}&" | variable_class="&A{r}&" | concept="&B{r})'
-    common_candidate_style(
-        ws, {"A": 24, "B": 34, "C": 27, "D": 24, "E": 32, "F": 32, "G": 70, "H": 110}
+    pad = len(headers) - 4
+    example_rows = [row + [""] * pad for row in example_rows]
+    rows = example_rows + [[""] * len(headers) for _ in range(20)]
+    add_candidate_table(builder, headers, rows, "ContextCandidates")
+    first_row, last_row = 8, 7 + len(rows)
+    data_rows = range(first_row, last_row + 1)
+
+    def col(name: str) -> str:
+        return get_column_letter(headers.index(name) + 1)
+
+    vc, concept = col("variable_class"), col("concept (not an upload column)")
+    nf, role = col("native_frequency"), col("role")
+    token_columns = add_hidden_token_columns(
+        builder, [vc, concept], data_rows, start_col=len(headers) + 3
     )
+    generated_col, final_col, status_col = (
+        col("Generated ID"),
+        col("Final ID"),
+        col("Row status"),
+    )
+    existing_col, override_col = col("variable_id (existing)"), col("Manual override")
+    for r in data_rows:
+        builder[f"{generated_col}{r}"] = join_token_columns(token_columns, r)
+        builder[f"{final_col}{r}"] = (
+            f'=IF(TRIM({override_col}{r})<>"",TRIM({override_col}{r}),{generated_col}{r})'
+        )
+        builder[f"{status_col}{r}"] = (
+            f'=IF(OR({vc}{r}="",{concept}{r}="",{nf}{r}="",{role}{r}=""),'
+            '"Missing required field — fill in variable_class, the concept name, native_frequency, and role.",'
+            f'IF({generated_col}{r}="","Missing required field — variable_class and the concept name must combine into an ID.",'
+            f"IF(COUNTIF(${final_col}${first_row}:${final_col}${last_row},{final_col}{r})>1,"
+            '"Duplicate variable ID — two rows currently build the same variable_id; distinguish the actual variable, not its source frequency.",'
+            f'IF(AND({existing_col}{r}<>"",{existing_col}{r}<>{final_col}{r}),'
+            '"Existing variable_id differs from the built ID — review before using.","Ready"))))'
+        )
+
+    widths = {get_column_letter(i): 20 for i in range(1, len(headers) + 1)}
+    widths[status_col] = 48
+    widths[concept] = 30
+    widths[role] = 32
+    common_candidate_style(builder, widths)
+    color_header_range(
+        builder, 7, headers.index("source") + 1, headers.index("scope") + 1, "8C6A00"
+    )
+    color_header_range(
+        builder,
+        7,
+        headers.index("effective_from") + 1,
+        headers.index("effective_to") + 1,
+        "5D6B78",
+    )
+
     add_dropdown(
-        ws,
-        "A8:A25",
-        ["flow_count", "stock_level", "rate_index", "survey_measurement", "event_flag"],
-        "Variable class",
+        builder,
+        f"{vc}{first_row}:{vc}{last_row}",
+        list(VARIABLE_CLASSES),
+        "variable_class",
     )
-    ws.conditional_formatting.add(
-        "G8:G25",
-        FormulaRule(
-            formula=['ISNUMBER(SEARCH("RED",G8))'],
-            fill=PatternFill("solid", fgColor="FCE4E4"),
-        ),
+    add_soft_dropdown(
+        builder,
+        f"{nf}{first_row}:{nf}{last_row}",
+        ["daily", "weekly", "monthly", "quarterly", "yearly", "event"],
+        "native_frequency",
     )
-    ws.conditional_formatting.add(
-        "G8:G25",
-        FormulaRule(
-            formula=['ISNUMBER(SEARCH("AMBER",G8))'],
-            fill=PatternFill("solid", fgColor="FFF1CC"),
-        ),
+    add_status_conditional_formatting(
+        builder,
+        f"{status_col}{first_row}:{status_col}{last_row}",
+        f"{status_col}{first_row}",
     )
-    ws.conditional_formatting.add(
-        "G8:G25",
-        FormulaRule(
-            formula=['LEFT(G8,2)="OK"'], fill=PatternFill("solid", fgColor="E3F4E6")
-        ),
+
+    column_map = {
+        "variable_id": builder_ref(final_col),
+        "variable_class": builder_ref(vc),
+        "native_frequency": builder_ref(nf),
+        "role": builder_ref(role),
+        "source": builder_ref(col("source")),
+        "scope": builder_ref(col("scope")),
+        "effective_from": builder_ref(col("effective_from")),
+        "effective_to": builder_ref(col("effective_to")),
+    }
+    add_dictionary_output_sheet(
+        wb, CONTEXT_DICTIONARY_OUTPUT_COLUMNS, column_map, data_rows
     )
-    add_rag_reference(
+
+    allowed_rows: list[list[str]] = (
+        [
+            [
+                "variable_class",
+                v,
+                "One of the five approved classes.",
+                "Always -- separates flows, stocks, rates, surveys, and event flags.",
+            ]
+            for v in VARIABLE_CLASSES
+        ]
+        + [
+            [
+                "native_frequency",
+                v,
+                "Common publishing frequency.",
+                "Suggested only -- the app has no enforced enum for this field today.",
+            ]
+            for v in ("daily", "weekly", "monthly", "quarterly", "yearly", "event")
+        ]
+        + [
+            [
+                "role",
+                "Free text — no fixed list",
+                'The code has no enforced role enum today, despite being called "governed" in comments.',
+                "Enter as plain text; example: exogenous_forecastable_control. Do not treat this as a closed list.",
+            ],
+            [
+                "source",
+                "Free text — no fixed list",
+                "Provenance reference.",
+                "Only needed once this variable is reviewed for wider use.",
+            ],
+            [
+                "scope",
+                "Free text — no fixed list",
+                "Geographic or business scope.",
+                "Only needed once this variable is reviewed for wider use.",
+            ],
+            [
+                "effective_from",
+                "ISO date",
+                "When this dictionary mapping starts.",
+                "Optional.",
+            ],
+            [
+                "effective_to",
+                "ISO date",
+                "When this dictionary mapping ends.",
+                "Optional.",
+            ],
+        ]
+    )
+    write_allowed_values(wb, allowed_rows)
+
+    write_examples(
         wb,
-        CONTEXT_RAG,
-        {
-            "variable_class": "yes",
-            "variable_id": "yes",
-            "variable_class__why": "Keeps different kinds of variable separate.",
-            "variable_id__why": "Stable identity used by the source dictionary and observations.",
-        },
-    )
-    ex = wb.create_sheet("Examples")
-    ex.append(["Check", "Good", "Invalid / risky", "Reason"])
-    ex.append(
+        ["Check", "Good", "Invalid / risky", "Reason"],
         [
-            "Stable ID",
-            "rate_index_uk_cpi",
-            "rate_index_uk_cpi_monthly_gbp_2026",
-            "Frequency, unit, and dates belong in the dictionary unless they change the variable itself.",
-        ]
+            [
+                "Stable ID",
+                "rate_index_uk_cpi",
+                "rate_index_uk_cpi_monthly_gbp_2026",
+                "Frequency, unit, and dates belong in the dictionary unless they change the variable itself.",
+            ],
+            [
+                "Frequency",
+                "native_frequency=monthly",
+                "monthly value copied to weekly rows",
+                "Preserve source frequency and align later by a governed method.",
+            ],
+            [
+                "Missingness",
+                "unavailable_source",
+                "unavailable changed to 0",
+                "Missingness is not observed zero.",
+            ],
+            [
+                "Role",
+                "CPI = exogenous_forecastable_control",
+                "branded-search demand = exogenous control",
+                "An endogenous mediator must be model-generated.",
+            ],
+            [
+                "Event",
+                "event_id + factual dates",
+                "event flag inferred from a campaign name",
+                "Named-event treatment is a separate governed path.",
+            ],
+        ],
     )
-    ex.append(
-        [
-            "Frequency",
-            "native_frequency=monthly",
-            "monthly value copied to weekly rows",
-            "Preserve source frequency and align later by a governed method.",
-        ]
-    )
-    ex.append(
-        [
-            "Missingness",
-            "unavailable_source",
-            "unavailable changed to 0",
-            "Missingness is not observed zero.",
-        ]
-    )
-    ex.append(
-        [
-            "Role",
-            "CPI = exogenous_forecastable_control",
-            "branded-search demand = exogenous control",
-            "An endogenous mediator must be model-generated.",
-        ]
-    )
-    ex.append(
-        [
-            "Event",
-            "event_id + factual dates",
-            "event flag inferred from a campaign name",
-            "Named-event treatment is a separate governed path.",
-        ]
-    )
-    ex.column_dimensions["A"].width = 22
-    ex.column_dimensions["B"].width = 52
-    ex.column_dimensions["C"].width = 52
-    ex.column_dimensions["D"].width = 80
-    for c in ex[1]:
-        c.font = Font(bold=True, color="FFFFFF")
-        c.fill = PatternFill("solid", fgColor="12304A")
-    ex.sheet_view.showGridLines = False
+
     wb.calculation.fullCalcOnLoad = True
     wb.calculation.forceFullCalc = True
     wb.save(path)
@@ -2971,10 +3846,16 @@ def main() -> None:
     (DOCS / "Ancestry_MMM_Data_Upload_Guide.html").write_text(
         build_html(), encoding="utf-8"
     )
-    build_outcome_workbook(DOCS / "Ancestry_MMM_Outcome_ID_Builder.xlsx")
-    build_activity_workbook(DOCS / "Ancestry_MMM_Activity_ID_Builder.xlsx")
-    build_context_workbook(DOCS / "Ancestry_MMM_Context_Variable_ID_Builder.xlsx")
-    print("generated guide, inventory, and three ID builders")
+    build_outcome_dictionary_builder(
+        DOCS / "Ancestry_MMM_Outcome_Dictionary_Builder.xlsx"
+    )
+    build_activity_dictionary_builder(
+        DOCS / "Ancestry_MMM_Activity_Dictionary_Builder.xlsx"
+    )
+    build_context_dictionary_builder(
+        DOCS / "Ancestry_MMM_Context_Dictionary_Builder.xlsx"
+    )
+    print("generated guide, inventory, and three Dictionary Builders")
 
 
 if __name__ == "__main__":

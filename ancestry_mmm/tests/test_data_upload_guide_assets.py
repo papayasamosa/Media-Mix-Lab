@@ -126,7 +126,288 @@ def test_generator_produces_all_expected_outputs(tmp_path, monkeypatch, guide):
     monkeypatch.setattr(guide, "DOCS", tmp_path)
     guide.main()
     assert (tmp_path / "Ancestry_MMM_Data_Upload_Guide.html").exists()
-    assert (tmp_path / "Ancestry_MMM_Outcome_ID_Builder.xlsx").exists()
-    assert (tmp_path / "Ancestry_MMM_Activity_ID_Builder.xlsx").exists()
-    assert (tmp_path / "Ancestry_MMM_Context_Variable_ID_Builder.xlsx").exists()
+    assert (tmp_path / "Ancestry_MMM_Outcome_Dictionary_Builder.xlsx").exists()
+    assert (tmp_path / "Ancestry_MMM_Activity_Dictionary_Builder.xlsx").exists()
+    assert (tmp_path / "Ancestry_MMM_Context_Dictionary_Builder.xlsx").exists()
     assert (tmp_path / "data_upload_guide_schema_inventory.md").exists()
+    assert not (tmp_path / "Ancestry_MMM_Outcome_ID_Builder.xlsx").exists()
+    assert not (tmp_path / "Ancestry_MMM_Activity_ID_Builder.xlsx").exists()
+    assert not (tmp_path / "Ancestry_MMM_Context_Variable_ID_Builder.xlsx").exists()
+
+
+def test_html_recommends_dictionary_builders_not_old_id_builders(guide):
+    html = guide.build_html()
+    assert "Dictionary_Builder.xlsx" in html
+    assert "ID_Builder.xlsx" not in html
+    assert "Dictionary Builder" in html
+
+
+@pytest.mark.parametrize(
+    ("builder_fn", "expected_columns"),
+    [
+        ("build_outcome_dictionary_builder", "OUTCOME_DICTIONARY_OUTPUT_COLUMNS"),
+        ("build_activity_dictionary_builder", "ACTIVITY_DICTIONARY_OUTPUT_COLUMNS"),
+        ("build_context_dictionary_builder", "CONTEXT_DICTIONARY_OUTPUT_COLUMNS"),
+    ],
+)
+def test_dictionary_builder_output_sheet_matches_live_schema_columns(
+    tmp_path, guide, builder_fn, expected_columns
+):
+    import openpyxl
+
+    path = tmp_path / "builder.xlsx"
+    getattr(guide, builder_fn)(path)
+    wb = openpyxl.load_workbook(path)
+    assert wb.sheetnames == [
+        "START_HERE",
+        "BUILDER",
+        "DICTIONARY_OUTPUT",
+        "ALLOWED_VALUES",
+        "EXAMPLES",
+    ]
+    output = wb["DICTIONARY_OUTPUT"]
+    headers = [cell.value for cell in output[1]]
+    assert headers == getattr(guide, expected_columns)
+
+
+def test_outcome_dictionary_builder_omits_confirmed_inert_fields(tmp_path, guide):
+    import openpyxl
+
+    path = tmp_path / "outcome.xlsx"
+    guide.build_outcome_dictionary_builder(path)
+    wb = openpyxl.load_workbook(path)
+    headers = {cell.value for cell in wb["DICTIONARY_OUTPUT"][1]}
+    assert "date_basis" not in headers
+    assert "maturity_required" not in headers
+
+
+def test_activity_dictionary_builder_never_asks_for_write_only_fields(tmp_path, guide):
+    import openpyxl
+
+    path = tmp_path / "activity.xlsx"
+    guide.build_activity_dictionary_builder(path)
+    wb = openpyxl.load_workbook(path)
+    # The live parser requires these columns' headers to exist once other v2
+    # extras are present (confirmed via parser round-trip testing), so they
+    # stay in DICTIONARY_OUTPUT -- but the BUILDER sheet must never offer
+    # them as something the analyst fills in.
+    output_headers = [cell.value for cell in wb["DICTIONARY_OUTPUT"][1]]
+    builder_headers = {cell.value for cell in wb["BUILDER"][7]}
+    for field in (
+        "model_input_unit",
+        "model_input_kind",
+        "spend_column",
+        "response_unit_column",
+        "response_unit",
+    ):
+        assert field in output_headers
+        assert field not in builder_headers
+
+
+def test_context_dictionary_builder_role_is_free_text_not_a_dropdown(tmp_path, guide):
+    import openpyxl
+
+    path = tmp_path / "context.xlsx"
+    guide.build_context_dictionary_builder(path)
+    wb = openpyxl.load_workbook(path)
+    builder = wb["BUILDER"]
+    role_col = [c.value for c in builder[7]].index("role") + 1
+    role_cell = f"{openpyxl.utils.get_column_letter(role_col)}13"
+    assert not any(
+        dv.sqref.__contains__(role_cell)
+        for dv in builder.data_validations.dataValidation
+    )
+
+
+def test_context_dictionary_builder_never_asks_for_unused_unit_field(tmp_path, guide):
+    import openpyxl
+
+    path = tmp_path / "context.xlsx"
+    guide.build_context_dictionary_builder(path)
+    wb = openpyxl.load_workbook(path)
+    # `unit`'s header must stay in DICTIONARY_OUTPUT: the live parser requires
+    # the full v2 extra-column set once source/scope are present (confirmed
+    # via parser round-trip testing), even though nothing reads its value.
+    assert "unit" in [cell.value for cell in wb["DICTIONARY_OUTPUT"][1]]
+    assert "unit" not in {cell.value for cell in wb["BUILDER"][7]}
+
+
+def _write_workbook(tables):
+    from io import BytesIO
+
+    import pandas as pd
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        for sheet_name, table in tables.items():
+            table.to_excel(writer, sheet_name=sheet_name, index=False)
+    return output.getvalue()
+
+
+def test_outcome_dictionary_builder_output_is_accepted_by_the_real_parser():
+    """Prove Dictionary Builder -> DICTIONARY_OUTPUT -> upload -> parser ->
+    accepted, using literal values equal to what BUILDER's own formulas
+    compute for its first pre-filled example row (verified separately via
+    Excel COM: Generated ID = Final ID = family_history_fh_gsa_new)."""
+    import pandas as pd
+
+    from ancestry_mmm.core.coverage import DOMAIN_OUTCOMES
+    from ancestry_mmm.data.templates import (
+        canonicalize_standard_workbook,
+        parse_standard_workbook,
+    )
+
+    outcome_id = "family_history_fh_gsa_new"
+    outcome_dictionary = pd.DataFrame(
+        [
+            {
+                "outcome_id": outcome_id,
+                "source_column": outcome_id,
+                "product": "Family History",
+                "metric_key": "fh_gsa",
+                "metric": "GSA",
+                "segment_dimension": "unspecified",
+                "segment": "New",
+                "outcome_group_id": "",
+                "outcome_group_label": "",
+                "outcome_family_key": "",
+                "group_aggregation": "",
+            }
+        ]
+    )
+    outcomes = pd.DataFrame(
+        [{"period_start": "2026-01-05", "market": "UK", outcome_id: 120}]
+    )
+    raw = _write_workbook(
+        {"outcomes": outcomes, "outcome_dictionary": outcome_dictionary}
+    )
+    workbook = parse_standard_workbook(
+        raw, source_id="s1", filename="test.xlsx", logical_domain=DOMAIN_OUTCOMES
+    )
+    assert workbook.manifest.errors == ()
+    assert workbook.manifest.valid_standard_template
+    bundle = canonicalize_standard_workbook(workbook)
+    assert [d.outcome_id for d in bundle.outcome_definitions] == [outcome_id]
+
+
+def test_activity_dictionary_builder_output_is_accepted_by_the_real_parser():
+    """Same proof for Activity, including the v2 extra columns the builder
+    keeps (currency/effective_from/effective_to) alongside the blank
+    write-only columns the schema still requires once those are present."""
+    import pandas as pd
+
+    from ancestry_mmm.core.coverage import DOMAIN_ACTIVITY_AND_MEDIA
+    from ancestry_mmm.data.templates import (
+        canonicalize_standard_workbook,
+        parse_standard_workbook,
+    )
+
+    activity_id = "paid_search_google_brand"
+    activity_dictionary = pd.DataFrame(
+        [
+            {
+                "activity_id": activity_id,
+                "market": "UK",
+                "pooling_group_id": "",
+                "channel": "Paid Search",
+                "platform": "not specified",
+                "campaign_type": "not specified",
+                "marketing_objective": "not specified",
+                "funnel_stage": "unclassified",
+                "product_advertised": "not specified",
+                "message_type": "not specified",
+                "activity_ownership": "paid",
+                "intended_model_role": "intervention",
+                "model_input_column": activity_id,
+                "model_input_measure": "spend",
+                "economic_treatment": "paid_media_cost",
+                "planning_eligibility": "optimisable",
+                "source": "Google Ads export",
+                "model_input_unit": "",
+                "model_input_kind": "",
+                "spend_column": "",
+                "response_unit_column": "",
+                "response_unit": "",
+                "currency": "",
+                "effective_from": "",
+                "effective_to": "",
+            }
+        ]
+    )
+    activity_data = pd.DataFrame(
+        [
+            {
+                "period_start": "2026-01-05",
+                "market": "UK",
+                "activity_id": activity_id,
+                "spend": 1200,
+            }
+        ]
+    )
+    raw = _write_workbook(
+        {"activity_data": activity_data, "activity_dictionary": activity_dictionary}
+    )
+    workbook = parse_standard_workbook(
+        raw,
+        source_id="s2",
+        filename="test.xlsx",
+        logical_domain=DOMAIN_ACTIVITY_AND_MEDIA,
+    )
+    assert workbook.manifest.errors == ()
+    assert workbook.manifest.valid_standard_template
+    bundle = canonicalize_standard_workbook(workbook)
+    assert [d.activity_id for d in bundle.activity_definitions] == [activity_id]
+
+
+def test_context_dictionary_builder_output_is_accepted_by_the_real_parser():
+    """Same proof for Context, including the blank `unit` column the schema
+    still requires once source/scope (kept per the necessity review) are
+    present."""
+    import pandas as pd
+
+    from ancestry_mmm.core.coverage import DOMAIN_CONTEXT_AND_EXTERNAL_FACTORS
+    from ancestry_mmm.data.templates import (
+        canonicalize_standard_workbook,
+        parse_standard_workbook,
+    )
+
+    variable_id = "rate_index_uk_cpi"
+    variable_dictionary = pd.DataFrame(
+        [
+            {
+                "variable_id": variable_id,
+                "variable_class": "rate_index",
+                "native_frequency": "monthly",
+                "role": "exogenous_forecastable_control",
+                "source": "",
+                "scope": "",
+                "effective_from": "",
+                "effective_to": "",
+                "unit": "",
+            }
+        ]
+    )
+    context_data = pd.DataFrame(
+        [
+            {
+                "period_start": "2026-01-01",
+                "market": "UK",
+                "variable_id": variable_id,
+                "value": 132.4,
+                "native_frequency": "monthly",
+            }
+        ]
+    )
+    raw = _write_workbook(
+        {"context_data": context_data, "variable_dictionary": variable_dictionary}
+    )
+    workbook = parse_standard_workbook(
+        raw,
+        source_id="s3",
+        filename="test.xlsx",
+        logical_domain=DOMAIN_CONTEXT_AND_EXTERNAL_FACTORS,
+    )
+    assert workbook.manifest.errors == ()
+    assert workbook.manifest.valid_standard_template
+    bundle = canonicalize_standard_workbook(workbook)
+    assert bundle.context_variable_metadata[0]["variable_id"] == variable_id
