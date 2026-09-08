@@ -1,4 +1,4 @@
-"""Build the analyst-facing Ancestry MMM data-upload guide and ID builders.
+"""Build the analyst-facing Ancestry MMM data-upload guide and Dictionary Builders.
 
 This is a documentation/tooling generator.  It does not change the application
 parser, schemas, model, or upload behaviour.  The generated workbooks are
@@ -38,11 +38,6 @@ from ancestry_mmm.core.outcomes import (
     OUTCOME_GROUP_AGGREGATIONS,
     OUTCOME_ROLES,
     SEGMENT_DIMENSIONS,
-)
-from ancestry_mmm.core.search_intent_taxonomy import (
-    SEARCH_INTENT_GROUP_ID_BRAND,
-    SEARCH_INTENT_GROUP_ID_NON_BRAND,
-    SEARCH_PLATFORMS,
 )
 from ancestry_mmm.data.templates import (
     OUTCOME_DICTIONARY_V2_COLUMNS,
@@ -360,29 +355,29 @@ OUTCOME_RAG = [
     ),
     rag_row(
         "date_basis",
-        "AMBER — Needed for some uses",
+        "GREY — Legacy/unused",
         "Yes",
         "No",
-        "Date meaning for the outcome.",
+        "Intended date meaning for the outcome — accepted by the schema, but not read by any current transformation.",
         "signup_date",
-        "Avoids silently mixing event and billing dates.",
-        "The definition may be unapproved for official use.",
-        "approval; completeness",
-        "Approved date-basis vocabulary",
-        "Only while the definition is draft and the registry supplies no value.",
+        "It doesn't need it. `core/outcomes.py` states directly that this field is schema/validation only; no transformation reads or computes it today.",
+        "Nothing changes — no current behaviour depends on this field being present.",
+        "Not used by any current transformation or by the Outcome Dictionary Builder.",
+        "Approved date-basis vocabulary, only if you add the column by hand outside the builder",
+        "Always safe to leave out. The Outcome Dictionary Builder does not offer this column.",
     ),
     rag_row(
         "maturity_required",
-        "AMBER — Needed for some uses",
+        "GREY — Legacy/unused",
         "Yes",
         "No",
-        "Whether the outcome needs a maturity rule.",
+        "Intended flag for whether the outcome needs a maturity rule — accepted by the schema, but not read by any current transformation.",
         "TRUE",
-        "Makes incomplete periods visible.",
-        "Maturity cannot be governed.",
-        "outcome completeness",
-        "TRUE/FALSE",
-        "For outcomes that are not maturity-sensitive.",
+        "It doesn't need it. The value is type-coerced and stored, but nothing downstream reads it today.",
+        "Nothing changes — no current behaviour depends on this field being present.",
+        "Not used by any current transformation or by the Outcome Dictionary Builder.",
+        "TRUE/FALSE, only if you add the column by hand outside the builder",
+        "Always safe to leave out. The Outcome Dictionary Builder does not offer this column.",
     ),
     rag_row(
         "role",
@@ -745,14 +740,14 @@ ACTIVITY_RAG = [
     ),
     rag_row(
         "pooling_group_id",
-        "AMBER — Needed for some uses",
+        "AMBER — Reporting/lineage only",
         "Yes",
         "No",
         "Optional cross-market identity for similar activity.",
         "paid_search_brand",
-        "Supports lineage and comparison; it does not force statistical pooling.",
-        "Cross-market identity is not recorded.",
-        "hierarchy; review",
+        "Supports lineage and comparison across markets; it does not force statistical pooling and is never read by any fit, canonicalisation, planning, or optimisation code — reporting/lineage only.",
+        "Cross-market identity is not recorded; fitting is unaffected either way.",
+        "hierarchy/lineage reporting only",
         "Stable ID",
         "When the activity has no governed cross-market peer.",
     ),
@@ -771,14 +766,14 @@ ACTIVITY_RAG = [
     ),
     rag_row(
         "platform",
-        "AMBER — Needed for some uses",
+        "AMBER — Reporting/display only",
         "Yes",
         "Yes for differentiated platform",
         "Buying or delivery platform.",
         "Google",
-        "Helps distinguish Google and Bing when that matters.",
-        "Platform-level identity may collide.",
-        "activity identity; reports",
+        "Helps distinguish Google and Bing in reports and the causal-graph display; the necessity review confirmed it is never read by fit, canonicalisation, or planning/optimisation code.",
+        "Platform-level identity may collide in reports; fitting is unaffected either way.",
+        "reporting rollups and causal-graph display only",
         "Text",
         "If platform is genuinely not applicable.",
     ),
@@ -789,61 +784,61 @@ ACTIVITY_RAG = [
         "No",
         "Campaign or placement type.",
         "Brand",
-        "Adds meaningful identity when platform/channel alone is not enough.",
-        "Similar activities may collide.",
-        "activity identity; reports",
+        "Adds meaningful identity when platform/channel alone is not enough, and gates the Search-taxonomy fields (search_intent_group_id/search_platform can only be set when campaign_type is not one of the excluded PMax/Demand Gen/YouTube types) — its only other behavioural effect.",
+        "Similar activities may collide in reports.",
+        "activity identity; reports; Search-taxonomy gate",
         "Text",
         "When source has no campaign type.",
     ),
     rag_row(
         "marketing_objective",
-        "AMBER — Needed for some uses",
+        "AMBER — Reporting/display only",
         "Yes",
         "No",
         "Why the activity was run.",
         "acquisition/performance",
-        "Supports reporting; it is not silently inferred.",
-        "Objective reporting is incomplete.",
-        "reports; governance",
+        "Supports reporting; it is not silently inferred. The necessity review confirmed it is never read by fit, canonicalisation, or planning/optimisation code.",
+        "Objective reporting is incomplete; fitting is unaffected either way.",
+        "reporting rollups and causal-graph display only",
         "Suggested vocabulary or documented custom",
         "When not supplied.",
     ),
     rag_row(
         "funnel_stage",
-        "AMBER — Needed for some uses",
+        "AMBER — Reporting/display only",
         "Yes",
         "Yes for governed classification",
         "Approved funnel position.",
         "performance_lower",
-        "Supports pathway governance without guessing.",
-        "Classification is incomplete.",
-        "pathways; reports",
+        "Supports pathway reporting without guessing — a closed vocabulary so reports can't silently acquire spelling variants. The necessity review confirmed it is never read by fit, canonicalisation, or planning/optimisation code, and its own governing comment (`activities.py`) states it is not read by model builders or causal-graph compilation either.",
+        "Classification is incomplete in reports; fitting is unaffected either way.",
+        "pathway/funnel reporting only",
         "brand_upper, mid_funnel, performance_lower, cross_funnel, not_applicable, unclassified",
         "Only while unclassified is explicitly accepted.",
     ),
     rag_row(
         "product_advertised",
-        "AMBER — Needed for some uses",
+        "AMBER — Reporting/display only",
         "Yes",
         "No",
         "Product in the creative or offer.",
         "Family History",
-        "Separates FH, DNA, and cross-product activity.",
-        "Product reporting is incomplete.",
-        "reports; pathways",
+        "Separates FH, DNA, and cross-product activity in reports and the causal-graph display; the necessity review confirmed it is never read by fit, canonicalisation, or planning/optimisation code.",
+        "Product reporting is incomplete; fitting is unaffected either way.",
+        "reporting rollups and causal-graph display only",
         "Text; approved product names where known",
         "When activity is product-neutral.",
     ),
     rag_row(
         "message_type",
-        "AMBER — Needed for some uses",
+        "AMBER — Reporting/display only",
         "Yes",
         "No",
         "Message or offer type.",
         "brand",
-        "Descriptive taxonomy for analysis.",
-        "Message reporting is incomplete.",
-        "reports",
+        "Descriptive taxonomy for analysis; the necessity review confirmed it is never read by fit, canonicalisation, or planning/optimisation code.",
+        "Message reporting is incomplete; fitting is unaffected either way.",
+        "reporting rollups and causal-graph display only",
         "Text",
         "When not available.",
     ),
@@ -940,68 +935,68 @@ ACTIVITY_RAG = [
     ),
     rag_row(
         "model_input_unit",
-        "AMBER — Needed for some uses",
+        "GREY — Currently write-only",
         "Yes",
-        "Yes for model input",
-        "Unit of the selected model input.",
+        "No",
+        "Intended unit of the selected model input — parsed and stored for review, but not applied by the standard upload path.",
         "GBP",
-        "Prevents treating all model inputs as spend.",
-        "Unit review is required; economics may be blocked.",
-        "model input; media units",
-        "GBP, impressions, clicks, GRP, TVR, etc.",
-        "When the source unit is recorded elsewhere in a governed mapping.",
+        "It doesn't apply this today. The value is parsed into a review-status record (`activity_semantic_mappings`); `source_pack_adoption.py` states directly that the upload does not apply it automatically. The real unit/cost mapping is entered separately, in Channel Media Units and Curve Generation, after upload.",
+        "Nothing changes — the standard upload path doesn't read this value either way.",
+        "Stored for manual review only; not read by canonicalisation, fit, or planning.",
+        "GBP, impressions, clicks, GRP, TVR, etc., only if you choose to record it for review",
+        "Always safe to leave blank. The Activity Dictionary Builder does not offer this column.",
     ),
     rag_row(
         "model_input_kind",
-        "AMBER — Needed for some uses",
+        "GREY — Currently write-only",
         "Yes",
-        "Yes for model input",
-        "Whether input is monetary spend or exposure.",
+        "No",
+        "Intended flag for monetary spend vs. exposure — parsed and stored for review, but not applied by the standard upload path.",
         "monetary_spend",
-        "Connects the input to the correct cost contract.",
-        "Physical-to-monetary translation is unresolved.",
-        "media units; economics",
-        "monetary_spend or exposure",
-        "When a governed mapping supplies it.",
+        "It doesn't apply this today, for the same reason as model_input_unit: parsed into a review-status record only, never automatically applied. The real cost-contract mapping happens in Channel Media Units and Curve Generation after upload.",
+        "Nothing changes — the standard upload path doesn't read this value either way.",
+        "Stored for manual review only; not read by canonicalisation, fit, or planning.",
+        "monetary_spend or exposure, only if you choose to record it for review",
+        "Always safe to leave blank. The Activity Dictionary Builder does not offer this column.",
     ),
     rag_row(
         "spend_column",
-        "AMBER — Needed for some uses",
+        "GREY — Currently write-only",
         "Yes",
         "No",
-        "Raw monetary spend column, if one exists.",
+        "Raw monetary spend column reference — parsed and stored for review, but not applied by the standard upload path.",
         "spend",
-        "Allows a later cost mapping without pretending it is the model input.",
-        "Spend mapping needs review.",
-        "economics; cost mapping",
-        "Exact raw header",
-        "For response-only or non-monetary activity.",
+        "It doesn't apply this today, for the same reason as model_input_unit. The real spend/cost mapping happens in Channel Media Units and Curve Generation after upload.",
+        "Nothing changes — the standard upload path doesn't read this value either way.",
+        "Stored for manual review only; not read by canonicalisation, fit, or planning.",
+        "Exact raw header, only if you choose to record it for review",
+        "Always safe to leave blank. The Activity Dictionary Builder does not offer this column.",
     ),
     rag_row(
         "response_unit_column",
-        "AMBER — Needed for some uses",
+        "GREY — Currently write-only",
         "Yes",
         "No",
-        "Raw delivery/response column, if one exists.",
+        "Raw delivery/response column reference — parsed and stored for review, but not applied by the standard upload path.",
         "clicks",
-        "Records a separate physical response measure.",
-        "Response mapping needs review.",
-        "media units; diagnostics",
-        "Exact raw header",
-        "When no physical response is supplied.",
+        "It doesn't apply this today, for the same reason as model_input_unit. The real response/unit mapping happens in Channel Media Units and Curve Generation after upload.",
+        "Nothing changes — the standard upload path doesn't read this value either way.",
+        "Stored for manual review only; not read by canonicalisation, fit, or planning.",
+        "Exact raw header, only if you choose to record it for review",
+        "Always safe to leave blank. The Activity Dictionary Builder does not offer this column.",
     ),
     rag_row(
         "response_unit",
-        "AMBER — Needed for some uses",
+        "GREY — Currently write-only",
         "Yes",
         "No",
-        "Unit in the response column.",
+        "Unit of the response column reference — parsed and stored for review, but not applied by the standard upload path.",
         "clicks",
-        "Prevents clicks, impressions, conversions, and visits being conflated.",
-        "Response mapping needs review.",
-        "media units",
-        "Text",
-        "When response_unit_column is blank.",
+        "It doesn't apply this today, for the same reason as model_input_unit. The real response/unit mapping happens in Channel Media Units and Curve Generation after upload.",
+        "Nothing changes — the standard upload path doesn't read this value either way.",
+        "Stored for manual review only; not read by canonicalisation, fit, or planning.",
+        "Text, only if you choose to record it for review",
+        "Always safe to leave blank. The Activity Dictionary Builder does not offer this column.",
     ),
     rag_row(
         "currency",
@@ -1126,41 +1121,41 @@ CONTEXT_RAG = [
     ),
     rag_row(
         "native_frequency",
-        "RED — Must provide",
+        "RED — Must provide (see override note)",
         "Yes",
         "Yes",
         "Frequency at which the source was observed.",
         "weekly",
-        "Stops monthly or quarterly data being presented as weekly.",
-        "The source frequency is unknown.",
-        "context_data; variable_dictionary",
+        "Stops monthly or quarterly data being presented as weekly at upload time — this part is real. But the necessity review found the governed Coverage Matrix screen (Page 15) re-asks for this value independently and defaults every variable to weekly regardless of what you upload here; it is also duplicated as a required context_data row column that is confirmed never read into the pivot — a second, fully write-only copy.",
+        "The source frequency is unknown at upload; if you do supply it, expect Page 15 to re-default it anyway.",
+        "context_data (upload-time only; not read into the pivot); variable_dictionary (a non-blocking warning banner only, not enforced by Page 15)",
         "weekly, monthly, quarterly, yearly, daily, event",
         "Never.",
     ),
     rag_row(
         "variable_class",
-        "RED — Must provide",
+        "RED — Must provide (see override note)",
         "Yes",
         "Yes",
         "Type of variable.",
         "rate_index",
-        "Separates flows, stocks, rates, surveys, and event flags.",
-        "The variable meaning is incomplete.",
-        "variable_dictionary",
+        "Separates flows, stocks, rates, surveys, and event flags at upload time — this enum is real and validated. But the necessity review found the governed Coverage Matrix screen (Page 15) does not read this uploaded value at all: it defaults every variable to flow_count regardless, and the one place that does read it (a CI/diagnostic harness, not the analyst path) overrides it to rate_index anyway.",
+        "The definition is rejected at upload (the column and a valid value are genuinely required); once uploaded, expect Page 15 to re-default it regardless.",
+        "variable_dictionary at upload only (validated against the 5 approved classes); not read by Page 15's Coverage Matrix, the screen that actually governs this today",
         "flow_count, stock_level, rate_index, survey_measurement, event_flag",
         "Never for governed variables.",
     ),
     rag_row(
         "role",
-        "RED — Must provide",
+        "RED — Must provide, not currently enforced",
         "Yes",
         "Yes",
-        "Approved operational future/model role.",
+        "Intended operational future/model role.",
         "exogenous_forecastable_control",
-        "Prevents an endogenous mediator being independently forecast.",
-        "The variable role is unsafe or blocked.",
-        "variable_dictionary; planning",
-        "Approved role text; see guide",
+        'Intended to prevent an endogenous mediator being independently forecast — but the necessity review found no enum enforcement anywhere in the code today, despite being called "governed" in a code comment. It is currently indistinguishable from a free-text note field, and isn\'t even included in the one completeness check that looks at the rest of the Context metadata.',
+        "Nothing currently blocks an upload over an invalid or missing role beyond the column needing to exist — this is a documentation-vs-code mismatch, not an enforced safeguard.",
+        "Stored in variable_dictionary; not enum-validated by any current code path",
+        "No enforced list today — free text in practice, despite the field's name. Documented example: exogenous_forecastable_control.",
         "Never for governed variables.",
     ),
     rag_row(
@@ -1975,14 +1970,14 @@ def build_html() -> str:
         builder_html=dictionary_builder_section(
             "Ancestry_MMM_Activity_Dictionary_Builder.xlsx",
             "activity_dictionary",
-            "Turns business-facing choices — channel, market, and (for Paid Search) Brand/Non-Brand and platform — into a complete, upload-ready <code>activity_dictionary</code> row and generates a stable <code>activity_id</code>.",
+            "Turns business-facing choices — channel, market, and (for Paid Search) platform and campaign type — into a complete, upload-ready <code>activity_dictionary</code> row and generates a stable <code>activity_id</code>.",
             [
                 "channel, market, activity_ownership, intended_model_role, model_input_measure, economic_treatment, planning_eligibility, and source.",
                 "model_input_column, if it needs to differ from the generated activity_id (it defaults to the same value).",
-                "platform, campaign_type, and — for Paid Search only — search_platform and search_intent_group_id — fill these in only when they help distinguish one activity from another (Google vs Bing, Brand vs Non-Brand). If you leave platform or campaign_type blank, DICTIONARY_OUTPUT fills in not specified for you, since the live parser currently rejects a truly empty value. search_platform and search_intent_group_id are not uploaded columns themselves; see the note below.",
+                "platform and campaign_type — the same two ordinary activity_dictionary fields any channel uses, not Search-only inputs — fill these in when they help distinguish one activity from another (Google vs Bing, Brand vs Non-Brand). If you leave either blank, DICTIONARY_OUTPUT fills in not specified for you, since the live parser currently rejects a truly empty value.",
             ],
             [
-                "activity_id — built from channel plus whichever of platform, campaign_type, search_platform, and search_intent_group_id you filled in, the same way as the standalone identity fields above.",
+                "activity_id — built from channel plus whichever of platform and campaign_type you filled in, the same way as the standalone identity fields above.",
             ],
             [
                 "activity_ownership",
@@ -1990,15 +1985,13 @@ def build_html() -> str:
                 "economic_treatment",
                 "planning_eligibility",
                 "funnel_stage",
-                "search_platform",
-                "search_intent_group_id",
             ],
             "activity_ownership is paid, owned, earned, or external_event; intended_model_role is intervention, mediator, demand_capture, control, or event; economic_treatment is paid_media_cost, fully_loaded_cost, campaign_cost, response_only, or not_applicable; planning_eligibility is optimisable, scenario_only, fixed, or excluded.",
             [
                 "pooling_group_id, funnel_stage, marketing_objective, product_advertised, and message_type — the necessity review confirmed the model, canonicalisation, and optimiser never read their values; only reporting rollups and the causal-graph display do. Fill in what you have. If you leave one blank, the DICTIONARY_OUTPUT sheet automatically fills in a harmless placeholder (unclassified for funnel_stage, not specified for the others) — testing this builder's output against the live parser confirmed a truly empty value is currently rejected for these columns, even though nothing meaningful reads them.",
                 "currency, effective_from, effective_to — optional provenance metadata.",
             ],
-            "This builder does not ask for model_input_unit, model_input_kind, spend_column, response_unit_column, or response_unit — the necessity review confirmed these five columns are currently write-only in the standard upload path (see the callout above). Their column headers still appear, blank, in DICTIONARY_OUTPUT, because the current schema requires them once other v2 columns are present — this builder just never asks you to fill them in. The actual weekly activity numbers still go in the <code>activity_data</code> sheet, not this builder. search_platform and search_intent_group_id here only help build a clear activity_id; they are not activity_dictionary columns today, and the governed Search-taxonomy mapping still has to be set up separately after upload.",
+            "This builder does not ask for model_input_unit, model_input_kind, spend_column, response_unit_column, or response_unit — the necessity review confirmed these five columns are currently write-only in the standard upload path (see the callout above). Their column headers still appear, blank, in DICTIONARY_OUTPUT, because the current schema requires them once other v2 columns are present — this builder just never asks you to fill them in. It also does not ask for search_platform or search_intent_group_id: they are not activity_dictionary columns today — activity_definitions_from_dictionary still doesn't map them from a standard workbook — so this builder does not pretend they are ordinary fields. Use platform and campaign_type above to keep your activity_id readable; the governed Search-taxonomy mapping (Brand/Non-Brand, Google/Bing at the ActivityDefinition level) is configured separately, after upload, until that mapping gap is closed. The actual weekly activity numbers still go in the <code>activity_data</code> sheet, not this builder.",
         ),
     )
 
@@ -2026,20 +2019,20 @@ def build_html() -> str:
             ],
             [
                 "native_frequency",
-                "How often this variable is actually published.",
+                "How often this variable is actually published. Preserved at upload, but Page 15 (Data Coverage) re-asks separately and defaults to weekly regardless of what you enter here — treat this as upload-time metadata, not a setting Page 15 will honour.",
                 "weekly, monthly, quarterly, yearly, daily, or event.",
                 "monthly",
             ],
             [
                 "variable_class",
-                "What kind of variable this is.",
+                "What kind of variable this is. Page 15 (Data Coverage) does not read this uploaded value at all — it defaults every variable to flow_count regardless, so treat this as informational at upload time, not a setting Page 15 will honour.",
                 "flow_count, stock_level, rate_index, survey_measurement, or event_flag.",
                 "rate_index",
             ],
             [
                 "role",
-                "How this variable is allowed to be used in forecasting.",
-                "An approved role — see the technical reference below for the full list.",
+                "How this variable is intended to be used in forecasting. No enum is enforced anywhere in the app today, despite the name — this is currently free text; see the technical reference below.",
+                "Free text today. A documented example is exogenous_forecastable_control — not a fixed list.",
                 "exogenous_forecastable_control",
             ],
         ],
@@ -3022,14 +3015,14 @@ def build_activity_dictionary_builder(path: Path) -> None:
                 "What you need to fill in",
                 [
                     "Go to the BUILDER sheet. Fill in channel, market, activity_ownership, intended_model_role, model_input_measure, economic_treatment, planning_eligibility, and source for every activity row.",
-                    "For Paid Search activities you want split by Brand/Non-Brand and Google/Bing, also fill in campaign_type, search_platform, and search_intent_group_id -- these help build a clear id.",
+                    "For Paid Search activities you want split by Google/Bing and Brand/Non-Brand, also fill in platform and campaign_type -- the same two ordinary dictionary fields any other channel would use, not special Search-only inputs.",
                     "Only fill in the grey (optional/advanced) columns if you have the information handy -- they are reporting metadata, not fit or planning inputs.",
                 ],
             ),
             (
                 "What is generated automatically",
                 [
-                    "Generated ID -- built from channel plus whichever of platform, campaign_type, search_platform, and search_intent_group_id you filled in.",
+                    "Generated ID -- built from channel plus whichever of platform and campaign_type you filled in.",
                     "Final ID -- the Generated ID, unless you type something in Manual override.",
                     "Row status -- plain-English text telling you if the row is Ready, missing something, or a duplicate.",
                     "The DICTIONARY_OUTPUT sheet -- every column the upload expects, in the right order, computed live from your BUILDER entries.",
@@ -3039,15 +3032,16 @@ def build_activity_dictionary_builder(path: Path) -> None:
                 "What is required, conditional, and optional",
                 [
                     "Required (white columns): channel, market, activity_ownership, intended_model_role, model_input_measure, economic_treatment, planning_eligibility, source.",
-                    "Conditional (amber columns, Paid Search identity only): platform, campaign_type, search_platform, search_intent_group_id.",
+                    "Conditional (amber columns): platform, campaign_type -- fill these in when they help distinguish one activity from another (Google vs Bing, Brand vs Non-Brand); the upload does currently reject a truly empty cell, so a blank one defaults to not specified in DICTIONARY_OUTPUT.",
                     "Optional / advanced (grey columns): pooling_group_id, funnel_stage, marketing_objective, product_advertised, message_type, currency, effective_from, effective_to. The schema-necessity review confirmed the model, canonicalisation, and optimiser never read these values -- only reporting rollups and the causal-graph display do. Leave the BUILDER cell blank if you don't have the information; DICTIONARY_OUTPUT automatically writes a harmless placeholder (unclassified for funnel_stage, not specified for the rest, pooling_group_id genuinely blank) instead of a truly empty cell, because the live upload currently rejects an empty value in those columns even though nothing meaningful reads it.",
                     "Not asked at all in this builder: model_input_unit, model_input_kind, spend_column, response_unit_column, response_unit. The necessity review confirmed these five v2 dictionary columns are currently write-only in the standard upload path -- filling them in does nothing today, and the real place to set units and cost mappings is inside the app, in Channel Media Units and Curve Generation, after your data is uploaded. Their column headers still appear (blank) in DICTIONARY_OUTPUT: once other v2 columns like currency are present, the current schema requires the full v2 column set to exist, so removing these headers entirely would make the whole row rejected. This builder never asks you to fill them in.",
+                    "Also not asked at all: search_platform and search_intent_group_id. They are not activity_dictionary columns today -- activity_definitions_from_dictionary still doesn't map them from a standard workbook -- so this builder does not pretend they are ordinary fields. The governed Search-taxonomy mapping (Brand/Non-Brand, Google/Bing at the ActivityDefinition level) is configured separately, after upload, until that mapping gap is closed. Use platform and campaign_type above to keep your activity_id readable in the meantime.",
                 ],
             ),
             (
                 "How dropdowns work",
                 [
-                    "activity_ownership, intended_model_role, economic_treatment, planning_eligibility, funnel_stage, search_platform, and search_intent_group_id are dropdowns built from the app's own governed lists. campaign_type and marketing_objective offer suggestions but also accept free text, matching how the app actually treats them. See the ALLOWED_VALUES sheet for the full, current set with plain-English explanations.",
+                    "activity_ownership, intended_model_role, economic_treatment, planning_eligibility, and funnel_stage are dropdowns built from the app's own governed lists. campaign_type and marketing_objective offer suggestions but also accept free text, matching how the app actually treats them. See the ALLOWED_VALUES sheet for the full, current set with plain-English explanations.",
                 ],
             ),
             (
@@ -3089,8 +3083,6 @@ def build_activity_dictionary_builder(path: Path) -> None:
         "Row status",
         "platform",
         "campaign_type",
-        "search_platform",
-        "search_intent_group_id",
         "pooling_group_id",
         "funnel_stage",
         "marketing_objective",
@@ -3150,16 +3142,8 @@ def build_activity_dictionary_builder(path: Path) -> None:
     example_rows = [row + [""] * pad for row in example_rows]
     example_rows[0][headers.index("platform")] = "Google"
     example_rows[0][headers.index("campaign_type")] = "Brand"
-    example_rows[0][headers.index("search_platform")] = "google"
-    example_rows[0][headers.index("search_intent_group_id")] = (
-        SEARCH_INTENT_GROUP_ID_BRAND
-    )
     example_rows[1][headers.index("platform")] = "Bing"
     example_rows[1][headers.index("campaign_type")] = "Brand"
-    example_rows[1][headers.index("search_platform")] = "bing"
-    example_rows[1][headers.index("search_intent_group_id")] = (
-        SEARCH_INTENT_GROUP_ID_BRAND
-    )
     rows = example_rows + [[""] * len(headers) for _ in range(20)]
     add_candidate_table(builder, headers, rows, "ActivityCandidates")
     first_row, last_row = 8, 7 + len(rows)
@@ -3172,8 +3156,6 @@ def build_activity_dictionary_builder(path: Path) -> None:
         col("channel"),
         col("platform"),
         col("campaign_type"),
-        col("search_platform"),
-        col("search_intent_group_id"),
     ]
     token_columns = add_hidden_token_columns(
         builder, id_inputs, data_rows, start_col=len(headers) + 3
@@ -3218,7 +3200,7 @@ def build_activity_dictionary_builder(path: Path) -> None:
         builder,
         7,
         headers.index("platform") + 1,
-        headers.index("search_intent_group_id") + 1,
+        headers.index("campaign_type") + 1,
         "8C6A00",
     )
     color_header_range(
@@ -3255,21 +3237,15 @@ def build_activity_dictionary_builder(path: Path) -> None:
     )
     add_dropdown(
         builder,
-        f"{col('search_platform')}{first_row}:{col('search_platform')}{last_row}",
-        list(SEARCH_PLATFORMS),
-        "search_platform",
-    )
-    add_dropdown(
-        builder,
-        f"{col('search_intent_group_id')}{first_row}:{col('search_intent_group_id')}{last_row}",
-        [SEARCH_INTENT_GROUP_ID_BRAND, SEARCH_INTENT_GROUP_ID_NON_BRAND],
-        "search_intent_group_id",
-    )
-    add_dropdown(
-        builder,
         f"{col('funnel_stage')}{first_row}:{col('funnel_stage')}{last_row}",
         list(FUNNEL_STAGES),
         "funnel_stage",
+    )
+    add_soft_dropdown(
+        builder,
+        f"{col('platform')}{first_row}:{col('platform')}{last_row}",
+        ["Google", "Bing"],
+        "platform",
     )
     add_soft_dropdown(
         builder,
@@ -3370,28 +3346,11 @@ def build_activity_dictionary_builder(path: Path) -> None:
         ]
         + [
             [
-                "search_platform",
-                v,
-                "Governed platform axis for Paid Search identity.",
-                "Only for Paid Search activities you want split by platform.",
-            ]
-            for v in SEARCH_PLATFORMS
-        ]
-        + [
-            [
-                "search_intent_group_id",
-                SEARCH_INTENT_GROUP_ID_BRAND,
-                "Brand Search intent.",
-                "Only for Paid Search activities you want split by Brand/Non-Brand.",
+                "platform",
+                "Google / Bing",
+                "Suggested values only -- not a closed enum in the app.",
+                "Free text is also accepted; use whatever platform actually applies, including non-Search channels like TV or a broadcaster name.",
             ],
-            [
-                "search_intent_group_id",
-                SEARCH_INTENT_GROUP_ID_NON_BRAND,
-                "Non-Brand Search intent.",
-                "Only for Paid Search activities you want split by Brand/Non-Brand.",
-            ],
-        ]
-        + [
             [
                 "campaign_type",
                 "Brand / Non-Brand",
@@ -3403,6 +3362,12 @@ def build_activity_dictionary_builder(path: Path) -> None:
                 ", ".join(MARKETING_OBJECTIVE_SUGGESTIONS),
                 "Suggested values only -- not a closed enum in the app.",
                 "Free text is also accepted.",
+            ],
+            [
+                "search_platform / search_intent_group_id",
+                "Not offered by this builder",
+                "Not activity_dictionary columns today -- the standard upload doesn't map them.",
+                "Configured separately, after upload, in the governed Search-taxonomy admin mapping. Use platform and campaign_type above to keep your activity_id readable in the meantime.",
             ],
         ]
         + [

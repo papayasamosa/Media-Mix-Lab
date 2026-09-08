@@ -2,8 +2,9 @@
 
 Checks that the controlled-value lists baked into
 `scripts/build_data_upload_guide_assets.py` (the single source of truth for
-the HTML guide, the three Excel ID builders, and the schema inventory) stay
-in sync with the live governed vocabularies they are supposed to mirror.
+the HTML guide, the three Excel Dictionary Builders, and the schema
+inventory) stay in sync with the live governed vocabularies they are
+supposed to mirror.
 This does not re-validate Excel/browser behaviour -- see the Excel-COM and
 Playwright evidence recorded in `Ancestry_MMM_Data_Upload_Guide_REVIEW.md`.
 """
@@ -411,3 +412,103 @@ def test_context_dictionary_builder_output_is_accepted_by_the_real_parser():
     assert workbook.manifest.valid_standard_template
     bundle = canonicalize_standard_workbook(workbook)
     assert bundle.context_variable_metadata[0]["variable_id"] == variable_id
+
+
+def test_outcome_rag_marks_date_basis_and_maturity_required_as_unused(guide):
+    """Guards against the technical reference re-implying these fields do
+    something: both are confirmed inert by the necessity review and are not
+    offered by the Outcome Dictionary Builder."""
+    for field in ("date_basis", "maturity_required"):
+        row = next(r for r in guide.OUTCOME_RAG if r["Field name"] == field)
+        assert row["Status"].startswith("GREY")
+        assert "not used by any current transformation" in row["Used by"].lower()
+
+
+def test_activity_rag_marks_write_only_fields_as_currently_inert(guide):
+    """Guards against the technical reference implying these fields govern
+    media-unit, economics, cost-mapping, or response behaviour through the
+    standard upload path -- they are confirmed write-only today."""
+    for field in (
+        "model_input_unit",
+        "model_input_kind",
+        "spend_column",
+        "response_unit_column",
+        "response_unit",
+    ):
+        row = next(r for r in guide.ACTIVITY_RAG if r["Field name"] == field)
+        assert row["Status"] == "GREY — Currently write-only"
+        assert "not applied by the standard upload path" in row["Plain-English meaning"]
+
+
+def test_activity_rag_marks_reporting_only_fields_accurately(guide):
+    """Guards against the technical reference describing reporting/graph
+    metadata as fit- or planning-critical."""
+    for field in (
+        "pooling_group_id",
+        "platform",
+        "marketing_objective",
+        "funnel_stage",
+        "product_advertised",
+        "message_type",
+    ):
+        row = next(r for r in guide.ACTIVITY_RAG if r["Field name"] == field)
+        used_by = row["Used by"].lower()
+        assert "reporting" in used_by
+        assert "only" in used_by
+
+
+def test_context_rag_discloses_variable_class_and_native_frequency_override(guide):
+    """Guards against the technical reference describing these as fully
+    governed settings when Page 15 (Data Coverage) currently re-defaults
+    them regardless of what is uploaded."""
+    for field in ("variable_class", "native_frequency"):
+        row = next(r for r in guide.CONTEXT_RAG if r["Field name"] == field)
+        assert "Page 15" in row["Why the tool needs it"]
+
+
+def test_context_rag_discloses_role_is_not_enforced(guide):
+    """Guards against the technical reference describing role as a governed
+    enum when no enforcement exists anywhere in the code today."""
+    row = next(r for r in guide.CONTEXT_RAG if r["Field name"] == "role")
+    assert "not currently enforced" in row["Status"]
+
+
+def test_activity_dictionary_builder_never_asks_for_search_taxonomy_pseudo_fields(
+    tmp_path, guide
+):
+    """search_platform/search_intent_group_id are not activity_dictionary
+    columns today, so the builder must not ask for them as if they were
+    ordinary fields -- platform/campaign_type (real columns) build the id
+    instead."""
+    import openpyxl
+
+    path = tmp_path / "activity.xlsx"
+    guide.build_activity_dictionary_builder(path)
+    wb = openpyxl.load_workbook(path)
+    builder_headers = {cell.value for cell in wb["BUILDER"][7]}
+    assert "search_platform" not in builder_headers
+    assert "search_intent_group_id" not in builder_headers
+    assert "platform" in builder_headers
+    assert "campaign_type" in builder_headers
+
+
+def test_activity_dictionary_builder_id_has_exactly_three_identity_inputs(
+    tmp_path, guide
+):
+    """channel, platform, campaign_type are the only fields the Generated ID
+    formula draws on -- not the retired 5-input (incl. search_platform /
+    search_intent_group_id) design. Each identity input gets exactly 3
+    hidden helper columns (clean/collapsed/token); this count changing back
+    to 15 would mean the 5-input design silently returned."""
+    import openpyxl
+
+    path = tmp_path / "activity.xlsx"
+    guide.build_activity_dictionary_builder(path)
+    wb = openpyxl.load_workbook(path)
+    builder = wb["BUILDER"]
+    hidden_helper_columns = [
+        letter
+        for letter, dim in builder.column_dimensions.items()
+        if dim.hidden and dim.width == 2
+    ]
+    assert len(hidden_helper_columns) == 9  # 3 identity inputs x 3 helper columns
