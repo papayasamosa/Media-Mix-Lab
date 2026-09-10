@@ -9115,3 +9115,31 @@ request (same code path, different `denominator_outcome_id`/
 unmodified - plus a structural guard asserting the runtime valuation/
 rate/attribution/reporting-service modules never hardcode an NBT-specific
 string. No separate GSA valuation engine was built.
+
+## 2026-09-10 (next pass) Dictionary Builder GUI now offers Search taxonomy fields
+
+Closed the remaining half of the earlier parser-mapping addendum:
+`scripts/build_data_upload_guide_assets.py`'s Activity Dictionary Builder
+now offers `search_intent_group_id`/`search_platform` as real,
+dropdown-validated BUILDER-sheet inputs (derived from
+`APPROVED_MINIMUM_SEARCH_INTENT_GROUPS`/`SEARCH_PLATFORMS` - never a
+second, hand-typed vocabulary), passed straight through to
+DICTIONARY_OUTPUT via a plain formula reference rather than the
+"or-default" placeholder pattern (which would have produced an invalid
+enum value on a blank cell instead of a genuinely unclassified one).
+Added the two columns to `ACTIVITY_DICTIONARY_OUTPUT_COLUMNS` as this
+builder's own additive output list, not via `_ACTIVITY_V2_EXTRA_COLUMNS`
+- the latter would have made every v2 upload's header row require the
+columns present, breaking any existing v2 dictionary file.
+
+Flipped the one existing test that asserted the fields' *absence*
+(correct at the time, now the opposite of the intended behaviour) and
+added round-trip coverage: Brand+Google, Non-Brand+Bing, and
+Brand-with-no-platform (aggregate Search) all survive builder ->
+workbook -> parser -> governed `ActivityDefinition`; a non-Search
+activity is unaffected; a PMax activity carrying either field is
+rejected with the existing `ActivityDefinition` validation message.
+Regenerated the actual committed Activity Dictionary Builder `.xlsx`,
+HTML guide, and schema inventory from the updated generator - reverted
+the Context/Outcome builder `.xlsx` files, whose regeneration touched
+only an embedded creation timestamp with zero logical-content change.

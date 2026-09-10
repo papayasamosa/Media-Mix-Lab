@@ -25,6 +25,10 @@ from ancestry_mmm.core.activities import (
     MODEL_ROLES,
     OWNERSHIP,
     PLANNING_ELIGIBILITY,
+    SEARCH_PLATFORMS,
+)
+from ancestry_mmm.core.search_intent_taxonomy import (
+    APPROVED_MINIMUM_SEARCH_INTENT_GROUPS,
 )
 from ancestry_mmm.core.coverage import (
     DOMAIN_ACTIVITY_AND_MEDIA,
@@ -98,15 +102,32 @@ OUTCOME_DICTIONARY_OUTPUT_COLUMNS = list(OUTCOME_DICTIONARY_V2_COLUMNS) + [
     for c in _OUTCOME_DEFINITION_OPTIONAL_COLUMNS
     if c not in OUTCOME_OMITTED_OPTIONAL_COLUMNS
 ]
-ACTIVITY_DICTIONARY_OUTPUT_COLUMNS = list(ACTIVITY_DICTIONARY_BASE_COLUMNS) + [
-    c for c in _ACTIVITY_V2_EXTRA_COLUMNS if c not in ACTIVITY_OMITTED_V2_COLUMNS
-]
+ACTIVITY_DICTIONARY_OUTPUT_COLUMNS = (
+    list(ACTIVITY_DICTIONARY_BASE_COLUMNS)
+    + [c for c in _ACTIVITY_V2_EXTRA_COLUMNS if c not in ACTIVITY_OMITTED_V2_COLUMNS]
+    # search_intent_group_id/search_platform (2026-09-10): genuinely optional
+    # columns -- most activities are not Paid Search -- so they are appended
+    # here (this builder's own output list) rather than added to
+    # _ACTIVITY_V2_EXTRA_COLUMNS, which would make every v2 upload's header
+    # row require them present (even blank), breaking any existing v2
+    # dictionary that predates this capability. activity_definitions_from_
+    # dictionary already tolerates the column being entirely absent.
+    + ["search_intent_group_id", "search_platform"]
+)
 CONTEXT_DICTIONARY_OUTPUT_COLUMNS = list(CONTEXT_DICTIONARY_BASE_COLUMNS) + [
     c for c in _CONTEXT_V2_EXTRA_COLUMNS if c not in CONTEXT_OMITTED_V2_COLUMNS
 ]
 
 OUTCOME_METRIC_KEY_CHOICES = [*METRIC_REGISTRY.keys(), METRIC_KEY_CUSTOM]
 TRUE_FALSE_BLANK = ["TRUE", "FALSE"]
+# Governed minimum Search intent taxonomy (REQ-SEARCH-004) -- derived from
+# the approved catalogue rather than a second, hand-typed vocabulary. Only
+# the two approved top-level groups (Brand/Non-Brand); a deeper Non-Brand
+# child group remains a draft-only, evidence-gated capability this builder
+# does not offer.
+SEARCH_INTENT_GROUP_ID_CHOICES = [
+    group.search_intent_group_id for group in APPROVED_MINIMUM_SEARCH_INTENT_GROUPS
+]
 
 
 RAG_HEAD = [
@@ -1928,8 +1949,8 @@ def build_html() -> str:
             ],
             [
                 "search_intent_group_id, search_platform",
-                "Only for Paid Search activities you want split by Brand/Non-Brand and Google/Bing.",
-                "brand_search or non_brand_search; google or bing. Note: today these must be set up separately after upload — the standard sheet doesn't apply them automatically yet.",
+                "Only for Paid Search activities you want split by Brand/Non-Brand and/or Google/Bing. Leave both blank otherwise.",
+                "brand_search or non_brand_search; google or bing.",
             ],
         ],
         [
@@ -1991,7 +2012,7 @@ def build_html() -> str:
                 "pooling_group_id, funnel_stage, marketing_objective, product_advertised, and message_type — the necessity review confirmed the model, canonicalisation, and optimiser never read their values; only reporting rollups and the causal-graph display do. Fill in what you have. If you leave one blank, the DICTIONARY_OUTPUT sheet automatically fills in a harmless placeholder (unclassified for funnel_stage, not specified for the others) — testing this builder's output against the live parser confirmed a truly empty value is currently rejected for these columns, even though nothing meaningful reads them.",
                 "currency, effective_from, effective_to — optional provenance metadata.",
             ],
-            "This builder does not ask for model_input_unit, model_input_kind, spend_column, response_unit_column, or response_unit — the necessity review confirmed these five columns are currently write-only in the standard upload path (see the callout above). Their column headers still appear, blank, in DICTIONARY_OUTPUT, because the current schema requires them once other v2 columns are present — this builder just never asks you to fill them in. It also does not ask for search_platform or search_intent_group_id: activity_definitions_from_dictionary now maps both from the standard workbook when the columns are present (2026-09-10), but this builder does not yet offer them as guided input fields, so it still doesn't add their column headers to DICTIONARY_OUTPUT. If you need them, add search_intent_group_id (brand_search / non_brand_search) and search_platform (google / bing) columns to your dictionary directly, or configure the same governed Search-taxonomy mapping at the ActivityDefinition level via Channel Media Units after upload. Use platform and campaign_type above to keep your activity_id readable in the meantime. The actual weekly activity numbers still go in the <code>activity_data</code> sheet, not this builder.",
+            "This builder does not ask for model_input_unit, model_input_kind, spend_column, response_unit_column, or response_unit — the necessity review confirmed these five columns are currently write-only in the standard upload path (see the callout above). Their column headers still appear, blank, in DICTIONARY_OUTPUT, because the current schema requires them once other v2 columns are present — this builder just never asks you to fill them in. As of 2026-09-10 it does ask for search_intent_group_id (brand_search / non_brand_search) and search_platform (google / bing) as governed, dropdown-validated columns next to platform/campaign_type — leave both blank for a non-Search activity, or when your Search history only supports an aggregate Brand/Non-Brand view without a platform split. The actual weekly activity numbers still go in the <code>activity_data</code> sheet, not this builder.",
         ),
     )
 
@@ -3032,10 +3053,9 @@ def build_activity_dictionary_builder(path: Path) -> None:
                 "What is required, conditional, and optional",
                 [
                     "Required (white columns): channel, market, activity_ownership, intended_model_role, model_input_measure, economic_treatment, planning_eligibility, source.",
-                    "Conditional (amber columns): platform, campaign_type -- fill these in when they help distinguish one activity from another (Google vs Bing, Brand vs Non-Brand); the upload does currently reject a truly empty cell, so a blank one defaults to not specified in DICTIONARY_OUTPUT.",
+                    "Conditional (amber columns): platform, campaign_type, search_intent_group_id, search_platform -- fill these in when they help distinguish one activity from another (Google vs Bing, Brand vs Non-Brand); platform/campaign_type default to not specified when left blank, while search_intent_group_id/search_platform stay genuinely blank (unclassified) -- a non-Search activity, or a Search activity whose history only supports an aggregate Brand/Non-Brand view without a platform split, should leave them blank rather than guessing.",
                     "Optional / advanced (grey columns): pooling_group_id, funnel_stage, marketing_objective, product_advertised, message_type, currency, effective_from, effective_to. The schema-necessity review confirmed the model, canonicalisation, and optimiser never read these values -- only reporting rollups and the causal-graph display do. Leave the BUILDER cell blank if you don't have the information; DICTIONARY_OUTPUT automatically writes a harmless placeholder (unclassified for funnel_stage, not specified for the rest, pooling_group_id genuinely blank) instead of a truly empty cell, because the live upload currently rejects an empty value in those columns even though nothing meaningful reads it.",
                     "Not asked at all in this builder: model_input_unit, model_input_kind, spend_column, response_unit_column, response_unit. The necessity review confirmed these five v2 dictionary columns are currently write-only in the standard upload path -- filling them in does nothing today, and the real place to set units and cost mappings is inside the app, in Channel Media Units and Curve Generation, after your data is uploaded. Their column headers still appear (blank) in DICTIONARY_OUTPUT: once other v2 columns like currency are present, the current schema requires the full v2 column set to exist, so removing these headers entirely would make the whole row rejected. This builder never asks you to fill them in.",
-                    "Also not asked at all in this builder: search_platform and search_intent_group_id. activity_definitions_from_dictionary now maps both from the standard workbook when the columns are present (2026-09-10) -- this builder just doesn't add them to DICTIONARY_OUTPUT yet. Add search_intent_group_id (brand_search / non_brand_search) and search_platform (google / bing) columns to your dictionary directly if you need them, or configure the same governed Search-taxonomy mapping at the ActivityDefinition level via Channel Media Units after upload. Use platform and campaign_type above to keep your activity_id readable in the meantime.",
                 ],
             ),
             (
@@ -3083,6 +3103,8 @@ def build_activity_dictionary_builder(path: Path) -> None:
         "Row status",
         "platform",
         "campaign_type",
+        "search_intent_group_id",
+        "search_platform",
         "pooling_group_id",
         "funnel_stage",
         "marketing_objective",
@@ -3142,8 +3164,12 @@ def build_activity_dictionary_builder(path: Path) -> None:
     example_rows = [row + [""] * pad for row in example_rows]
     example_rows[0][headers.index("platform")] = "Google"
     example_rows[0][headers.index("campaign_type")] = "Brand"
+    example_rows[0][headers.index("search_intent_group_id")] = "brand_search"
+    example_rows[0][headers.index("search_platform")] = "google"
     example_rows[1][headers.index("platform")] = "Bing"
     example_rows[1][headers.index("campaign_type")] = "Brand"
+    example_rows[1][headers.index("search_intent_group_id")] = "brand_search"
+    example_rows[1][headers.index("search_platform")] = "bing"
     rows = example_rows + [[""] * len(headers) for _ in range(20)]
     add_candidate_table(builder, headers, rows, "ActivityCandidates")
     first_row, last_row = 8, 7 + len(rows)
@@ -3200,7 +3226,7 @@ def build_activity_dictionary_builder(path: Path) -> None:
         builder,
         7,
         headers.index("platform") + 1,
-        headers.index("campaign_type") + 1,
+        headers.index("search_platform") + 1,
         "8C6A00",
     )
     color_header_range(
@@ -3253,6 +3279,18 @@ def build_activity_dictionary_builder(path: Path) -> None:
         ["Brand", "Non-Brand"],
         "campaign_type",
     )
+    add_dropdown(
+        builder,
+        f"{col('search_intent_group_id')}{first_row}:{col('search_intent_group_id')}{last_row}",
+        SEARCH_INTENT_GROUP_ID_CHOICES,
+        "search_intent_group_id",
+    )
+    add_dropdown(
+        builder,
+        f"{col('search_platform')}{first_row}:{col('search_platform')}{last_row}",
+        list(SEARCH_PLATFORMS),
+        "search_platform",
+    )
     add_soft_dropdown(
         builder,
         f"{col('marketing_objective')}{first_row}:{col('marketing_objective')}{last_row}",
@@ -3272,6 +3310,15 @@ def build_activity_dictionary_builder(path: Path) -> None:
         "channel": builder_ref(ch),
         "platform": builder_ref_or_default(col("platform"), "not specified"),
         "campaign_type": builder_ref_or_default(col("campaign_type"), "not specified"),
+        # Plain pass-through, never builder_ref_or_default: these are
+        # governed closed vocabularies (ActivityDefinition validates
+        # search_platform against SEARCH_PLATFORMS and rejects either
+        # field on a PMax/Demand Gen/YouTube campaign_type) - injecting a
+        # placeholder string here the way "not specified" is used above
+        # would produce an invalid, unparseable value instead of a
+        # genuinely blank/unclassified one.
+        "search_intent_group_id": builder_ref(col("search_intent_group_id")),
+        "search_platform": builder_ref(col("search_platform")),
         "marketing_objective": builder_ref_or_default(
             col("marketing_objective"), "not specified"
         ),
@@ -3364,10 +3411,16 @@ def build_activity_dictionary_builder(path: Path) -> None:
                 "Free text is also accepted.",
             ],
             [
-                "search_platform / search_intent_group_id",
-                "Not offered by this builder",
-                "Not activity_dictionary columns today -- the standard upload doesn't map them.",
-                "Configured separately, after upload, in the governed Search-taxonomy admin mapping. Use platform and campaign_type above to keep your activity_id readable in the meantime.",
+                "search_intent_group_id",
+                " / ".join(SEARCH_INTENT_GROUP_ID_CHOICES),
+                "Governed closed enum -- a blank cell (not a random typed value) means unclassified.",
+                "Leave blank for a non-Search activity, or a Search activity whose history only supports an aggregate Brand/Non-Brand view. Rejected on a PMax/Demand Gen/YouTube campaign_type.",
+            ],
+            [
+                "search_platform",
+                " / ".join(SEARCH_PLATFORMS),
+                "Governed closed enum -- a blank cell means unclassified (platform-aggregate).",
+                "Leave blank when your Search history does not reliably support a Google/Bing split. Rejected on a PMax/Demand Gen/YouTube campaign_type.",
             ],
         ]
         + [
@@ -3798,7 +3851,7 @@ Logical domain does not mean one file. `source_pack_adoption.py` accepts multipl
 ## Known implementation/documentation gaps carried to review
 
 1. Generated standard outcome examples use the display string `DNA cross-sell`, while the approved core constant is `DNA_CrossSell`; current parser validation accepts both because it requires a nonblank supplied segment rather than normalising it. The guide does not silently alter existing app behaviour; use the project-approved spelling consistently and review the template/parser mismatch. Confirmed still open at the pass-3 baseline (`template_downloads.py` unchanged since 2026-09-03).
-2. Closed 2026-09-10: search taxonomy fields exist on the governed `ActivityDefinition` and admin UI, and the standard source dictionary parser (`activity_definitions_from_dictionary`) now also maps `search_intent_group_id`/`search_platform` from a standard workbook when the two columns are present. This builder does not yet offer them as guided BUILDER-sheet input fields (see the callout above) - that remains a follow-up UI enhancement, distinct from the parser-mapping gap this item originally tracked.
+2. Closed 2026-09-10 (parser and builder both): search taxonomy fields exist on the governed `ActivityDefinition` and admin UI, the standard source dictionary parser (`activity_definitions_from_dictionary`) maps `search_intent_group_id`/`search_platform` from a standard workbook when the two columns are present, and this builder now offers both as governed, dropdown-validated BUILDER-sheet columns (amber, optional) that round-trip through the real parser for Brand/Google, Non-Brand/Bing, and platform-unspecified aggregate-Search rows alike.
 3. The generic downloadable sample outcome dictionary (`template_downloads.py`) still teaches GSA ids (`fh_gsa_new`, etc.) as its worked example, not the UK production NBT ids. This is accurate to disclose, not to silently fix — the sample is deliberately generic/cross-project, and UK production ids come from the approved UK source pack, not the generic sample. The guide now says this explicitly (see the UK production NBT note and its FAQ entry).
 """
 

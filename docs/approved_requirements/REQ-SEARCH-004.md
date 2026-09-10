@@ -406,3 +406,53 @@ parser gap.
 - `ancestry_mmm/tests/test_templates.py::test_activity_definitions_from_dictionary_maps_search_taxonomy_columns`
 - `ancestry_mmm/tests/test_templates.py::test_activity_definitions_from_dictionary_without_search_columns_is_unaffected`
 - `ancestry_mmm/tests/test_templates.py::test_activity_definitions_from_dictionary_rejects_invalid_search_platform`
+
+## Addendum, 2026-09-10 (continued): Dictionary Builder GUI now offers both fields
+
+Closes the remaining half of the previous addendum's own "not implemented"
+note. `scripts/build_data_upload_guide_assets.py`'s Activity Dictionary
+Builder now offers `search_intent_group_id` (governed strict dropdown,
+derived from `APPROVED_MINIMUM_SEARCH_INTENT_GROUPS` - never a second,
+hand-typed vocabulary) and `search_platform` (strict dropdown from
+`SEARCH_PLATFORMS`) as real BUILDER-sheet inputs, grouped visually with
+`platform`/`campaign_type`. Both pass straight through to
+`DICTIONARY_OUTPUT` via a plain formula reference (never the "or-default"
+placeholder pattern used for unrelated columns - a placeholder string in a
+governed enum field would produce an invalid, unparseable value instead of
+a genuinely blank/unclassified one). `ACTIVITY_DICTIONARY_OUTPUT_COLUMNS`
+gained the two columns as this builder's own additive output list, not via
+`_ACTIVITY_V2_EXTRA_COLUMNS` - that would have made every v2 upload's
+header row require them present, breaking any existing v2 dictionary file
+that predates this capability.
+
+Flipped `test_activity_dictionary_builder_never_asks_for_search_taxonomy_
+pseudo_fields` (which asserted the fields' *absence* - correct when
+written, now the opposite of the intended behaviour) to
+`test_activity_dictionary_builder_offers_governed_search_taxonomy_fields`,
+and added round-trip tests through the real parser: Brand+Google,
+Non-Brand+Bing, and Brand-with-no-platform (aggregate Search, §4) all
+survive builder -> workbook -> parser -> governed `ActivityDefinition`; a
+non-Search activity leaving both columns blank is unaffected; a PMax
+activity carrying either field is rejected with the existing, specific
+`ActivityDefinition` validation message - no new, more permissive
+validation path for dictionary-sourced values. Regenerated the actual
+committed `docs/Ancestry_MMM_Activity_Dictionary_Builder.xlsx`, the HTML
+guide, and the schema inventory from the updated generator (Context/
+Outcome builder `.xlsx` files were also touched by regeneration but only
+by an embedded creation timestamp with zero logical-content change -
+reverted, since this addendum's code changes are Activity-only).
+
+### Affected modules (this addendum)
+
+- `scripts/build_data_upload_guide_assets.py`
+- `ancestry_mmm/tests/test_data_upload_guide_assets.py`
+- `docs/Ancestry_MMM_Activity_Dictionary_Builder.xlsx` (regenerated)
+- `docs/Ancestry_MMM_Data_Upload_Guide.html` (regenerated)
+- `docs/data_upload_guide_schema_inventory.md` (regenerated)
+
+### Required tests (this addendum, continued)
+
+- `ancestry_mmm/tests/test_data_upload_guide_assets.py::test_activity_dictionary_builder_offers_governed_search_taxonomy_fields`
+- `ancestry_mmm/tests/test_data_upload_guide_assets.py::test_activity_dictionary_builder_search_taxonomy_round_trips_through_the_real_parser`
+- `ancestry_mmm/tests/test_data_upload_guide_assets.py::test_non_search_activity_is_not_forced_to_supply_search_taxonomy_fields`
+- `ancestry_mmm/tests/test_data_upload_guide_assets.py::test_invalid_search_taxonomy_combination_fails_clearly`

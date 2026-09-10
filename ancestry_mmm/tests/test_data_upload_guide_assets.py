@@ -473,23 +473,283 @@ def test_context_rag_discloses_role_is_not_enforced(guide):
     assert "not currently enforced" in row["Status"]
 
 
-def test_activity_dictionary_builder_never_asks_for_search_taxonomy_pseudo_fields(
+def test_activity_dictionary_builder_offers_governed_search_taxonomy_fields(
     tmp_path, guide
 ):
-    """search_platform/search_intent_group_id are not activity_dictionary
-    columns today, so the builder must not ask for them as if they were
-    ordinary fields -- platform/campaign_type (real columns) build the id
-    instead."""
+    """2026-09-10: activity_definitions_from_dictionary now maps
+    search_intent_group_id/search_platform when present (REQ-SEARCH-004
+    addendum) - the builder must offer them as real, validated inputs,
+    not merely blank headers the parser tolerates. Both use the strict
+    (non-"soft") dropdown, since these are governed closed vocabularies,
+    not free-text suggestions like platform/campaign_type."""
     import openpyxl
 
     path = tmp_path / "activity.xlsx"
     guide.build_activity_dictionary_builder(path)
     wb = openpyxl.load_workbook(path)
-    builder_headers = {cell.value for cell in wb["BUILDER"][7]}
-    assert "search_platform" not in builder_headers
-    assert "search_intent_group_id" not in builder_headers
+    builder = wb["BUILDER"]
+    builder_headers = {cell.value for cell in builder[7]}
+    assert "search_platform" in builder_headers
+    assert "search_intent_group_id" in builder_headers
     assert "platform" in builder_headers
     assert "campaign_type" in builder_headers
+
+    dv_sqrefs = {
+        str(dv.sqref): set(dv.formula1.strip('"').split(","))
+        for dv in builder.data_validations.dataValidation
+    }
+    search_intent_col = [
+        cell.column_letter for cell in builder[7] if cell.value == "search_intent_group_id"
+    ][0]
+    search_platform_col = [
+        cell.column_letter for cell in builder[7] if cell.value == "search_platform"
+    ][0]
+    intent_values = next(
+        values
+        for sqref, values in dv_sqrefs.items()
+        if sqref.startswith(f"{search_intent_col}8")
+    )
+    platform_values = next(
+        values
+        for sqref, values in dv_sqrefs.items()
+        if sqref.startswith(f"{search_platform_col}8")
+    )
+    assert intent_values == {SEARCH_INTENT_GROUP_ID_BRAND, SEARCH_INTENT_GROUP_ID_NON_BRAND}
+    assert platform_values == set(SEARCH_PLATFORMS)
+
+
+def test_activity_dictionary_builder_search_taxonomy_round_trips_through_the_real_parser():
+    """Brand+Google and Non-Brand+Bing both survive builder -> workbook ->
+    parser -> governed ActivityDefinition, and a Brand activity with no
+    platform specified (aggregate Search, REQ-SEARCH-004 S4) is equally
+    valid."""
+    import pandas as pd
+
+    from ancestry_mmm.core.coverage import DOMAIN_ACTIVITY_AND_MEDIA
+    from ancestry_mmm.data.templates import (
+        canonicalize_standard_workbook,
+        parse_standard_workbook,
+    )
+
+    def _row(activity_id: str, search_intent_group_id: str, search_platform: str) -> dict:
+        return {
+            "activity_id": activity_id,
+            "market": "UK",
+            "pooling_group_id": "",
+            "channel": "Paid Search",
+            "platform": "not specified",
+            "campaign_type": "not specified",
+            "marketing_objective": "not specified",
+            "funnel_stage": "unclassified",
+            "product_advertised": "not specified",
+            "message_type": "not specified",
+            "activity_ownership": "paid",
+            "intended_model_role": "intervention",
+            "model_input_column": activity_id,
+            "model_input_measure": "spend",
+            "economic_treatment": "paid_media_cost",
+            "planning_eligibility": "optimisable",
+            "source": "Google Ads export",
+            "model_input_unit": "",
+            "model_input_kind": "",
+            "spend_column": "",
+            "response_unit_column": "",
+            "response_unit": "",
+            "currency": "",
+            "effective_from": "",
+            "effective_to": "",
+            "search_intent_group_id": search_intent_group_id,
+            "search_platform": search_platform,
+        }
+
+    activity_dictionary = pd.DataFrame(
+        [
+            _row(
+                "paid_search_google_brand",
+                SEARCH_INTENT_GROUP_ID_BRAND,
+                "google",
+            ),
+            _row(
+                "paid_search_bing_non_brand",
+                SEARCH_INTENT_GROUP_ID_NON_BRAND,
+                "bing",
+            ),
+            _row("paid_search_brand_aggregate", SEARCH_INTENT_GROUP_ID_BRAND, ""),
+        ]
+    )
+    activity_data = pd.DataFrame(
+        [
+            {
+                "period_start": "2026-01-05",
+                "market": "UK",
+                "activity_id": row["activity_id"],
+                "spend": 1200,
+            }
+            for _, row in activity_dictionary.iterrows()
+        ]
+    )
+    raw = _write_workbook(
+        {"activity_data": activity_data, "activity_dictionary": activity_dictionary}
+    )
+    workbook = parse_standard_workbook(
+        raw,
+        source_id="s3",
+        filename="test.xlsx",
+        logical_domain=DOMAIN_ACTIVITY_AND_MEDIA,
+    )
+    assert workbook.manifest.errors == ()
+    bundle = canonicalize_standard_workbook(workbook)
+    by_id = {d.activity_id: d for d in bundle.activity_definitions}
+
+    assert by_id["paid_search_google_brand"].search_intent_group_id == (
+        SEARCH_INTENT_GROUP_ID_BRAND
+    )
+    assert by_id["paid_search_google_brand"].search_platform == "google"
+    assert by_id["paid_search_bing_non_brand"].search_intent_group_id == (
+        SEARCH_INTENT_GROUP_ID_NON_BRAND
+    )
+    assert by_id["paid_search_bing_non_brand"].search_platform == "bing"
+    assert by_id["paid_search_brand_aggregate"].search_intent_group_id == (
+        SEARCH_INTENT_GROUP_ID_BRAND
+    )
+    assert by_id["paid_search_brand_aggregate"].search_platform == ""
+
+
+def test_non_search_activity_is_not_forced_to_supply_search_taxonomy_fields():
+    """A TV activity leaving both new columns blank is exactly as valid as
+    before this capability existed - search taxonomy is never required
+    just because the columns now exist in DICTIONARY_OUTPUT."""
+    import pandas as pd
+
+    from ancestry_mmm.core.coverage import DOMAIN_ACTIVITY_AND_MEDIA
+    from ancestry_mmm.data.templates import (
+        canonicalize_standard_workbook,
+        parse_standard_workbook,
+    )
+
+    activity_dictionary = pd.DataFrame(
+        [
+            {
+                "activity_id": "tv_brand",
+                "market": "UK",
+                "pooling_group_id": "",
+                "channel": "TV",
+                "platform": "not specified",
+                "campaign_type": "not specified",
+                "marketing_objective": "not specified",
+                "funnel_stage": "unclassified",
+                "product_advertised": "not specified",
+                "message_type": "not specified",
+                "activity_ownership": "paid",
+                "intended_model_role": "intervention",
+                "model_input_column": "tv_brand",
+                "model_input_measure": "spend",
+                "economic_treatment": "paid_media_cost",
+                "planning_eligibility": "optimisable",
+                "source": "Broadcaster invoice",
+                "model_input_unit": "",
+                "model_input_kind": "",
+                "spend_column": "",
+                "response_unit_column": "",
+                "response_unit": "",
+                "currency": "",
+                "effective_from": "",
+                "effective_to": "",
+                "search_intent_group_id": "",
+                "search_platform": "",
+            }
+        ]
+    )
+    activity_data = pd.DataFrame(
+        [
+            {
+                "period_start": "2026-01-05",
+                "market": "UK",
+                "activity_id": "tv_brand",
+                "spend": 5000,
+            }
+        ]
+    )
+    raw = _write_workbook(
+        {"activity_data": activity_data, "activity_dictionary": activity_dictionary}
+    )
+    workbook = parse_standard_workbook(
+        raw,
+        source_id="s4",
+        filename="test.xlsx",
+        logical_domain=DOMAIN_ACTIVITY_AND_MEDIA,
+    )
+    assert workbook.manifest.errors == ()
+    bundle = canonicalize_standard_workbook(workbook)
+    assert bundle.activity_definitions[0].search_intent_group_id is None
+    assert bundle.activity_definitions[0].search_platform == ""
+
+
+def test_invalid_search_taxonomy_combination_fails_clearly():
+    """A PMax activity carrying a search_intent_group_id must be rejected
+    with a specific, attributable reason, never silently accepted or
+    silently dropped."""
+    import pandas as pd
+
+    from ancestry_mmm.core.coverage import DOMAIN_ACTIVITY_AND_MEDIA
+    from ancestry_mmm.data.templates import parse_standard_workbook
+
+    activity_dictionary = pd.DataFrame(
+        [
+            {
+                "activity_id": "pmax_shopping",
+                "market": "UK",
+                "pooling_group_id": "",
+                "channel": "Paid Search",
+                "platform": "not specified",
+                "campaign_type": "pmax",
+                "marketing_objective": "not specified",
+                "funnel_stage": "unclassified",
+                "product_advertised": "not specified",
+                "message_type": "not specified",
+                "activity_ownership": "paid",
+                "intended_model_role": "intervention",
+                "model_input_column": "pmax_shopping",
+                "model_input_measure": "spend",
+                "economic_treatment": "paid_media_cost",
+                "planning_eligibility": "optimisable",
+                "source": "Google Ads export",
+                "model_input_unit": "",
+                "model_input_kind": "",
+                "spend_column": "",
+                "response_unit_column": "",
+                "response_unit": "",
+                "currency": "",
+                "effective_from": "",
+                "effective_to": "",
+                "search_intent_group_id": SEARCH_INTENT_GROUP_ID_BRAND,
+                "search_platform": "google",
+            }
+        ]
+    )
+    activity_data = pd.DataFrame(
+        [
+            {
+                "period_start": "2026-01-05",
+                "market": "UK",
+                "activity_id": "pmax_shopping",
+                "spend": 1200,
+            }
+        ]
+    )
+    raw = _write_workbook(
+        {"activity_data": activity_data, "activity_dictionary": activity_dictionary}
+    )
+    workbook = parse_standard_workbook(
+        raw,
+        source_id="s5",
+        filename="test.xlsx",
+        logical_domain=DOMAIN_ACTIVITY_AND_MEDIA,
+    )
+    from ancestry_mmm.data.templates import canonicalize_standard_workbook
+
+    with pytest.raises(ValueError, match="excluded from the Paid Search taxonomy"):
+        canonicalize_standard_workbook(workbook)
 
 
 def test_activity_dictionary_builder_id_has_exactly_three_identity_inputs(
