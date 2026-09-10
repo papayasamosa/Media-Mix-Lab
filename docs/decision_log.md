@@ -9143,3 +9143,23 @@ Regenerated the actual committed Activity Dictionary Builder `.xlsx`,
 HTML guide, and schema inventory from the updated generator - reverted
 the Context/Outcome builder `.xlsx` files, whose regeneration touched
 only an embedded creation timestamp with zero logical-content change.
+
+## 2026-09-10 (next pass) economic reporting state round-trip verified end to end
+
+Section 6's ask: confirm a saved/reloaded project preserves outcome-
+valuation source data, denominator linkage, currency identity, and FX
+configuration *together*, and doesn't spuriously invalidate the model
+fingerprints that already govern the dependent fit. Each field had
+already been round-trip-tested individually (previous pass's quarantine-
+resolver tests); added `TestEconomicReportingStateRoundTrip` to
+`test_persistence.py` proving all four fields survive one real
+`export_project`/`import_project` cycle together, that the imported
+records still pass the quarantine resolvers a real import handler
+actually calls, that `model_approval` is completely unaffected (by
+design - REQ-ECON-002/006 deliberately exclude valuation/FX inputs from
+fit-identity fingerprinting), and that replacing the valuation source
+between two export/import cycles is reflected immediately on reload,
+never stale - there is no persisted, cached economic-report artefact for
+staleness to apply to; Results recomputes live from whatever is
+currently in the reloaded project state. No new persistence layer was
+invented. 250 tests in `test_persistence.py` pass, no regressions.

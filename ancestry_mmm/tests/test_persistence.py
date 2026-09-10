@@ -5744,3 +5744,128 @@ class TestResolveImportedNamedEvents:
         with zipfile.ZipFile(legacy_path) as zf:
             legacy_manifest = json.loads(zf.read("manifest.json"))
         assert legacy_manifest["contains"]["named_event_registry"] is False
+
+
+class TestEconomicReportingStateRoundTrip:
+    """UK FH MMM Next Autonomous Instructions (2026-09-10), section 6: a
+    saved and reloaded project must preserve outcome-valuation source
+    data, denominator linkage, currency identity, and FX configuration
+    together - not just each field individually (already proven by the
+    resolve_imported_* quarantine tests above) - and must not spuriously
+    invalidate the model approval/fingerprints that already govern the
+    dependent fit. There is no separate persisted *computed* economic
+    report artefact to stale (confirmed in the previous pass's decision
+    log) - Results recomputes live from whatever outcome_valuation_
+    records/fx_rate_set/fx_rate_records/currency_context are currently in
+    the reloaded project state, so a replaced valuation source is
+    reflected immediately on the next render, never shown stale."""
+
+    def test_valuation_denominator_currency_and_fx_all_round_trip_together(
+        self, tmp_path, sample_project
+    ):
+        from ancestry_mmm.core.persistence import (
+            resolve_imported_fx_rate_records,
+            resolve_imported_fx_rate_set,
+            resolve_imported_outcome_valuation_records,
+        )
+
+        project = dict(sample_project)
+        project["outcome_valuation_records"] = [
+            _valid_valuation_record_dict(
+                market="UK",
+                week="2026-01-05",
+                segment="New",
+                denominator_outcome_id="fh_new_gsa",
+                currency="GBP",
+            )
+        ]
+        project["currency_context"] = CurrencyContext(
+            market_reporting_currency="GBP", value_currency="USD"
+        ).to_dict()
+        project["fx_rate_set"] = _valid_fx_rate_set_dict()
+        project["fx_rate_records"] = [
+            _valid_fx_rate_record_dict(
+                rate_id="gbp-usd-2026",
+                source_currency="GBP",
+                target_currency="USD",
+                rate="1.27",
+                frequency="annual",
+                financial_year="2026",
+            )
+        ]
+
+        output_path = export_project(tmp_path / "econ-bundle.zip", **project)
+        imported = import_project(output_path)
+
+        # Round-trips as raw dicts (persistence layer) ...
+        assert imported["outcome_valuation_records"] == project["outcome_valuation_records"]
+        assert imported["currency_context"] == project["currency_context"]
+        assert imported["fx_rate_set"] == project["fx_rate_set"]
+        assert imported["fx_rate_records"] == project["fx_rate_records"]
+
+        # ... and survives the quarantine resolvers a real import handler
+        # (09_Project_Export.py) actually calls before trusting them.
+        resolved_valuation, valuation_warnings = resolve_imported_outcome_valuation_records(
+            imported
+        )
+        assert valuation_warnings == []
+        assert resolved_valuation[0]["denominator_outcome_id"] == "fh_new_gsa"
+        assert resolved_valuation[0]["currency"] == "GBP"
+
+        resolved_fx_set, fx_set_warnings = resolve_imported_fx_rate_set(imported)
+        assert fx_set_warnings == []
+        assert resolved_fx_set["rate_set_id"] == project["fx_rate_set"]["rate_set_id"]
+
+        resolved_fx_records, fx_records_warnings = resolve_imported_fx_rate_records(imported)
+        assert fx_records_warnings == []
+        assert resolved_fx_records[0]["source_currency"] == "GBP"
+        assert resolved_fx_records[0]["target_currency"] == "USD"
+
+        # The model approval this economic state depends on is completely
+        # unaffected - REQ-ECON-002/006's documented design deliberately
+        # excludes valuation/FX inputs from fit-identity fingerprinting
+        # (core.fingerprint.fingerprint_model_spec), so adding or changing
+        # them must never spuriously invalidate an existing approval.
+        assert imported["model_approval"] == project["model_approval"]
+
+    def test_manifest_reports_valuation_and_fx_presence(self, tmp_path, sample_project):
+        project = dict(sample_project)
+        project["outcome_valuation_records"] = [_valid_valuation_record_dict()]
+        project["fx_rate_set"] = _valid_fx_rate_set_dict()
+        project["fx_rate_records"] = [_valid_fx_rate_record_dict()]
+
+        output_path = export_project(tmp_path / "with-econ.zip", **project)
+        with zipfile.ZipFile(output_path) as zf:
+            manifest = json.loads(zf.read("manifest.json"))
+        assert manifest["contains"]["outcome_valuation_records"] is True
+        assert manifest["contains"]["fx_rate_set"] is True
+        assert manifest["contains"]["fx_rate_records"] is True
+
+        legacy_path = export_project(tmp_path / "without-econ.zip", **sample_project)
+        with zipfile.ZipFile(legacy_path) as zf:
+            legacy_manifest = json.loads(zf.read("manifest.json"))
+        assert legacy_manifest["contains"]["outcome_valuation_records"] is False
+        assert legacy_manifest["contains"]["fx_rate_set"] is False
+
+    def test_replacing_the_valuation_source_after_reload_is_reflected_not_stale(
+        self, tmp_path, sample_project
+    ):
+        """Simulates the exact scenario section 6 warns about: an analyst
+        uploads a replacement valuation file after a project was already
+        saved. Re-exports/re-imports with a genuinely different record
+        and confirms the reloaded state shows the NEW value, never the
+        old one - there is no cache in between to go stale."""
+        project = dict(sample_project)
+        project["outcome_valuation_records"] = [
+            _valid_valuation_record_dict(aggregate_value=100.0)
+        ]
+        first_path = export_project(tmp_path / "v1.zip", **project)
+        first_imported = import_project(first_path)
+        assert first_imported["outcome_valuation_records"][0]["aggregate_value"] == 100.0
+
+        project["outcome_valuation_records"] = [
+            _valid_valuation_record_dict(aggregate_value=999.0)
+        ]
+        second_path = export_project(tmp_path / "v2.zip", **project)
+        second_imported = import_project(second_path)
+        assert second_imported["outcome_valuation_records"][0]["aggregate_value"] == 999.0
