@@ -1820,6 +1820,52 @@
         "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_accepts_dict_metadata",
         "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_maturity_window_days_changes_completeness_fingerprint"
       ]
+    },
+    {
+      "requirement_id": "REQ-COVERAGE-002",
+      "status": "approved_for_implementation",
+      "record_path": "docs/approved_requirements/REQ-COVERAGE-002.md",
+      "affected_modules": [
+        "ancestry_mmm/core/missing_media_evidence.py",
+        "docs/missing_media_threshold_recommendation.md",
+        "docs/approved_requirements/REQ-COVERAGE-002.md",
+        "docs/approved_requirements/index.json",
+        "docs/decision_log.md"
+      ],
+      "required_tests": [
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_approved_requirements_readme_exists",
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_index_json_exists",
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_index_json_is_valid",
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_indexed_records_exist",
+        "ancestry_mmm/tests/test_requirements_index_conformance.py::test_requirement_ids_are_unique",
+        "ancestry_mmm/tests/test_requirements_index_conformance.py::test_every_record_path_exists",
+        "ancestry_mmm/tests/test_requirements_index_conformance.py::test_every_indexed_test_node_is_collectable",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_internal_gap_is_classified_correctly",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_edge_gap_at_start_is_classified_correctly",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_unknown_state_is_a_gap_by_default",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_observed_zero_segments_are_never_gaps",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_named_event_overlap_is_detected_only_within_market_scope",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_spend_companion_evidence_when_covering_and_when_absent",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_companion_with_no_overlapping_segment_is_none_not_false",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEvaluateCandidateReconstructionMethod::test_returns_one_result_per_valid_gap_length_and_position",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEvaluateCandidateReconstructionMethod::test_gap_length_that_does_not_fit_is_skipped_not_padded",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEvaluateCandidateReconstructionMethod::test_mae_is_computed_correctly",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEvaluateCandidateReconstructionMethod::test_mape_is_none_when_a_true_value_is_zero",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEvaluateCandidateReconstructionMethod::test_reconstruct_returning_wrong_length_raises",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEvaluateCandidateReconstructionMethod::test_mismatched_input_lengths_raise",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEstimationReadinessPolicy::test_recommendation_only_by_default",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEstimationReadinessPolicy::test_adopted_policy_requires_attribution",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEstimationReadinessPolicy::test_adopted_policy_with_attribution_succeeds",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEstimationReadinessPolicy::test_negative_thresholds_rejected",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_no_policy_always_blocks",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_edge_gap_blocked_unless_policy_allows_it",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_exceeds_missing_week_count_blocks",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_exceeds_consecutive_run_blocks",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_within_missing_week_count_and_run_is_estimable",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_threshold_without_evidence_blocks",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_within_threshold_is_estimable",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_exceeding_threshold_blocks"
+      ]
     }
   ]
 }

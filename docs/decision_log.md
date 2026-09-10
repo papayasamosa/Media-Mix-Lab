@@ -8975,3 +8975,54 @@ today's UI-entry timing. The Dictionary Builder generator does not yet
 offer these as guided input fields; its documentation is corrected to
 state the parser gap is closed while the builder-UI gap remains, rather
 than continuing to claim the parser itself doesn't map them.
+
+## 2026-09-10 (continued) missing-media gap diagnostics and estimation-evidence framework (REQ-COVERAGE-002)
+
+The brief's own stated "main area that still needs technical work"
+(Workstream D). Confirmed by audit that nothing under any name existed for
+this: fitting a candidate spend-to-activity relationship on observed
+weeks, carving synthetic holdout gaps and scoring reconstruction error,
+any numeric missing-run/coverage-percentage threshold, or an
+evidence-summary artifact. `REQ-COVERAGE-001`'s own "Out of scope" section
+explicitly withholds approval of any specific imputation formula or
+validation threshold for a future, separately-approved requirement -
+`core/missing_media_evidence.py` (new) is that dependent capability, not a
+reopening of `REQ-COVERAGE-001`.
+
+Three pieces: `diagnose_gaps` (consecutive-run length, edge-vs-internal
+position, named-event overlap scoped to the event's own `market_scope`,
+optional cross-measure evidence), `evaluate_candidate_reconstruction_method`
+(a method-agnostic synthetic-holdout harness - selects, endorses, or
+hard-codes no specific imputation formula; the candidate method is always
+caller-supplied), and `assess_estimation_readiness` (fail-closed:
+`policy=None` always blocks; `EstimationReadinessPolicy` mirrors
+`core.coverage.DefinitionBreak`'s approval-requires-attribution pattern
+and defaults `is_recommendation_only=True`).
+
+Ran the harness against a synthetic two-year weekly series (trend +
+seasonality + noise + promotional spikes, seed 42 - no real Ancestry data)
+across three candidate methods and five gap lengths, and wrote the actual
+results into `docs/missing_media_threshold_recommendation.md`, mirroring
+`docs/frequency_conversion_method_options.md`'s established survey-not-
+approval pattern. Worst-case MAPE stayed in the 25-36% range across every
+method/gap-length combination tested in this synthetic scenario, and
+linear interpolation's relative advantage inverted at the longest gap
+tested (13 weeks) - evidence against a permissive intuition that short
+gaps are cheap to estimate or that error shrinks smoothly with gap length.
+The document explicitly proposes no MAPE ceiling number (a business
+risk-tolerance choice, not a statistical one) and states plainly that real
+UK FH data must be run through the same harness before any policy is
+adopted.
+
+Investigated Workstream C (automatic detection of an `activity_id`'s
+semantic grain changing through time) alongside this. Found no reliable
+technical signal to key an automatic detector off without inventing a
+business rule about what a "genuine" grain change looks like in raw data
+versus ordinary variation - the existing analyst-declared
+`core.coverage.DefinitionBreak` mechanism (with required approval
+attribution) already covers the manual-declaration side. Recorded as
+investigated-and-not-built in `REQ-COVERAGE-002` rather than forcing a
+speculative heuristic.
+
+25 new tests (`test_missing_media_evidence.py`), all passing; zero new
+mypy errors (225 total, unchanged); ruff clean.
