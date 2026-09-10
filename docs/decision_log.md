@@ -9026,3 +9026,18 @@ speculative heuristic.
 
 25 new tests (`test_missing_media_evidence.py`), all passing; zero new
 mypy errors (225 total, unchanged); ruff clean.
+
+## 2026-09-10 (continued) live-page verification of the currency-aware ROI fix
+
+Ran `test_outcome_valuation_reporting_apptest.py` (the dedicated AppTest
+file for the Results page's "Economic outcome valuation & ROI" section) -
+missed earlier when verifying the REQ-FX-006 addendum, since
+`test_curve_bank_page_apptest.py` (which was run at the time) never
+populates `outcome_valuation_records` and so never actually reaches
+`_render_economic_valuation_reporting`/`_fx_request_kwargs` at all. All
+11 pre-existing tests passed unmodified against the new code. Added two
+new tests driving the real page end to end with a deliberately mismatched
+`market_spec_config` currency, proving `_fx_request_kwargs` actually wires
+the governed market currency through and the resulting warning/hidden-ROI
+behaviour actually renders - not just that the underlying service call is
+correct in isolation.

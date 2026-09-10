@@ -189,3 +189,7 @@ and display/rounding precision remain exactly as open as before.
 ### Required tests (this addendum)
 
 - `ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch` (all tests)
+- `ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage` (all tests) -
+  drives the real page end to end (not `OutcomeValuationReportingService` in
+  isolation), proving `_fx_request_kwargs` actually wires the governed
+  market currency through and the resulting warning actually renders

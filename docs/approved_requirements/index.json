@@ -1405,6 +1405,8 @@
         "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_mismatched_currency_without_fx_rate_set_blocks_roi_only",
         "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_mismatched_currency_without_matching_fx_rate_blocks_roi_only",
         "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_mismatched_currency_with_approved_rate_converts_and_computes_roi",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage::test_mismatched_market_currency_shows_warning_and_hides_roi",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage::test_matching_market_currency_shows_no_currency_warning",
         "ancestry_mmm/tests/test_fx_reporting.py::TestAssessFxStalenessTriggers::test_reporting_currency_selection_alone_never_triggers_staleness"
       ]
     },

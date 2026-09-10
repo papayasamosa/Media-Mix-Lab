@@ -21,6 +21,7 @@ from ancestry_mmm.core.fingerprint import (
 )
 from ancestry_mmm.core.hierarchical_model import FHModelMeta
 from ancestry_mmm.core.approval import ModelApproval
+from ancestry_mmm.core.market_config import MarketCurrency, MarketProfile, MarketSpecConfig
 from ancestry_mmm.core.outcome_valuation import (
     VALUATION_KIND_FH_LTR,
     WeeklyOutcomeValuationRecord,
@@ -164,7 +165,11 @@ def _january_2024_weeks() -> list[str]:
 
 
 def _seed_session_state(
-    at: AppTest, *, valuation_records=None, with_waterfall_support: bool = False
+    at: AppTest,
+    *,
+    valuation_records=None,
+    with_waterfall_support: bool = False,
+    market_local_currency: str | None = None,
 ) -> None:
     meta = _meta()
     trace = _trace(meta, n_obs=16 if with_waterfall_support else None)
@@ -231,6 +236,15 @@ def _seed_session_state(
     at.session_state["outcome_valuation_records"] = [
         r.to_dict() for r in (valuation_records or [])
     ]
+    if market_local_currency:
+        market_spec_config = MarketSpecConfig()
+        market_spec_config.set_profile(
+            MarketProfile(
+                market=MARKET,
+                currency=MarketCurrency(local_currency=market_local_currency),
+            )
+        )
+        at.session_state["market_spec_config"] = market_spec_config.to_dict()
 
 
 def _january_records() -> list[WeeklyOutcomeValuationRecord]:
@@ -393,6 +407,54 @@ class TestPeriodComparison:
         assert "Incremental value - change" not in metric_labels
         # Period A's own card still renders successfully.
         assert "Incremental value" in metric_labels
+
+
+class TestSpendCurrencyMismatchOnTheLivePage:
+    """UK FH MMM brief (2026-09-10) Workstream A/F, end to end through the
+    real page (not just OutcomeValuationReportingService in isolation) -
+    proves _fx_request_kwargs actually wires the governed market currency
+    through and _render_valuation_result actually surfaces the resulting
+    warning, not just that the underlying service call is correct."""
+
+    def test_mismatched_market_currency_shows_warning_and_hides_roi(self):
+        at = AppTest.from_file(str(PAGE), default_timeout=60)
+        _seed_session_state(
+            at,
+            valuation_records=_january_records(),  # currency="GBP"
+            market_local_currency="USD",  # deliberately mismatched for this test
+        )
+        at.run()
+        assert not at.exception
+
+        at.selectbox(key="ev_report_grain").set_value("Month").run()
+        at.selectbox(key="ev_report_period").set_value("2024-01").run()
+        assert not at.exception
+
+        warnings = [w.value for w in at.warning]
+        assert any("no Finance FX rate set" in w for w in warnings)
+        metric_labels = [m.label for m in at.metric]
+        assert "Incremental value" in metric_labels
+        assert "ROI" in metric_labels
+        roi_metrics = [m for m in at.metric if m.label == "ROI"]
+        assert roi_metrics[0].value == "Not available"
+
+    def test_matching_market_currency_shows_no_currency_warning(self):
+        at = AppTest.from_file(str(PAGE), default_timeout=60)
+        _seed_session_state(
+            at,
+            valuation_records=_january_records(),  # currency="GBP"
+            market_local_currency="GBP",  # matches - no conversion needed
+        )
+        at.run()
+
+        at.selectbox(key="ev_report_grain").set_value("Month").run()
+        at.selectbox(key="ev_report_period").set_value("2024-01").run()
+        assert not at.exception
+
+        warnings = [w.value for w in at.warning]
+        assert not any("Finance FX rate set" in w for w in warnings)
+        roi_metrics = [m for m in at.metric if m.label == "ROI"]
+        assert roi_metrics[0].value != "Not available"
 
 
 class TestContributionWaterfall:
