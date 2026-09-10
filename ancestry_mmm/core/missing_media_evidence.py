@@ -163,8 +163,10 @@ def diagnose_gaps(
     for segment in record.coverage_segments:
         if segment.state not in gap_states:
             continue
-        is_at_start = bool(observed_start) and segment.period_start <= observed_start
-        is_at_end = bool(observed_end) and segment.period_end >= observed_end
+        is_at_start = bool(observed_start) and segment.period_start <= (
+            observed_start or ""
+        )
+        is_at_end = bool(observed_end) and segment.period_end >= (observed_end or "")
         overlapping_events = tuple(
             sorted(
                 occurrence.event_id
