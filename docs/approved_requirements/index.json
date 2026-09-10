@@ -1385,7 +1385,9 @@
         "docs/approved_requirements/REQ-FX-006.md",
         "docs/approved_requirements/index.json",
         "ancestry_mmm/core/fx_reporting.py",
-        "docs/governed_fx_contract_implementation_decision_record.md"
+        "docs/governed_fx_contract_implementation_decision_record.md",
+        "ancestry_mmm/application/outcome_valuation_reporting_service.py",
+        "ancestry_mmm/pages/07_Results_Curve_Bank.py"
       ],
       "required_tests": [
         "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_approved_requirements_readme_exists",
@@ -1398,6 +1400,11 @@
         "ancestry_mmm/tests/test_governed_fx_authority_reconciliation.py::TestGovernedFXOverlayReconciled::test_req_fx_006_indexed_and_classified_incomplete",
         "ancestry_mmm/tests/test_fx_reporting.py::TestLabelCurrencyFigure::test_rejects_currency_not_in_context",
         "ancestry_mmm/tests/test_fx_reporting.py::TestFxTranslationDecompositionComponent::test_computes_translation_effect",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_no_spend_currency_declared_is_unchanged",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_matching_spend_currency_is_unchanged",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_mismatched_currency_without_fx_rate_set_blocks_roi_only",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_mismatched_currency_without_matching_fx_rate_blocks_roi_only",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_mismatched_currency_with_approved_rate_converts_and_computes_roi",
         "ancestry_mmm/tests/test_fx_reporting.py::TestAssessFxStalenessTriggers::test_reporting_currency_selection_alone_never_triggers_staleness"
       ]
     },

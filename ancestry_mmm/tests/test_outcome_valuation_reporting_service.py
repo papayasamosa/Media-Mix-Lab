@@ -287,6 +287,122 @@ class TestFailsClosed:
         assert result.errors != []
 
 
+class TestSpendCurrencyMismatch:
+    """UK FH MMM brief (2026-09-10) Workstream A/F: attributable_spend is
+    in the market's native currency, which may differ from the governed
+    valuation catalogue's currency (here always GBP via
+    `_valuation_records`). ROI must never silently divide across
+    currencies."""
+
+    def test_no_spend_currency_declared_is_unchanged(self, trace, frame, meta):
+        """Backward-compatible default: omitting spend_currency (every
+        caller before this feature existed) leaves behaviour identical to
+        the happy path - no conversion, no warning, no block."""
+        request = _base_request(trace, frame, meta)
+        result = OutcomeValuationReportingService().evaluate_period(request)
+
+        assert result.errors == []
+        assert result.attribution.spend == pytest.approx(
+            attributable_spend(frame, meta, market="UK", weeks=WEEK_STARTS)
+        )
+        assert not any("currency" in w.lower() for w in result.warnings)
+
+    def test_matching_spend_currency_is_unchanged(self, trace, frame, meta):
+        request = _base_request(trace, frame, meta, spend_currency="GBP")
+        result = OutcomeValuationReportingService().evaluate_period(request)
+
+        assert result.errors == []
+        assert result.attribution.spend == pytest.approx(
+            attributable_spend(frame, meta, market="UK", weeks=WEEK_STARTS)
+        )
+
+    def test_mismatched_currency_without_fx_rate_set_blocks_roi_only(
+        self, trace, frame, meta
+    ):
+        request = _base_request(trace, frame, meta, spend_currency="USD")
+        result = OutcomeValuationReportingService().evaluate_period(request)
+
+        assert result.errors == []
+        assert result.attribution is not None
+        assert np.isfinite(result.attribution.incremental_value_mean)
+        assert result.attribution.roi_mean is None
+        assert result.attribution.spend is None
+        assert any("no Finance FX rate set" in w for w in result.warnings)
+
+    @staticmethod
+    def _approved_fx_rate_set_and_records(**rate_overrides):
+        from ancestry_mmm.application.fx_service import build_manual_fx_rate_set
+
+        row = dict(
+            rate_date="2025-01-01",
+            source_currency="USD",
+            target_currency="GBP",
+            rate="0.8",
+            method="finance_constant_dollar_annual",
+            frequency="annual",
+            financial_year="2025",
+        )
+        row.update(rate_overrides)
+        frame_df = pd.DataFrame([row])
+        rate_set, records = build_manual_fx_rate_set(
+            frame_df,
+            rate_set_id="fx-2025",
+            rate_set_version=1,
+            name="Finance FY2025",
+            provider="finance-approved-upload",
+            base_or_reference_currency="GBP",
+            start_date="2025-01-01",
+            end_date="2025-12-31",
+            rate_policy="FIN-FX-2025",
+            approval_status="approved",
+            approved_by="finance-reviewer",
+            approved_at="2025-08-31T12:00:00Z",
+        )
+        return rate_set.to_dict(), [record.to_dict() for record in records]
+
+    def test_mismatched_currency_without_matching_fx_rate_blocks_roi_only(
+        self, trace, frame, meta
+    ):
+        rate_set, records = self._approved_fx_rate_set_and_records(
+            source_currency="AUD"  # no USD->GBP rate in this set
+        )
+        request = _base_request(
+            trace,
+            frame,
+            meta,
+            spend_currency="USD",
+            fx_rate_set=rate_set,
+            fx_rate_records=records,
+        )
+        result = OutcomeValuationReportingService().evaluate_period(request)
+
+        assert result.errors == []
+        assert result.attribution.roi_mean is None
+        assert result.attribution.spend is None
+        assert any("no applicable" in w for w in result.warnings)
+
+    def test_mismatched_currency_with_approved_rate_converts_and_computes_roi(
+        self, trace, frame, meta
+    ):
+        rate_set, records = self._approved_fx_rate_set_and_records()
+        request = _base_request(
+            trace,
+            frame,
+            meta,
+            spend_currency="USD",
+            fx_rate_set=rate_set,
+            fx_rate_records=records,
+            fx_as_of_date="2025-12-31",
+        )
+        result = OutcomeValuationReportingService().evaluate_period(request)
+        native_spend = attributable_spend(frame, meta, market="UK", weeks=WEEK_STARTS)
+
+        assert result.errors == []
+        assert result.attribution.spend == pytest.approx(native_spend * 0.8)
+        assert result.attribution.roi_mean is not None
+        assert any("converted from USD to GBP" in w for w in result.warnings)
+
+
 class TestComparePeriods:
     """WP2E: explicit two-period comparison. Reuses `evaluate_period()`
     itself (called twice) - one calculation path, verified here by

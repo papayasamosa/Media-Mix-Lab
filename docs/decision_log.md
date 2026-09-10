@@ -8921,3 +8921,37 @@ persisted economic-report artefact yet for a fit-level fingerprint to gate -
 the Results page recomputes live from session state on every view. Deferred
 pending a persisted artefact that would actually need it, rather than adding
 a second parallel invalidation path.
+
+## 2026-09-10 (continued) currency-aware historical ROI (REQ-FX-006 addendum)
+
+Found a real bug matching the brief's section 10 concern almost exactly:
+`attributable_spend`'s native media-input currency and the governed
+`WeeklyOutcomeValuationRecord` catalogue's currency can differ, and
+`pages/07_Results_Curve_Bank.py`'s historical ROI section displayed
+`attribution.spend` labelled with the *value's* currency regardless of
+what currency it was actually in, dividing the two for ROI with no
+conversion or block.
+
+First built a bespoke `resolve_annual_fx_rate` lookup in `core/fx_rates.py`
+before discovering `application.fx_service.resolve_approved_fx_rate`
+already exists and is already used by Official Curve Generation
+(`pages/13_Official_Curve_Generation.py`) for the identical problem on
+monetary curves - it additionally checks the rate set's approval status
+and records-fingerprint integrity, neither of which the bespoke version
+did. Reverted the bespoke function and its tests; wired
+`OutcomeValuationReportingService` to the existing mechanism instead.
+
+`HistoricalOutcomeValuationRequest` gains `spend_currency`, `fx_rate_set`,
+`fx_rate_records`, `fx_as_of_date`. A genuine, explicitly-declared currency
+mismatch converts spend into the value's currency before computing ROI, or
+withholds ROI (and the spend figure) with an explicit warning when no
+approved rate covers the pair - reusing the pre-existing "no spend means no
+ROI" contract rather than a new field. `spend_currency=None` (the default,
+and every pre-existing caller) leaves single-currency behaviour unchanged.
+The Results page now resolves `spend_currency` from the same
+`MarketCurrency.local_currency` Official Curve Generation reads, and
+renders `result.warnings` (computed before, but never displayed). Recorded
+as a REQ-FX-006 addendum. 202 tests across the FX/valuation suites pass, no
+regressions; the Results/Curve Bank page AppTest suite (19 tests) also
+passes, though no dedicated AppTest yet exercises this section specifically
+- coverage is at the service layer (24 tests, 5 new).

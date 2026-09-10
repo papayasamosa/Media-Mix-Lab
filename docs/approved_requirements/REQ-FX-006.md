@@ -143,3 +143,49 @@ Full detail in
 reference-rate-set default for the constant-currency view, or display/
 rounding precision, is invented - every item under "Explicitly
 excluded" above remains exactly as open as before this addendum.
+
+## Addendum, 2026-09-10: historical outcome-valuation ROI is currency-aware
+
+UK FH MMM implementation brief audit finding: `attributable_spend` (the
+market's native media-input currency) and the governed
+`WeeklyOutcomeValuationRecord` catalogue's `currency` can differ, and the
+historical ROI path (`application.outcome_valuation_reporting_service`,
+`pages/07_Results_Curve_Bank.py`'s "Economic outcome valuation & ROI"
+section) had no FX awareness at all - `attribution.spend` was displayed
+labelled with the *value's* currency regardless of what currency it was
+actually computed in, and ROI divided the two without any conversion or
+block.
+
+`HistoricalOutcomeValuationRequest` gains `spend_currency`, `fx_rate_set`,
+`fx_rate_records`, and `fx_as_of_date`. When `spend_currency` differs from
+the valuation catalogue's currency, `OutcomeValuationReportingService`
+resolves an approved rate via `application.fx_service.
+resolve_approved_fx_rate` - the same approval-status/fingerprint-checked,
+as-of-date lookup Official Curve Generation already uses for monetary
+curves (`pages/13_Official_Curve_Generation.py`) - never a second,
+parallel FX-lookup mechanism. Spend is converted into the value's
+currency before ROI is computed, so `attribution.spend`/`attribution.
+currency` are always mutually consistent by construction. When no
+approved rate covers the pair, ROI (and the spend figure) are withheld
+with an explicit warning, exactly like the pre-existing "zero/absent
+spend means no ROI" contract - never a fabricated or mislabelled figure.
+`spend_currency=None` (not yet governed for a market) leaves existing
+single-currency reporting byte-for-byte unchanged.
+
+The Results page resolves `spend_currency` from the same
+`MarketCurrency.local_currency` Official Curve Generation reads, and now
+renders `result.warnings` (previously computed but never displayed).
+
+This closes the currency-labelled-ROI gap for this one reporting surface
+only. Year-on-year FX decomposition (Requirement 4's remaining seven
+components), a reference-rate-set default for the constant-currency view,
+and display/rounding precision remain exactly as open as before.
+
+### Affected modules (this addendum)
+
+- `ancestry_mmm/application/outcome_valuation_reporting_service.py`
+- `ancestry_mmm/pages/07_Results_Curve_Bank.py`
+
+### Required tests (this addendum)
+
+- `ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch` (all tests)

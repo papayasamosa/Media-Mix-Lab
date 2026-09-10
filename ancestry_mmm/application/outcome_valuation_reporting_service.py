@@ -32,8 +32,13 @@ substitutes a nearby rate.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from ancestry_mmm.application.fx_service import (
+    FXUploadValidationError,
+    resolve_approved_fx_rate,
+)
+from ancestry_mmm.core.fx_rates import FXRateRecord, FXRateSet
 from ancestry_mmm.core.hierarchical_model import FHModelMeta
 from ancestry_mmm.core.outcome_valuation import WeeklyOutcomeValuationRecord
 from ancestry_mmm.core.outcome_valuation_attribution import (
@@ -75,6 +80,26 @@ class HistoricalOutcomeValuationRequest:
     n_permutations: int = DEFAULT_REPORTING_N_PERMUTATIONS
     seed: int = 42
     credible_mass: float = DEFAULT_CRED_MASS
+    # UK FH MMM brief (2026-09-10), Workstream A/F: `attributable_spend` is
+    # in the market's native media-input currency, which may differ from
+    # the governed valuation catalogue's `currency`. `spend_currency` is
+    # never inferred from `market` - the caller (the Results page, from
+    # governed market/channel currency configuration) supplies it
+    # explicitly, or leaves it `None` when unknown/not yet governed, in
+    # which case no conversion is attempted (existing single-currency
+    # behaviour is unchanged). When `spend_currency` differs from the
+    # valuation catalogue's currency, resolving an approved rate reuses
+    # `application.fx_service.resolve_approved_fx_rate` - the same
+    # approval-status/fingerprint-checked, as-of-date lookup Official Curve
+    # Generation already uses for monetary curves - never a second,
+    # parallel FX-lookup mechanism. `fx_rate_set`/`fx_rate_records` are the
+    # project's governed Finance FX upload; `fx_as_of_date` mirrors that
+    # page's own "FX as-of date" input (defaults to the period's last
+    # resolved week when not supplied).
+    spend_currency: Optional[str] = None
+    fx_rate_set: Optional[Mapping[str, Any]] = None
+    fx_rate_records: Sequence[Any] = ()
+    fx_as_of_date: Optional[str] = None
 
 
 @dataclass
@@ -248,10 +273,13 @@ class OutcomeValuationReportingService:
                 weeks=resolved_weeks,
                 channel=request.channel,
             )
+            spend_for_roi, currency_warnings = self._resolve_spend_for_roi(
+                request, spend, ordered_rates[0].currency, resolved_weeks[-1]
+            )
             attribution = summarize_posterior_economic_attribution(
                 incremental_outcome_draws,
                 ordered_rates,
-                spend=spend,
+                spend=spend_for_roi,
                 credible_mass=request.credible_mass,
             )
         except Exception as exc:
@@ -262,8 +290,75 @@ class OutcomeValuationReportingService:
             attribution=attribution,
             resolved_weeks=resolved_weeks,
             errors=[],
-            warnings=list(issues),
+            warnings=list(issues) + currency_warnings,
         )
+
+    @staticmethod
+    def _resolve_spend_for_roi(
+        request: "HistoricalOutcomeValuationRequest",
+        spend: float,
+        value_currency: str,
+        last_resolved_week: str,
+    ) -> "tuple[Optional[float], List[str]]":
+        """UK FH MMM brief (2026-09-10) Workstream A/F: resolve the spend
+        figure to pass into ROI, converting it into `value_currency` via
+        `application.fx_service.resolve_approved_fx_rate` when
+        `request.spend_currency` differs from it - the same
+        approval-status/fingerprint-checked lookup Official Curve
+        Generation already uses, never a second, parallel FX-lookup
+        mechanism. Returns `(spend_for_roi, warnings)`. `spend_for_roi=None`
+        means "ROI not shown" (the existing zero/absent-spend contract) - a
+        currency block reuses that identical mechanism, never a new field.
+
+        Zero/negative spend never needs conversion (no ROI is computed for
+        it regardless), and `spend_currency=None` (not yet governed) leaves
+        existing single-currency behaviour byte-for-byte unchanged - this
+        function does exactly nothing unless a genuine, explicitly declared
+        currency mismatch exists.
+        """
+        if (
+            not request.spend_currency
+            or not value_currency
+            or request.spend_currency == value_currency
+            or spend is None
+            or spend <= 0
+        ):
+            return spend, []
+
+        if request.fx_rate_set is None:
+            return None, [
+                f"Attributable spend is in {request.spend_currency} but the "
+                f"governed valuation catalogue is in {value_currency}. ROI "
+                "is not shown: no Finance FX rate set has been supplied yet."
+            ]
+
+        try:
+            rate_set = FXRateSet.from_dict(dict(request.fx_rate_set))
+            fx_records = [
+                FXRateRecord.from_dict(item) if isinstance(item, Mapping) else item
+                for item in (request.fx_rate_records or ())
+            ]
+            resolved_rate = resolve_approved_fx_rate(
+                rate_set,
+                fx_records,
+                source_currency=request.spend_currency,
+                target_currency=value_currency,
+                as_of_date=request.fx_as_of_date or last_resolved_week,
+            )
+        except (ValueError, TypeError, FXUploadValidationError) as exc:
+            return None, [f"ROI is not shown: {exc}"]
+
+        if resolved_rate is None:
+            return None, [
+                "ROI is not shown: the approved Finance FX rate set has no "
+                f"applicable {request.spend_currency}->{value_currency} rate "
+                f"on or before {request.fx_as_of_date or last_resolved_week}."
+            ]
+
+        return float(spend) * float(resolved_rate), [
+            f"Attributable spend converted from {request.spend_currency} to "
+            f"{value_currency} at the approved Finance FX rate ({resolved_rate})."
+        ]
 
     def compare_periods(
         self,

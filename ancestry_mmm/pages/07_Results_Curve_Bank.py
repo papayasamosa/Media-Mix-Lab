@@ -396,6 +396,27 @@ def _render_period_selector(available_weeks, market, key_prefix, *, columns=None
     return grain, period_label, custom_start, custom_end
 
 
+def _fx_request_kwargs(market: str) -> dict:
+    """UK FH MMM brief (2026-09-10) Workstream A/F: the governed
+    spend-currency and Finance FX inputs to merge into every
+    `HistoricalOutcomeValuationRequest` for `market`, so attributable
+    spend is never silently mislabelled with the value's currency when the
+    two differ. `spend_currency` comes from the same governed
+    `MarketCurrency.local_currency` Official Curve Generation already uses
+    (`ancestry_mmm/pages/13_Official_Curve_Generation.py`) - never a new,
+    independently-entered currency. Blank/unset local_currency resolves to
+    `None`, which leaves existing single-currency reporting unaffected
+    (`OutcomeValuationReportingService` only acts on an explicit,
+    known mismatch)."""
+    profile = market_config.get_profile(market)
+    spend_currency = profile.currency.local_currency or None
+    return dict(
+        spend_currency=spend_currency,
+        fx_rate_set=get_state("fx_rate_set"),
+        fx_rate_records=get_state("fx_rate_records") or [],
+    )
+
+
 def _render_economic_valuation_reporting(meta, trace, frame, records):
     """Historical ROI/incremental-value reporting (WP2D-ui). Routes every
     calculation through `OutcomeValuationReportingService` - one join
@@ -478,6 +499,7 @@ def _render_economic_valuation_reporting(meta, trace, frame, records):
         period_label=period_label,
         custom_range_start=custom_start,
         custom_range_end=custom_end,
+        **_fx_request_kwargs(report_market),
     )
     with st.spinner("Computing posterior incremental value..."):
         result = OutcomeValuationReportingService().evaluate_period(request)
@@ -497,6 +519,8 @@ def _render_valuation_result(result, *, heading=None, key_suffix=""):
         for error in result.errors:
             st.error(error)
         return
+    for warning in result.warnings:
+        st.warning(warning)
 
     attribution = result.attribution
     st.caption(
@@ -641,6 +665,7 @@ def _render_period_comparison(meta, trace, frame, records):
         valuation_kind=cmp_valuation_kind,
         weekly_valuation_records=records,
         channel=channel,
+        **_fx_request_kwargs(cmp_market),
     )
     request_a = HistoricalOutcomeValuationRequest(
         grain=grain_a,
