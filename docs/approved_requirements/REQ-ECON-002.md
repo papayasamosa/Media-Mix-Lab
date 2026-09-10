@@ -356,3 +356,29 @@ engineering (architecture reconciliation).
 ## Approval date
 
 2026-08-28
+
+## Addendum, 2026-09-10: end-to-end GSA-denominator proof added
+
+The generic denominator mechanism (Requirement 3) was already unit-tested
+against a GSA-named `denominator_outcome_id` in `test_outcome_valuation.py`
+and `test_outcome_valuation_rates.py`, but no test exercised the full
+`OutcomeValuationReportingService.evaluate_period` path (weekly-rate
+derivation, draw-level join, aggregation, ROI) with anything other than
+an NBT/FH_LTR-flavoured request. Added `TestGenericDenominatorArchitecture
+WithGSA` to `test_outcome_valuation_reporting_service.py`: an end-to-end
+request using a GSA-cohort-style denominator alongside the existing
+NBT-style tests (both pass unmodified, proving neither displaces the
+other), plus a structural guard asserting the runtime valuation/rate/
+attribution/reporting-service modules never hardcode an NBT-specific
+string. No separate GSA valuation engine was built - this is the same
+`OutcomeValuationReportingService` call, same code path, different
+`denominator_outcome_id`/`valuation_kind` value, exactly as Requirement 3
+already required.
+
+### Affected modules (this addendum)
+
+- `ancestry_mmm/tests/test_outcome_valuation_reporting_service.py`
+
+### Required tests (this addendum)
+
+- `ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestGenericDenominatorArchitectureWithGSA` (all tests)

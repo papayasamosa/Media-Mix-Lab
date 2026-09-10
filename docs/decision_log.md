@@ -9102,3 +9102,16 @@ explain what the new field is *not* (a legitimate, correct explanation),
 which still tripped the guard. Reworded the comment to make the same
 point without the literal figure, rather than weakening the guard test -
 it is doing exactly its job.
+
+## 2026-09-10 (next pass) end-to-end GSA-denominator test (REQ-ECON-002 addendum)
+
+The generic denominator mechanism was already unit-tested against a
+GSA-named `denominator_outcome_id` at the `outcome_valuation`/
+`outcome_valuation_rates` layer, but no test exercised the full
+`OutcomeValuationReportingService.evaluate_period` path with anything
+other than an NBT/FH_LTR-flavoured request. Added an end-to-end GSA-style
+request (same code path, different `denominator_outcome_id`/
+`valuation_kind`) alongside the pre-existing NBT-style tests - both pass
+unmodified - plus a structural guard asserting the runtime valuation/
+rate/attribution/reporting-service modules never hardcode an NBT-specific
+string. No separate GSA valuation engine was built.

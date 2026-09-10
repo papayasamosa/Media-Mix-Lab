@@ -1581,7 +1581,10 @@
         "ancestry_mmm/tests/test_outcome_valuation.py::TestRecordConstruction::test_blank_denominator_outcome_id_rejected",
         "ancestry_mmm/tests/test_outcome_valuation.py::TestCatalogueValidation::test_unknown_denominator_outcome_id_is_rejected",
         "ancestry_mmm/tests/test_outcome_valuation.py::TestCrossValidateAgainstObservedDenominator::test_zero_zero_pair_is_not_flagged",
-        "ancestry_mmm/tests/test_outcome_valuation.py::TestCrossValidateAgainstObservedDenominator::test_nonzero_value_with_zero_denominator_is_surfaced"
+        "ancestry_mmm/tests/test_outcome_valuation.py::TestCrossValidateAgainstObservedDenominator::test_nonzero_value_with_zero_denominator_is_surfaced",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestGenericDenominatorArchitectureWithGSA::test_gsa_denominator_end_to_end_reporting_matches_nbt_path_shape",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestGenericDenominatorArchitectureWithGSA::test_nbt_style_path_is_unaffected_by_the_generic_mechanism",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestGenericDenominatorArchitectureWithGSA::test_no_runtime_valuation_module_hardcodes_an_nbt_specific_string"
       ]
     },
     {

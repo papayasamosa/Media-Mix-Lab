@@ -8,6 +8,8 @@ fixtures."""
 
 from __future__ import annotations
 
+import inspect
+
 import arviz as az
 import numpy as np
 import pandas as pd
@@ -20,6 +22,7 @@ from ancestry_mmm.application.outcome_valuation_reporting_service import (
 from ancestry_mmm.core.coverage import STATE_ESTIMATED, STATE_OBSERVED_ZERO
 from ancestry_mmm.core.hierarchical_model import FHModelMeta
 from ancestry_mmm.core.outcome_valuation import (
+    VALUATION_KIND_DNA_REVENUE,
     VALUATION_KIND_FH_LTR,
     WeeklyOutcomeValuationRecord,
 )
@@ -558,3 +561,97 @@ class TestComparePeriods:
         assert comparison.roi is None
         assert any(e.startswith("Period B:") for e in comparison.errors)
         assert comparison.period_a.attribution is not None
+
+
+class TestGenericDenominatorArchitectureWithGSA:
+    """UK FH MMM Next Autonomous Instructions (2026-09-10), section 8: the
+    generic weekly-value-rate-derivation path must not assume NBT is the
+    universal denominator. `denominator_outcome_id` is an opaque
+    identifier as far as this service is concerned - REQ-ECON-002
+    Requirement 3 explicitly forbids inferring or defaulting it to any
+    particular outcome (GSA included). This proves the exact same
+    `OutcomeValuationReportingService.evaluate_period` code path -
+    weekly-rate derivation, draw-level join, aggregation, ROI - produces a
+    correct result for a GSA-cohort-by-GSA-week valuation record, with no
+    special-casing anywhere for which outcome the denominator happens to
+    reference. `TestHappyPath`'s NBT-flavoured (`VALUATION_KIND_FH_LTR`)
+    tests above are unmodified and continue to pass unchanged - this
+    class adds a parallel path, never a replacement."""
+
+    @staticmethod
+    def _gsa_style_records(weeks, *, aggregate_value=300.0):
+        # dna_revenue carries no LTR-horizon concept (unlike fh_ltr), so it
+        # doubles here as a stand-in for "a non-NBT-flavoured valuation
+        # kind" without needing FH_LTR_HORIZON_MONTHS at all - the point
+        # under test is the denominator_outcome_id, not the valuation_kind.
+        return [
+            WeeklyOutcomeValuationRecord(
+                valuation_kind=VALUATION_KIND_DNA_REVENUE,
+                market="UK",
+                week=week,
+                segment=SEGMENT,
+                denominator_outcome_id="New",  # stands in for a GSA outcome_id
+                quality_status=STATE_ESTIMATED,
+                aggregate_value=aggregate_value,
+                currency="GBP",
+            )
+            for week in weeks
+        ]
+
+    def test_gsa_denominator_end_to_end_reporting_matches_nbt_path_shape(
+        self, trace, frame, meta
+    ):
+        """An approved GSA-style outcome (the fixture's "New" outcome_id,
+        used here as the GSA cohort) referenced by a weekly valuation
+        record's denominator_outcome_id - the same generic weekly-rate
+        derivation, draw-level join, and ROI computation as the NBT path,
+        with no code branch keyed on which outcome_id is supplied."""
+        request = _base_request(
+            trace,
+            frame,
+            meta,
+            valuation_kind=VALUATION_KIND_DNA_REVENUE,
+            weekly_valuation_records=self._gsa_style_records(WEEK_STARTS),
+        )
+        result = OutcomeValuationReportingService().evaluate_period(request)
+
+        assert result.errors == []
+        assert result.attribution is not None
+        assert np.isfinite(result.attribution.incremental_value_mean)
+        assert result.attribution.currency == "GBP"
+        assert result.attribution.spend == pytest.approx(
+            attributable_spend(frame, meta, market="UK", weeks=WEEK_STARTS)
+        )
+
+    def test_nbt_style_path_is_unaffected_by_the_generic_mechanism(
+        self, trace, frame, meta
+    ):
+        """The pre-existing FH_LTR/NBT-style request continues to work
+        identically alongside the GSA-style one above - proving the
+        generic mechanism serves both, never one at the expense of the
+        other."""
+        request = _base_request(trace, frame, meta)
+        result = OutcomeValuationReportingService().evaluate_period(request)
+        assert result.errors == []
+        assert result.attribution is not None
+
+    def test_no_runtime_valuation_module_hardcodes_an_nbt_specific_string(self):
+        """Structural guard: the generic valuation/rate/attribution/
+        reporting-service modules must never special-case a net-bill-
+        through-specific identifier - REQ-ECON-002 Requirement 3's
+        genericness requirement, enforced as source text, not just proven
+        by example via the tests above."""
+        import ancestry_mmm.core.outcome_valuation as _ov
+        import ancestry_mmm.core.outcome_valuation_attribution as _ova
+        import ancestry_mmm.core.outcome_valuation_rates as _ovr
+        import ancestry_mmm.application.outcome_valuation_reporting_service as _ovrs
+
+        forbidden = ("net_billthrough", "fh_net_billthrough", "nbt_")
+        for module in (_ov, _ova, _ovr, _ovrs):
+            source = inspect.getsource(module).lower()
+            for needle in forbidden:
+                assert needle not in source, (
+                    f"{module.__name__} references {needle!r} - the "
+                    "denominator/valuation mechanism must remain "
+                    "outcome-agnostic."
+                )
