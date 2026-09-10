@@ -43,20 +43,30 @@ class NetBillthroughCompletenessMetadata:
     outcome_id: str = ""
     definition_version: str = ""
     definition_fingerprint: str = ""
+    # REQ-NBT-005: an explicit, per-source-pack production readiness window
+    # (e.g. 30 days for the current UK Family History production pack),
+    # distinct from REQ-NBT-002's 14-day *historical-test* completeness
+    # horizon. `None` means "not configured" - assess_official_maturity_
+    # readiness never assumes a default in its absence (REQ-NBT-004: no
+    # historical-test rule may be silently applied as a production
+    # assumption).
+    maturity_window_days: int | None = None
 
     def completeness_fingerprint(self) -> str:
         """Stable SHA-256 fingerprint of this completeness record, covering
         the data-integrity fields that define the record's identity:
         source_owner, data_as_of_date, latest_complete_net_billthrough_week,
-        and maturity_rule_description. This is NOT the same as the
-        outcome-definition fingerprint (``definition_fingerprint``) — a
-        completeness record can be updated (newer as-of date, later complete
-        week) without changing the outcome definition, and vice versa."""
+        maturity_rule_description, and maturity_window_days. This is NOT the
+        same as the outcome-definition fingerprint (``definition_fingerprint``)
+        — a completeness record can be updated (newer as-of date, later
+        complete week) without changing the outcome definition, and vice
+        versa."""
         payload: Dict[str, object] = {
             "source_owner": self.source_owner,
             "data_as_of_date": self.data_as_of_date,
             "latest_complete_net_billthrough_week": self.latest_complete_net_billthrough_week,
             "maturity_rule_description": self.maturity_rule_description,
+            "maturity_window_days": self.maturity_window_days,
             "outcome_id": self.outcome_id,
             "definition_version": self.definition_version,
             "definition_fingerprint": self.definition_fingerprint,
@@ -391,6 +401,84 @@ def validate_nbt_completeness_metadata_for_outcome(
             "Net bill-through metadata requires a maturity rule and source owner."
         )
     return issues
+
+
+def assess_official_maturity_readiness(
+    metadata: "NetBillthroughCompletenessMetadata | dict | None",
+) -> dict:
+    """REQ-NBT-005: assess whether the latest complete NBT week is old enough
+    to be treated as mature for *official* reporting/planning use.
+
+    This is a surfaced readiness signal, not a new blocking gate on
+    ``validate_supplied_net_billthrough``/``assert_supplied_net_billthrough_complete``
+    - those existing functions keep validating structural completeness
+    (coverage, non-negativity, week alignment) exactly as before. This
+    function answers a different question: given the supplied
+    ``maturity_window_days`` (a per-source-pack governed value - e.g. 30 days
+    for the current UK Family History production pack per the UK FH MMM
+    implementation brief, 2026-09-10 - never a value this function invents),
+    has enough time passed since the latest complete week for its cohorts to
+    be considered read for official use?
+
+    Deliberately does not default ``maturity_window_days`` to 14 (REQ-NBT-002's
+    historical-*test*-only completeness horizon) or to any other number:
+    REQ-NBT-004 requires production maturity to come from the supplied source
+    metadata, not a silently-applied historical-test assumption. When
+    ``maturity_window_days`` is not configured, this returns
+    ``is_mature=None`` ("not assessed"), never ``True`` or ``False``.
+    """
+    if metadata is None:
+        return {
+            "is_mature": None,
+            "maturity_window_days": None,
+            "days_since_latest_complete_week": None,
+            "reason": "No net bill-through completeness metadata supplied.",
+        }
+    if isinstance(metadata, dict):
+        metadata = NetBillthroughCompletenessMetadata.from_dict(metadata)
+
+    try:
+        latest = pd.Timestamp(
+            metadata.latest_complete_net_billthrough_week
+        ).normalize()
+        as_of = pd.Timestamp(metadata.data_as_of_date).normalize()
+    except (TypeError, ValueError):
+        return {
+            "is_mature": None,
+            "maturity_window_days": metadata.maturity_window_days,
+            "days_since_latest_complete_week": None,
+            "reason": "Completeness metadata contains invalid dates.",
+        }
+
+    days_since = int((as_of - latest).days)
+    if metadata.maturity_window_days is None:
+        return {
+            "is_mature": None,
+            "maturity_window_days": None,
+            "days_since_latest_complete_week": days_since,
+            "reason": (
+                "No maturity_window_days is configured for this source pack; "
+                "official readiness cannot be assessed against a threshold "
+                "that was never supplied."
+            ),
+        }
+
+    is_mature = days_since >= metadata.maturity_window_days
+    return {
+        "is_mature": is_mature,
+        "maturity_window_days": metadata.maturity_window_days,
+        "days_since_latest_complete_week": days_since,
+        "reason": (
+            f"{days_since} day(s) have elapsed since the latest complete week "
+            f"against a {metadata.maturity_window_days}-day maturity window."
+            if is_mature
+            else (
+                f"Only {days_since} day(s) have elapsed since the latest "
+                f"complete week; {metadata.maturity_window_days} day(s) are "
+                "required before treating it as mature for official use."
+            )
+        ),
+    }
 
 
 def assert_supplied_net_billthrough_complete(*args, **kwargs) -> None:

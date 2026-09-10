@@ -8866,3 +8866,33 @@ completeness are governed by the supplied source metadata.
 This decision is intentionally scoped to the current UK production onboarding
 path. It does not replace the versioned outcome-definition registry or make NBT
 a global default for unrelated projects.
+
+## 2026-09-10 UK Family History MMM implementation brief: 30-day maturity readiness window
+
+Recorded as `REQ-NBT-005`. For the current UK Family History production
+delivery, official MMM readiness treats the latest supplied NBT week as
+mature once 30 days have elapsed since `data_as_of_date`. This is a
+distinct, more conservative production readiness window from `REQ-NBT-002`'s
+14-day historical-test completeness horizon, which `REQ-NBT-004` already
+forbids treating as a production default; neither prior record is
+superseded.
+
+`NetBillthroughCompletenessMetadata` gains an optional `maturity_window_days`
+field (default `None` - never silently assumed) and a new
+`assess_official_maturity_readiness` function surfaces the readiness signal
+without changing the existing structural-completeness gate
+(`validate_supplied_net_billthrough`). The 30-day number is supplied
+configuration for this specific UK FH production pack, not a hard-coded
+universal threshold.
+
+This brief's audit against current `main` found the target-state
+architecture for NBT segment definitions, the generic NBT/GSA denominator
+mechanism, weekly-rate-before-aggregation, fail-closed missing valuation,
+and the FX rate/conversion primitives already implemented and tested (see
+`REQ-NBT-002`-`004`, `REQ-ECON-002`/`003`, `REQ-FX-001`-`004`). Remaining
+UK FH deltas identified but not yet closed by this pass: fingerprint/
+staleness wiring for `outcome_valuation`/`fx_rate` records into
+`core/fingerprint.py`, FX year-lookup-and-block integration into the Results
+page and `outcome_valuation_reporting.py`, and the missing-media
+estimation-evidence/holdout framework (the brief's own stated "main area
+still needing technical work").

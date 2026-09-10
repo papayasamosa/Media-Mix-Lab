@@ -1770,6 +1770,32 @@
         "ancestry_mmm/tests/test_uk_production_decisions.py::test_google_trends_expression_preserves_duplicate_term",
         "ancestry_mmm/tests/test_uk_production_decisions.py::test_search_taxonomy_requires_explicit_deeper_child_parent"
       ]
+    },
+    {
+      "requirement_id": "REQ-NBT-005",
+      "status": "approved_for_implementation",
+      "record_path": "docs/approved_requirements/REQ-NBT-005.md",
+      "affected_modules": [
+        "ancestry_mmm/core/net_billthrough.py",
+        "docs/approved_requirements/REQ-NBT-005.md",
+        "docs/approved_requirements/index.json",
+        "docs/decision_log.md"
+      ],
+      "required_tests": [
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_approved_requirements_readme_exists",
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_index_json_exists",
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_index_json_is_valid",
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_indexed_records_exist",
+        "ancestry_mmm/tests/test_requirements_index_conformance.py::test_requirement_ids_are_unique",
+        "ancestry_mmm/tests/test_requirements_index_conformance.py::test_every_record_path_exists",
+        "ancestry_mmm/tests/test_requirements_index_conformance.py::test_every_indexed_test_node_is_collectable",
+        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_no_metadata_is_not_assessed",
+        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_unconfigured_window_is_not_assessed_not_false",
+        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_thirty_day_window_mature_when_elapsed",
+        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_thirty_day_window_not_mature_when_recent",
+        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_accepts_dict_metadata",
+        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_maturity_window_days_changes_completeness_fingerprint"
+      ]
     }
   ]
 }

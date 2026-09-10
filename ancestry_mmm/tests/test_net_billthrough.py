@@ -8,6 +8,7 @@ G2A.7a.1 section 10).
 
 from ancestry_mmm.core.net_billthrough import (
     NetBillthroughCompletenessMetadata,
+    assess_official_maturity_readiness,
     validate_nbt_completeness_metadata_for_outcome,
 )
 from ancestry_mmm.core.outcome_approval import fingerprint_outcome_definition
@@ -140,3 +141,62 @@ class TestNBTCompletenessGate:
         metadata = _complete_metadata(outcome, data_as_of_date="not-a-date")
         issues = validate_nbt_completeness_metadata_for_outcome(outcome, metadata)
         assert any("invalid dates" in i for i in issues)
+
+
+class TestOfficialMaturityReadiness:
+    """REQ-NBT-005: surfaced official-readiness signal, distinct from
+    REQ-NBT-002's 14-day historical-test completeness horizon."""
+
+    def test_no_metadata_is_not_assessed(self):
+        result = assess_official_maturity_readiness(None)
+        assert result["is_mature"] is None
+
+    def test_unconfigured_window_is_not_assessed_not_false(self):
+        outcome = _nbt_outcome()
+        metadata = _complete_metadata(outcome)
+        assert metadata.maturity_window_days is None
+        result = assess_official_maturity_readiness(metadata)
+        assert result["is_mature"] is None
+        assert "is configured" in result["reason"]
+
+    def test_thirty_day_window_mature_when_elapsed(self):
+        outcome = _nbt_outcome()
+        metadata = _complete_metadata(
+            outcome,
+            data_as_of_date="2026-08-20",
+            latest_complete_net_billthrough_week="2026-07-13",
+            maturity_window_days=30,
+        )
+        result = assess_official_maturity_readiness(metadata)
+        assert result["is_mature"] is True
+        assert result["days_since_latest_complete_week"] == 38
+        assert result["maturity_window_days"] == 30
+
+    def test_thirty_day_window_not_mature_when_recent(self):
+        outcome = _nbt_outcome()
+        metadata = _complete_metadata(
+            outcome,
+            data_as_of_date="2026-07-20",
+            latest_complete_net_billthrough_week="2026-07-13",
+            maturity_window_days=30,
+        )
+        result = assess_official_maturity_readiness(metadata)
+        assert result["is_mature"] is False
+        assert result["days_since_latest_complete_week"] == 7
+
+    def test_accepts_dict_metadata(self):
+        outcome = _nbt_outcome()
+        metadata = _complete_metadata(
+            outcome,
+            data_as_of_date="2026-08-20",
+            latest_complete_net_billthrough_week="2026-07-13",
+            maturity_window_days=30,
+        )
+        result = assess_official_maturity_readiness(metadata.to_dict())
+        assert result["is_mature"] is True
+
+    def test_maturity_window_days_changes_completeness_fingerprint(self):
+        outcome = _nbt_outcome()
+        base = _complete_metadata(outcome)
+        with_window = _complete_metadata(outcome, maturity_window_days=30)
+        assert base.completeness_fingerprint() != with_window.completeness_fingerprint()
