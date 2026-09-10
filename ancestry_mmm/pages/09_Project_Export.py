@@ -57,6 +57,9 @@ from ancestry_mmm.core.persistence import (
     resolve_imported_outcome_reconciliation_groups,
     resolve_imported_experiments,
     resolve_imported_named_events,
+    resolve_imported_outcome_valuation_records,
+    resolve_imported_fx_rate_set,
+    resolve_imported_fx_rate_records,
     verify_imported_approval,
     UnsafeZipEntryError,
     audit_project_resumability,
@@ -1427,10 +1430,17 @@ if uploaded_zip is not None and st.button("Import bundle"):
             "future_assumption_bundles", imported.get("future_assumption_bundles")
         )
         set_state("candidate_a_fit_inputs", imported.get("candidate_a_fit_inputs"))
-        set_state(
-            "outcome_valuation_records",
-            imported.get("outcome_valuation_records") or [],
+        # REQ-ECON-002/UK FH MMM brief (2026-09-10) Workstream A: mirrors
+        # resolve_imported_outcome_approvals's never-trust-silently contract
+        # - a malformed valuation record is quarantined (dropped, named by
+        # index/identity) rather than crashing deep inside a later reporting
+        # call or being silently kept.
+        _resolved_valuation_records, _valuation_warnings = (
+            resolve_imported_outcome_valuation_records(imported)
         )
+        set_state("outcome_valuation_records", _resolved_valuation_records)
+        for _valuation_warning in _valuation_warnings:
+            st.warning(_valuation_warning)
         for _search_object_warning in _search_object_warnings:
             st.warning(_search_object_warning)
         # REQ-COVERAGE-001 S3: restore the quarantine-checked immutable
@@ -1543,8 +1553,21 @@ if uploaded_zip is not None and st.button("Import bundle"):
         # of this same session round-trips the identical policy/context.
         set_state("counterfactual_policy", imported.get("counterfactual_policy"))
         set_state("currency_context", imported.get("currency_context"))
-        set_state("fx_rate_set", imported.get("fx_rate_set"))
-        set_state("fx_rate_records", imported.get("fx_rate_records") or [])
+        # REQ-FX-001/002/UK FH MMM brief (2026-09-10) Workstream A: mirrors
+        # resolve_imported_outcome_approvals's never-trust-silently contract
+        # for the FX rate set and its underlying rate observations.
+        _resolved_fx_rate_set, _fx_rate_set_warnings = resolve_imported_fx_rate_set(
+            imported
+        )
+        set_state("fx_rate_set", _resolved_fx_rate_set)
+        for _fx_rate_set_warning in _fx_rate_set_warnings:
+            st.warning(_fx_rate_set_warning)
+        _resolved_fx_rate_records, _fx_rate_records_warnings = (
+            resolve_imported_fx_rate_records(imported)
+        )
+        set_state("fx_rate_records", _resolved_fx_rate_records)
+        for _fx_rate_records_warning in _fx_rate_records_warnings:
+            st.warning(_fx_rate_records_warning)
         set_state("value_mapping", imported.get("value_mapping"))
         # Fresh review finding: a cached constrained_result/unconstrained_
         # result left over from a DIFFERENT project earlier in this same

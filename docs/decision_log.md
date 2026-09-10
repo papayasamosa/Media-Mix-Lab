@@ -8896,3 +8896,28 @@ staleness wiring for `outcome_valuation`/`fx_rate` records into
 page and `outcome_valuation_reporting.py`, and the missing-media
 estimation-evidence/holdout framework (the brief's own stated "main area
 still needing technical work").
+
+## 2026-09-10 (continued) import-time quarantine for outcome-valuation and FX records
+
+`outcome_valuation_records`, `fx_rate_set`, and `fx_rate_records` were being
+restored from an imported project bundle raw (`imported.get(...)`), unlike
+every other governed artefact type (`outcome_approvals`, `causal_graphs`,
+`search_objects`, `named_events`) which already round-trip through a
+`resolve_imported_*` quarantine function. `core/persistence.py` gains
+`resolve_imported_outcome_valuation_records`, `resolve_imported_fx_rate_set`,
+and `resolve_imported_fx_rate_records`, mirroring
+`resolve_imported_outcome_approvals`'s never-trust-silently contract; wired
+into `pages/09_Project_Export.py`'s import handler. Recorded as a REQ-ECON-002
+addendum. No regression in the persistence or Project Export page test
+suites (268 tests).
+
+Investigated wiring valuation/FX into `core/fingerprint.py`'s fit-level
+staleness gate as the brief's Workstream A checklist literally names, but
+found this would duplicate an existing, finer-grained provenance mechanism:
+`WeeklyOutcomeValuationRecord.fingerprint()` already threads through
+`outcome_valuation_rates.py` into `source_record_fingerprint` and then into
+`PosteriorEconomicAttribution.source_rate_fingerprints`. There is also no
+persisted economic-report artefact yet for a fit-level fingerprint to gate -
+the Results page recomputes live from session state on every view. Deferred
+pending a persisted artefact that would actually need it, rather than adding
+a second parallel invalidation path.

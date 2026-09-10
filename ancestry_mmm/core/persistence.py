@@ -1599,6 +1599,132 @@ def resolve_imported_outcome_approvals(
     return legacy_records, warnings
 
 
+def resolve_imported_outcome_valuation_records(
+    imported: Dict[str, Any],
+) -> Tuple[List[dict], List[str]]:
+    """UK FH MMM brief (2026-09-10), Workstream A: resolve the governed
+    weekly outcome-valuation catalogue (REQ-ECON-002) an imported bundle
+    should use, mirroring `resolve_imported_outcome_approvals`'s
+    never-trust-silently contract. Each record is round-tripped through
+    `WeeklyOutcomeValuationRecord.from_dict`/`to_dict` for validation; a
+    malformed record (or one that no longer satisfies the record's own
+    construction-time invariants - e.g. a currency mismatch, an unapproved
+    denominator, or a stale LTR horizon) is quarantined (dropped), named by
+    index and its market/week/segment identity in `warnings`, never
+    silently kept or silently discarded without a trace.
+
+    Absent `outcome_valuation_records` (a bundle exported before this
+    capability existed, or a project with none configured) resolves to
+    `([], [])` - "no valuation records" is not an error.
+    """
+    from .outcome_valuation import WeeklyOutcomeValuationRecord
+
+    raw_records = imported.get("outcome_valuation_records")
+    warnings: List[str] = []
+    if not raw_records:
+        return [], warnings
+    normalised: List[dict] = []
+    for index, item in enumerate(raw_records):
+        if not isinstance(item, Mapping):
+            warnings.append(
+                f"Outcome valuation record {index} is not a mapping "
+                f"(type={type(item).__name__!r}) and was quarantined "
+                "(dropped, not silently kept)."
+            )
+            continue
+        try:
+            normalised.append(WeeklyOutcomeValuationRecord.from_dict(item).to_dict())
+        except (TypeError, ValueError, KeyError, AttributeError) as exc:
+            identity = (
+                f"market={item.get('market', '<unknown>')!r}, "
+                f"week={item.get('week', '<unknown>')!r}, "
+                f"segment={item.get('segment', '<unknown>')!r}"
+            )
+            warnings.append(
+                f"Outcome valuation record {index} ({identity}) was "
+                f"malformed and was quarantined (dropped, not silently "
+                f"kept): {exc}"
+            )
+    return normalised, warnings
+
+
+def resolve_imported_fx_rate_records(
+    imported: Dict[str, Any],
+) -> Tuple[List[dict], List[str]]:
+    """UK FH MMM brief (2026-09-10), Workstream A: resolve the governed FX
+    rate observations (REQ-FX-001/002) an imported bundle should use,
+    mirroring `resolve_imported_outcome_approvals`'s never-trust-silently
+    contract. Each record is round-tripped through
+    `FXRateRecord.from_dict`/`to_dict`; a malformed record (invalid currency
+    code, non-positive rate, an annual-frequency record missing its
+    financial_year, etc.) is quarantined (dropped), named by index and
+    rate_id in `warnings`.
+
+    Absent `fx_rate_records` resolves to `([], [])` - "no FX rates supplied
+    yet" is not an error; economics that need one still fail closed
+    downstream (REQ-FX-003/006).
+    """
+    from .fx_rates import FXRateRecord
+
+    raw_records = imported.get("fx_rate_records")
+    warnings: List[str] = []
+    if not raw_records:
+        return [], warnings
+    normalised: List[dict] = []
+    for index, item in enumerate(raw_records):
+        if not isinstance(item, Mapping):
+            warnings.append(
+                f"FX rate record {index} is not a mapping "
+                f"(type={type(item).__name__!r}) and was quarantined "
+                "(dropped, not silently kept)."
+            )
+            continue
+        try:
+            normalised.append(FXRateRecord.from_dict(item).to_dict())
+        except (TypeError, ValueError, KeyError, AttributeError) as exc:
+            rate_id = item.get("rate_id", "<unknown>")
+            warnings.append(
+                f"FX rate record {index} (rate_id={rate_id!r}) was "
+                f"malformed and was quarantined (dropped, not silently "
+                f"kept): {exc}"
+            )
+    return normalised, warnings
+
+
+def resolve_imported_fx_rate_set(
+    imported: Dict[str, Any],
+) -> Tuple[Optional[dict], List[str]]:
+    """UK FH MMM brief (2026-09-10), Workstream A: resolve the governed
+    `FXRateSet` (REQ-FX-002) an imported bundle should use, mirroring
+    `resolve_imported_outcome_approvals`'s never-trust-silently contract.
+    Round-tripped through `FXRateSet.from_dict`/`to_dict`; a malformed
+    record (invalid rate_set_id, inverted date range, a wrongly-shaped
+    `records_fingerprint`, an 'approved' status missing its approver, etc.)
+    is quarantined (dropped to `None`), named in `warnings`.
+
+    Absent `fx_rate_set` resolves to `(None, [])` - "no FX rate set
+    supplied yet" is not an error.
+    """
+    from .fx_rates import FXRateSet
+
+    raw_set = imported.get("fx_rate_set")
+    if raw_set is None:
+        return None, []
+    if not isinstance(raw_set, Mapping):
+        return None, [
+            f"FX rate set is not a mapping (type={type(raw_set).__name__!r}) "
+            "and was quarantined (dropped, not silently kept)."
+        ]
+    try:
+        return FXRateSet.from_dict(raw_set).to_dict(), []
+    except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        rate_set_id = raw_set.get("rate_set_id", "<unknown>")
+        return None, [
+            f"FX rate set (rate_set_id={rate_set_id!r}) was malformed and "
+            f"was quarantined (dropped, not silently kept): {exc}"
+        ]
+
+
 def resolve_imported_causal_graphs(
     imported: Dict[str, Any],
 ) -> Tuple[List[dict], List[str]]:

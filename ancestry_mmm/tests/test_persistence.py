@@ -79,6 +79,9 @@ from ancestry_mmm.core.persistence import (
     resolve_imported_media_outcome_pathways,
     resolve_imported_named_events,
     resolve_imported_outcome_approvals,
+    resolve_imported_outcome_valuation_records,
+    resolve_imported_fx_rate_set,
+    resolve_imported_fx_rate_records,
     resolve_imported_prefit_runs,
     resolve_imported_search_objects,
     resolve_imported_source_definitions,
@@ -1602,6 +1605,142 @@ def test_resolve_imported_outcome_approvals_reports_malformed_records_by_index()
     assert approvals == []
     assert len(warnings) == 1
     assert "0" in warnings[0] and "apr-1" in warnings[0]
+
+
+# ---------------------------------------------------------------------------
+# UK FH MMM brief (2026-09-10) Workstream A: outcome-valuation and FX
+# records are quarantine-checked on import, mirroring
+# resolve_imported_outcome_approvals's never-trust-silently contract.
+# ---------------------------------------------------------------------------
+
+
+def _valid_valuation_record_dict(**overrides) -> dict:
+    payload = dict(
+        valuation_kind="dna_revenue",
+        market="UK",
+        week="2026-01-05",
+        segment="New",
+        denominator_outcome_id="fh_new_nbt",
+        quality_status="estimated",
+        aggregate_value=100.0,
+        currency="GBP",
+    )
+    payload.update(overrides)
+    return payload
+
+
+def test_resolve_imported_outcome_valuation_records_absent_resolves_empty():
+    records, warnings = resolve_imported_outcome_valuation_records({})
+    assert records == []
+    assert warnings == []
+
+
+def test_resolve_imported_outcome_valuation_records_valid_round_trips():
+    imported = {"outcome_valuation_records": [_valid_valuation_record_dict()]}
+    records, warnings = resolve_imported_outcome_valuation_records(imported)
+    assert warnings == []
+    assert len(records) == 1
+    assert records[0]["market"] == "UK"
+
+
+def test_resolve_imported_outcome_valuation_records_reports_malformed_records_by_index():
+    imported = {
+        "outcome_valuation_records": [
+            _valid_valuation_record_dict(denominator_outcome_id=""),
+        ]
+    }
+    records, warnings = resolve_imported_outcome_valuation_records(imported)
+    assert records == []
+    assert len(warnings) == 1
+    assert "0" in warnings[0]
+
+
+def test_resolve_imported_outcome_valuation_records_quarantines_non_mapping_entries():
+    imported = {"outcome_valuation_records": ["not-a-mapping"]}
+    records, warnings = resolve_imported_outcome_valuation_records(imported)
+    assert records == []
+    assert len(warnings) == 1
+
+
+def _valid_fx_rate_record_dict(**overrides) -> dict:
+    payload = dict(
+        rate_id="r1",
+        rate_date="2026-01-01",
+        source_currency="GBP",
+        target_currency="USD",
+        rate="1.25",
+        frequency="monthly",
+        method="finance_constant_dollar_annual",
+        provider="Manual upload",
+        provider_series_id="manual-1",
+        retrieved_at="2026-01-01T00:00:00Z",
+    )
+    payload.update(overrides)
+    return payload
+
+
+def test_resolve_imported_fx_rate_records_absent_resolves_empty():
+    records, warnings = resolve_imported_fx_rate_records({})
+    assert records == []
+    assert warnings == []
+
+
+def test_resolve_imported_fx_rate_records_valid_round_trips():
+    imported = {"fx_rate_records": [_valid_fx_rate_record_dict()]}
+    records, warnings = resolve_imported_fx_rate_records(imported)
+    assert warnings == []
+    assert len(records) == 1
+    assert records[0]["rate_id"] == "r1"
+
+
+def test_resolve_imported_fx_rate_records_reports_malformed_records_by_rate_id():
+    imported = {
+        "fx_rate_records": [_valid_fx_rate_record_dict(rate="0")],
+    }
+    records, warnings = resolve_imported_fx_rate_records(imported)
+    assert records == []
+    assert len(warnings) == 1
+    assert "r1" in warnings[0]
+
+
+def _valid_fx_rate_set_dict(**overrides) -> dict:
+    import hashlib
+
+    payload = dict(
+        rate_set_id="fx-2026",
+        rate_set_version=1,
+        name="UK GBP-USD 2026",
+        provider="Manual upload",
+        base_or_reference_currency="GBP",
+        start_date="2026-01-01",
+        end_date="2026-12-31",
+        retrieved_at="2026-01-01T00:00:00Z",
+        rate_policy="point_in_time",
+        records_fingerprint=hashlib.sha256(b"test").hexdigest(),
+    )
+    payload.update(overrides)
+    return payload
+
+
+def test_resolve_imported_fx_rate_set_absent_resolves_none():
+    resolved, warnings = resolve_imported_fx_rate_set({})
+    assert resolved is None
+    assert warnings == []
+
+
+def test_resolve_imported_fx_rate_set_valid_round_trips():
+    imported = {"fx_rate_set": _valid_fx_rate_set_dict()}
+    resolved, warnings = resolve_imported_fx_rate_set(imported)
+    assert warnings == []
+    assert resolved["rate_set_id"] == "fx-2026"
+
+
+def test_resolve_imported_fx_rate_set_reports_malformed_set_by_id():
+    imported = {"fx_rate_set": _valid_fx_rate_set_dict(end_date="2025-01-01")}
+    resolved, warnings = resolve_imported_fx_rate_set(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "fx-2026" in warnings[0]
 
 
 def test_export_then_import_causal_graphs_round_trip(tmp_path, sample_project):
