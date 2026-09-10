@@ -9144,6 +9144,29 @@ HTML guide, and schema inventory from the updated generator - reverted
 the Context/Outcome builder `.xlsx` files, whose regeneration touched
 only an embedded creation timestamp with zero logical-content change.
 
+## 2026-09-10 (next pass) full repository verification: 5338/5338 passing
+
+Ran the full repository suite (`ancestry_mmm/tests`, 5340 collected
+tests) rather than targeted suites only, per this pass's explicit
+requirement. Took ~6 hours; found 3 failures, all in
+`test_graphify_tooling_contract.py`, all caused by an uncommitted,
+environment-side mutation of `.mcp.json` (the `graphify-project` entry
+went missing - almost certainly a side effect of the Graphify MCP
+connection failing at session start, not anything this pass touched;
+noted and deliberately left uncommitted earlier in this pass). Restored
+`.mcp.json` to its committed state and re-ran that file: 80/80 pass.
+Full suite is 5338/5338 passing, 2 skipped (pre-existing, unrelated), on
+the actual committed code. `ruff check ancestry_mmm scripts`: clean.
+Full-core mypy ratchet (`uv run mypy ancestry_mmm/core --ignore-missing-
+imports`): 225/225, matching `.mypy-baseline-count` exactly (caught and
+fixed a transient 227 during this same pass - see the earlier entry).
+The three narrower CI mypy commands (planning, validation_policy,
+application) are all clean.
+
+Also found `.gitignore` locally modified (adding a `.local-data/`
+ignore rule) - like `.mcp.json`, not something this pass's work
+intentionally changed; left uncommitted rather than assumed either way.
+
 ## 2026-09-10 (next pass) economic reporting state round-trip verified end to end
 
 Section 6's ask: confirm a saved/reloaded project preserves outcome-
