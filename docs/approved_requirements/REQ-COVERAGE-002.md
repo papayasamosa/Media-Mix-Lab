@@ -108,13 +108,64 @@ application-code behaviour changes.
 - Which candidate reconstruction method(s), if any, should become the approved
   default for a given activity/channel - deferred; this record approves the
   evaluation harness only, never a chosen method.
-- Wiring `assess_estimation_readiness` into an actual model-training or
-  Results-page blocking gate - this record delivers the domain capability;
-  UI/pipeline integration is separately-scoped future work, mirroring how
-  `core.frequency_alignment`'s architecture preceded its own UI wiring.
 - Automatic activity-grain-change detection (Workstream C) - not resolved by
   this record; the existing analyst-declared `core.coverage.DefinitionBreak`
   mechanism remains the only supported path.
+
+## Addendum, 2026-09-10: wired into the single authoritative production fit-readiness gate
+
+Per the immediate follow-up instructions, `assess_estimation_readiness` is
+now wired into the real gate, not left standalone. Traced the actual call
+chain first (`04_Model_Config.py` -> `application.official_preparation_
+service.review_official_preparation` -> `core.official_preparation.
+build_official_capability_report` -> `core.market_data_capability.
+check_market_channel_capability` -> `core.frequency_alignment.assess_
+official_preparation`'s `capability_evidence` check -> `OfficialPreparation
+Result.ready` -> `05_Model_Training.py`'s `_official_fit_gate_blocked`) to
+confirm there is exactly one authoritative gate for media/channel coverage,
+not several competing ones - `check_market_channel_capability`'s existing
+`has_unapproved_non_observed_coverage` check is the single point every
+downstream consumer already reads faithfully with no duplicate logic.
+
+`check_market_channel_capability`, `build_official_capability_report`, and
+`review_official_preparation` all gain optional `estimation_readiness_
+policy`/`estimation_evidence_by_variable` parameters, threaded straight
+through. Semantics, exactly as this record's core text already specified:
+`approved_for_official_use=True` alone still suffices when no policy is
+supplied (every existing caller, including `04_Model_Config.py`, passes
+none today and is completely unaffected - confirmed by the full existing
+regression suite passing unmodified). When a policy *is* supplied, an
+`estimated`/`modelled` segment on an otherwise-approved record is
+additionally required to pass `assess_estimation_readiness` (reusing
+`diagnose_gaps` scoped to exactly those two states - no duplicated
+diagnostic logic); `unknown`/`missing_expected`/`not_applicable`/
+`unavailable_source`/`suppressed` segments remain hard-blocked regardless
+of any policy, exactly as before - a policy only re-examines a state an
+analyst has already explicitly marked estimated, never a genuinely
+unresolved one.
+
+No project-level UI for *configuring* a policy is added by this addendum -
+building one would be premature given no approved threshold exists yet
+(`docs/missing_media_threshold_recommendation.md` remains a recommendation
+only). The capability is reachable today by any caller (a script, a test,
+or a future UI control) that constructs an `EstimationReadinessPolicy` and
+passes it through the existing parameter chain; wiring an actual UI control
+into `04_Model_Config.py` is deferred until a policy exists to configure.
+
+### Affected modules (this addendum)
+
+- `ancestry_mmm/core/market_data_capability.py`
+- `ancestry_mmm/core/official_preparation.py`
+- `ancestry_mmm/application/official_preparation_service.py`
+- `ancestry_mmm/pages/03_Structure_Segments_Markets.py` (NBT
+  `maturity_window_days` UI field and readiness read-out - a related
+  integration gap found during the same pass: the field existed on
+  `NetBillthroughCompletenessMetadata` with no UI control to actually set
+  it)
+
+### Required tests (this addendum)
+
+- `ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration` (all tests)
 
 ## Owner
 

@@ -24,6 +24,11 @@ from ancestry_mmm.core.market_data_capability import (
     FR_MOD_015_DECISION_REPORT,
     check_market_channel_capability,
 )
+from ancestry_mmm.core.missing_media_evidence import (
+    EstimationEvidenceSummary,
+    EstimationReadinessPolicy,
+    HoldoutEvaluationResult,
+)
 
 
 def _frequency() -> FrequencyMetadata:
@@ -269,4 +274,142 @@ class TestNonObservedStatesAreUnsupported:
         )
         matrix = _matrix(record)
         result = check_market_channel_capability(["UK"], ["TV"], matrix)
+        assert result.supported is True
+
+
+def _approved_estimated_record(
+    variable_id: str = "TV",
+    market: str = "UK",
+    *,
+    gap_start: str = "2026-02-01",
+    gap_end: str = "2026-02-08",
+    observed_start: str = "2026-01-01",
+    observed_end: str = "2026-03-01",
+) -> VariableCoverageRecord:
+    return _resolved_record(
+        variable_id,
+        market,
+        coverage_segments=(
+            CoverageSegment(
+                period_start=gap_start, period_end=gap_end, state=STATE_ESTIMATED
+            ),
+        ),
+        observed_start=observed_start,
+        observed_end=observed_end,
+        proposed_treatment="use governed estimate",
+        approved_treatment="use governed estimate",
+        treatment_status="approved",
+        treatment_approved_by="reviewer",
+        treatment_approved_at="2026-01-01",
+        approved_for_official_use=True,
+    )
+
+
+class TestEstimationReadinessPolicyIntegration:
+    """UK FH MMM brief (2026-09-10) Workstream D follow-up: wiring
+    assess_estimation_readiness into the actual production fit-readiness
+    gate, not just leaving it as a standalone module. `approved_for_
+    official_use=True` alone still suffices when no policy is supplied
+    (backward compatible with every existing caller); a supplied policy
+    additionally scrutinises estimated/modelled segments only."""
+
+    def test_no_policy_supplied_is_unchanged_from_today(self):
+        matrix = _matrix(_approved_estimated_record())
+        result = check_market_channel_capability(["UK"], ["TV"], matrix)
+        assert result.supported is True
+
+    def test_policy_supplied_but_gap_within_limits_still_supported(self):
+        matrix = _matrix(_approved_estimated_record())
+        policy = EstimationReadinessPolicy(
+            policy_id="p1", max_missing_week_count=4, max_consecutive_missing_run=4
+        )
+        result = check_market_channel_capability(
+            ["UK"], ["TV"], matrix, estimation_readiness_policy=policy
+        )
+        assert result.supported is True
+
+    def test_policy_supplied_and_gap_exceeds_missing_week_count_blocks(self):
+        matrix = _matrix(_approved_estimated_record())
+        policy = EstimationReadinessPolicy(policy_id="p1", max_missing_week_count=1)
+        result = check_market_channel_capability(
+            ["UK"], ["TV"], matrix, estimation_readiness_policy=policy
+        )
+        assert result.supported is False
+        assert "does not meet policy 'p1'" in result.issues[0].reason
+
+    def test_policy_requiring_evidence_with_none_supplied_blocks(self):
+        matrix = _matrix(_approved_estimated_record())
+        policy = EstimationReadinessPolicy(
+            policy_id="p1", max_reconstruction_error_mape=20.0
+        )
+        result = check_market_channel_capability(
+            ["UK"], ["TV"], matrix, estimation_readiness_policy=policy
+        )
+        assert result.supported is False
+
+    def test_policy_requiring_evidence_with_matching_evidence_supplied_passes(self):
+        matrix = _matrix(_approved_estimated_record())
+        policy = EstimationReadinessPolicy(
+            policy_id="p1", max_reconstruction_error_mape=50.0
+        )
+        evidence = EstimationEvidenceSummary(
+            variable_id="TV",
+            market="UK",
+            evaluated_at="2026-09-10",
+            n_observed_weeks_used=10,
+            results=(
+                HoldoutEvaluationResult(
+                    method_name="flat_fill",
+                    method_description="test",
+                    holdout_gap_length_weeks=1,
+                    holdout_position="middle",
+                    holdout_start_week="2026-01-15",
+                    n_holdout_weeks=1,
+                    reconstruction_error_mae=5.0,
+                    reconstruction_error_mape=10.0,
+                ),
+            ),
+        )
+        result = check_market_channel_capability(
+            ["UK"],
+            ["TV"],
+            matrix,
+            estimation_readiness_policy=policy,
+            estimation_evidence_by_variable={"TV": evidence},
+        )
+        assert result.supported is True
+
+    def test_edge_gap_blocked_by_default_policy(self):
+        matrix = _matrix(
+            _approved_estimated_record(
+                gap_start="2026-01-01",
+                gap_end="2026-01-08",
+                observed_start="2026-01-01",
+                observed_end="2026-03-01",
+            )
+        )
+        policy = EstimationReadinessPolicy(policy_id="p1")
+        result = check_market_channel_capability(
+            ["UK"], ["TV"], matrix, estimation_readiness_policy=policy
+        )
+        assert result.supported is False
+
+    def test_policy_never_examines_non_estimated_states(self):
+        """A policy only re-examines a state an analyst has already marked
+        estimated/modelled - it must never become a second path for
+        unknown/missing_expected to slip through unapproved."""
+        matrix = _matrix(_unresolved_record("TV", "UK"))
+        policy = EstimationReadinessPolicy(policy_id="p1")
+        result = check_market_channel_capability(
+            ["UK"], ["TV"], matrix, estimation_readiness_policy=policy
+        )
+        assert result.supported is False
+        assert "not a genuinely observed number" in result.issues[0].reason
+
+    def test_policy_does_not_affect_fully_observed_records(self):
+        matrix = _matrix(_resolved_record("TV", "UK"))
+        policy = EstimationReadinessPolicy(policy_id="p1", max_missing_week_count=0)
+        result = check_market_channel_capability(
+            ["UK"], ["TV"], matrix, estimation_readiness_policy=policy
+        )
         assert result.supported is True

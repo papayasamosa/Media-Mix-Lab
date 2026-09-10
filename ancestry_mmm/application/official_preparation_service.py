@@ -20,6 +20,10 @@ from ancestry_mmm.core.frequency_alignment import (
     alignment_specs_from_coverage_matrix,
     assess_official_preparation,
 )
+from ancestry_mmm.core.missing_media_evidence import (
+    EstimationEvidenceSummary,
+    EstimationReadinessPolicy,
+)
 from ancestry_mmm.core.official_preparation import (
     OfficialCapabilityReport,
     build_official_capability_report,
@@ -53,11 +57,21 @@ def review_official_preparation(
     activity_definitions: Sequence[ActivityDefinition | Mapping[str, Any]] = (),
     search_objects: Sequence[SearchObjectDefinition | Mapping[str, Any]] = (),
     pipeline_steps: Sequence[Mapping[str, Any]] = (),
+    estimation_readiness_policy: Optional[EstimationReadinessPolicy] = None,
+    estimation_evidence_by_variable: Optional[
+        Mapping[str, EstimationEvidenceSummary]
+    ] = None,
 ) -> OfficialPreparationReview:
     """Build the capability, readiness, and explicit alignment review.
 
     ``canonical_calendar`` is a governed input.  This function deliberately
     does not infer dates or frequency from source data.
+
+    ``estimation_readiness_policy``/``estimation_evidence_by_variable`` (UK
+    FH MMM brief, 2026-09-10, Workstream D follow-up) pass straight through
+    to ``build_official_capability_report`` - omitting them reproduces
+    exactly today's behaviour (no policy concept), so every existing caller
+    is unaffected.
     """
 
     capability_report = build_official_capability_report(
@@ -67,6 +81,8 @@ def review_official_preparation(
         activity_definitions=activity_definitions,
         search_objects=search_objects,
         pipeline_steps=pipeline_steps,
+        estimation_readiness_policy=estimation_readiness_policy,
+        estimation_evidence_by_variable=estimation_evidence_by_variable,
     )
     calendar = canonical_calendar or {}
     preparation = assess_official_preparation(

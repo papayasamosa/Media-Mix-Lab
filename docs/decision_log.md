@@ -9041,3 +9041,64 @@ new tests driving the real page end to end with a deliberately mismatched
 the governed market currency through and the resulting warning/hidden-ROI
 behaviour actually renders - not just that the underlying service call is
 correct in isolation.
+
+## 2026-09-10 (next pass) starting-point verification, no conflict found
+
+Received a follow-up instructions document for the same UK FH MMM work.
+Verified the branch (`feature/dictionary-builders`, HEAD `3c1a1182`) and
+working tree exactly matched the previous report. `origin/main` had moved
+3 commits ahead of local `main` (`4e70c4ba`, titled identically to this
+branch's own earlier `2cc6167e` commit) - investigated whether this was a
+real conflict rather than assuming either way. Confirmed benign: `git diff
+origin/main HEAD` is exactly this session's own work (22 files, the same
+set already reported), meaning the branch's foundational Dictionary
+Builder commits were already squash-merged upstream with matching content
+and nothing has drifted. No rebase needed; proceeding on the existing
+branch.
+
+## 2026-09-10 (next pass) missing-media readiness wired into the real fit gate
+
+Traced the actual call chain first (`04_Model_Config.py` -> `application.
+official_preparation_service.review_official_preparation` -> `core.
+official_preparation.build_official_capability_report` -> `core.
+market_data_capability.check_market_channel_capability` -> `core.
+frequency_alignment.assess_official_preparation`'s `capability_evidence`
+check -> `OfficialPreparationResult.ready` -> `05_Model_Training.py`'s
+`_official_fit_gate_blocked`) to confirm there is exactly one authoritative
+gate for media/channel coverage before wiring anything in - avoided
+creating a second, competing gate.
+
+`check_market_channel_capability` gains optional `estimation_readiness_
+policy`/`estimation_evidence_by_variable` parameters, threaded through
+`build_official_capability_report` and `review_official_preparation`
+unchanged in every other respect. `approved_for_official_use=True` alone
+still suffices when no policy is supplied - confirmed by the full existing
+regression suite (market_data_capability, market_channel_capability_gate,
+official_preparation_service, official_preparation_wp2, coverage,
+missing_media_evidence: 199 tests) passing unmodified. When a policy is
+supplied, an `estimated`/`modelled` segment on an otherwise-approved
+record is additionally required to pass `assess_estimation_readiness`
+(reusing `diagnose_gaps`, no duplicated diagnostic logic);
+`unknown`/`missing_expected`/other unresolved states remain hard-blocked
+regardless of policy. No UI to *configure* a policy was added - building
+one would be premature with no approved threshold to plug into it yet.
+
+Also found and closed a related integration gap while verifying the real
+UK production configuration (next entry below): `NetBillthroughCompleteness
+Metadata.maturity_window_days` (added last pass) had no UI control on
+`03_Structure_Segments_Markets.py` at all - an analyst could never actually
+set it through the real app. Added the field plus a live readiness
+read-out via `assess_official_maturity_readiness`.
+
+9 new tests (`test_market_data_capability.py::
+TestEstimationReadinessPolicyIntegration`), all passing; ruff clean.
+
+Regression-tested against `test_uk_production_decisions.py::
+test_current_uk_production_uses_supplied_nbt_ids`, an existing REQ-NBT-004
+acceptance guard asserting the historical-test completeness horizon's
+exact day-count never appears in the production Structure page's source
+text. My first draft of the new NBT UI comment cited that number to
+explain what the new field is *not* (a legitimate, correct explanation),
+which still tripped the guard. Reworded the comment to make the same
+point without the literal figure, rather than weakening the guard test -
+it is doing exactly its job.

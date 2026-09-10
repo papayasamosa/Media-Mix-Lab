@@ -26,6 +26,7 @@ from .market_data_capability import (
     EngineCapabilityResult,
     check_market_channel_capability,
 )
+from .missing_media_evidence import EstimationEvidenceSummary, EstimationReadinessPolicy
 from .outcomes import OutcomeDefinition, included_outcomes
 from .schema import ModelSpec
 from .search_objects import (
@@ -288,6 +289,10 @@ def build_official_capability_report(
     activity_definitions: Sequence[ActivityDefinition | Mapping[str, Any]] = (),
     search_objects: Sequence[SearchObjectDefinition | Mapping[str, Any]] = (),
     pipeline_steps: Sequence[Mapping[str, Any]] = (),
+    estimation_readiness_policy: Optional[EstimationReadinessPolicy] = None,
+    estimation_evidence_by_variable: Optional[
+        Mapping[str, EstimationEvidenceSummary]
+    ] = None,
 ) -> OfficialCapabilityReport:
     """Build capability evidence for every source-backed consumed variable.
 
@@ -295,6 +300,12 @@ def build_official_capability_report(
     A missing record, unresolved coverage, or non-observed treatment on a
     consumed variable is a blocking issue.  The existing rectangular
     market-by-media check is retained as an engine-specific sub-report.
+
+    `estimation_readiness_policy`/`estimation_evidence_by_variable` (UK FH
+    MMM brief, 2026-09-10, Workstream D follow-up) pass straight through to
+    `check_market_channel_capability` - see that function's docstring for
+    the exact, backward-compatible semantics (no policy means no behaviour
+    change from before this parameter existed).
     """
 
     consumed, generated = collect_consumed_variables(
@@ -305,7 +316,11 @@ def build_official_capability_report(
         pipeline_steps=pipeline_steps,
     )
     engine = check_market_channel_capability(
-        spec.markets, spec.channels, coverage_matrix
+        spec.markets,
+        spec.channels,
+        coverage_matrix,
+        estimation_readiness_policy=estimation_readiness_policy,
+        estimation_evidence_by_variable=estimation_evidence_by_variable,
     )
     by_variable_market: dict[tuple[str, str], list[VariableCoverageRecord]] = {}
     if coverage_matrix is not None:

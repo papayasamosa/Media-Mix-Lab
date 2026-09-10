@@ -1803,6 +1803,7 @@
       "record_path": "docs/approved_requirements/REQ-NBT-005.md",
       "affected_modules": [
         "ancestry_mmm/core/net_billthrough.py",
+        "ancestry_mmm/pages/03_Structure_Segments_Markets.py",
         "docs/approved_requirements/REQ-NBT-005.md",
         "docs/approved_requirements/index.json",
         "docs/decision_log.md"
@@ -1820,7 +1821,10 @@
         "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_thirty_day_window_mature_when_elapsed",
         "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_thirty_day_window_not_mature_when_recent",
         "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_accepts_dict_metadata",
-        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_maturity_window_days_changes_completeness_fingerprint"
+        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_maturity_window_days_changes_completeness_fingerprint",
+        "ancestry_mmm/tests/test_structure_net_billthrough_apptest.py::TestNBTMaturityWindowUI::test_nbt_section_renders_with_maturity_window_field",
+        "ancestry_mmm/tests/test_structure_net_billthrough_apptest.py::TestNBTMaturityWindowUI::test_setting_the_maturity_window_updates_the_live_readiness_readout",
+        "ancestry_mmm/tests/test_structure_net_billthrough_apptest.py::TestNBTMaturityWindowUI::test_configured_maturity_window_shows_readiness_readout"
       ]
     },
     {
@@ -1832,7 +1836,11 @@
         "docs/missing_media_threshold_recommendation.md",
         "docs/approved_requirements/REQ-COVERAGE-002.md",
         "docs/approved_requirements/index.json",
-        "docs/decision_log.md"
+        "docs/decision_log.md",
+        "ancestry_mmm/core/market_data_capability.py",
+        "ancestry_mmm/core/official_preparation.py",
+        "ancestry_mmm/application/official_preparation_service.py",
+        "ancestry_mmm/pages/03_Structure_Segments_Markets.py"
       ],
       "required_tests": [
         "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_approved_requirements_readme_exists",
@@ -1866,7 +1874,15 @@
         "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_within_missing_week_count_and_run_is_estimable",
         "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_threshold_without_evidence_blocks",
         "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_within_threshold_is_estimable",
-        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_exceeding_threshold_blocks"
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_exceeding_threshold_blocks",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_no_policy_supplied_is_unchanged_from_today",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_supplied_but_gap_within_limits_still_supported",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_supplied_and_gap_exceeds_missing_week_count_blocks",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_requiring_evidence_with_none_supplied_blocks",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_requiring_evidence_with_matching_evidence_supplied_passes",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_edge_gap_blocked_by_default_policy",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_never_examines_non_estimated_states",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_does_not_affect_fully_observed_records"
       ]
     }
   ]

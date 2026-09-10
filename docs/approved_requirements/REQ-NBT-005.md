@@ -64,5 +64,25 @@ Product / Finance (business window), Modelling / Platform engineering
 
 Derived from `UK_FH_MMM_Autonomous_Implementation_Brief_2026-09-10.md`,
 section 3.5 ("Maturity and completeness"). Complements `REQ-NBT-002`
-(historical-test-only 14-day rule) and `REQ-NBT-004` (production evidence
-boundary), neither of which this record supersedes.
+(historical-test-only completeness rule) and `REQ-NBT-004` (production
+evidence boundary), neither of which this record supersedes.
+
+## Addendum, 2026-09-10: UI control added - the field was previously unreachable
+
+Found during the next pass's production-configuration verification: the
+`maturity_window_days` field existed on `NetBillthroughCompletenessMetadata`
+with zero UI surface anywhere in the app - an analyst could never actually
+set it through the real Structure Segments/Markets page, only via a script
+or a test. Added a `st.number_input` (0 = not configured) to the existing
+NBT completeness form on `pages/03_Structure_Segments_Markets.py`, plus a
+live readiness read-out via `assess_official_maturity_readiness` so the
+effect of the configured window is visible immediately, not only after a
+fit or a Results-page visit.
+
+### Affected modules (this addendum)
+
+- `ancestry_mmm/pages/03_Structure_Segments_Markets.py`
+
+### Required tests (this addendum)
+
+- `ancestry_mmm/tests/test_structure_net_billthrough_apptest.py::TestNBTMaturityWindowUI` (all tests)
