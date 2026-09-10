@@ -362,3 +362,47 @@ input for it).
 
 - `ancestry_mmm/tests/test_search_intent_taxonomy.py` (all tests)
 - `ancestry_mmm/tests/test_activities.py::TestSearchTaxonomyFields` (all tests)
+
+## Addendum, 2026-09-10: standard workbook parser now maps the taxonomy fields
+
+UK FH MMM implementation brief audit finding: `search_intent_group_id`/
+`search_platform` existed on the governed `ActivityDefinition` domain
+model and were settable via Channel Media Units, but
+`activity_definitions_from_dictionary` (`ancestry_mmm/data/templates.py`)
+never read either column from a standard workbook, even when present -
+the brief's exact "governed field exists but is not correctly mapped from
+the standard workbook" concern.
+
+`activity_definitions_from_dictionary` now reads both columns when
+present (both optional - most activities are not Paid Search at all; a
+blank/absent cell resolves to unclassified, never inferred from
+`channel`/`platform`/naming conventions). `ActivityDefinition.__post_init__`'s
+existing validation (closed `SEARCH_PLATFORMS` vocabulary, PMax/Demand
+Gen/YouTube exclusion) applies identically regardless of whether the value
+arrived via the dictionary or the UI - no second, more permissive
+validation path. Catalogue-level cross-validation against the approved
+taxonomy (unknown group id, parent/child double-fit,
+`validate_activity_search_taxonomy`) still runs only when Channel Media
+Units next saves the activity list - the same timing this check already
+had for a UI-entered value, not a regression introduced by this addendum.
+
+The Dictionary Builder generator
+(`scripts/build_data_upload_guide_assets.py`) does not yet offer these two
+fields as guided BUILDER-sheet inputs (analysts add the columns to their
+dictionary directly, or configure the mapping via Channel Media Units
+after upload); its documentation, which previously stated the parser
+"still doesn't map them," is corrected to reflect the new behaviour and to
+scope the remaining gap accurately as a builder-UI enhancement, not a
+parser gap.
+
+### Affected modules (this addendum)
+
+- `ancestry_mmm/data/templates.py`
+  (`activity_definitions_from_dictionary`)
+- `scripts/build_data_upload_guide_assets.py` (documentation correction)
+
+### Required tests (this addendum)
+
+- `ancestry_mmm/tests/test_templates.py::test_activity_definitions_from_dictionary_maps_search_taxonomy_columns`
+- `ancestry_mmm/tests/test_templates.py::test_activity_definitions_from_dictionary_without_search_columns_is_unaffected`
+- `ancestry_mmm/tests/test_templates.py::test_activity_definitions_from_dictionary_rejects_invalid_search_platform`

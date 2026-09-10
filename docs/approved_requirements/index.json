@@ -1418,7 +1418,9 @@
         "ancestry_mmm/core/persistence.py",
         "ancestry_mmm/core/fingerprint.py",
         "docs/wp1_search_seo_granularity_decision_package.md",
-        "ancestry_mmm/core/search_intent_taxonomy.py"
+        "ancestry_mmm/core/search_intent_taxonomy.py",
+        "ancestry_mmm/data/templates.py",
+        "scripts/build_data_upload_guide_assets.py"
       ],
       "required_tests": [
         "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_approved_requirements_readme_exists",
@@ -1430,6 +1432,9 @@
         "ancestry_mmm/tests/test_requirements_index_conformance.py::test_every_indexed_test_node_is_collectable",
         "ancestry_mmm/tests/test_search_seo_granularity_authority_reconciliation.py::TestSearchSeoGranularityOverlayReconciled::test_req_search_004_indexed_and_classified_partial",
         "ancestry_mmm/tests/test_search_seo_granularity_authority_reconciliation.py::TestSearchSeoGranularityOverlayReconciled::test_all_three_records_reference_the_decision_package",
+        "ancestry_mmm/tests/test_templates.py::test_activity_definitions_from_dictionary_maps_search_taxonomy_columns",
+        "ancestry_mmm/tests/test_templates.py::test_activity_definitions_from_dictionary_without_search_columns_is_unaffected",
+        "ancestry_mmm/tests/test_templates.py::test_activity_definitions_from_dictionary_rejects_invalid_search_platform",
         "ancestry_mmm/tests/test_req_search_004_taxonomy_addendum.py::test_req_search_004_addendum_names_brand_non_brand_taxonomy",
         "ancestry_mmm/tests/test_req_search_004_taxonomy_addendum.py::test_req_search_004_addendum_treats_platform_as_orthogonal_axis",
         "ancestry_mmm/tests/test_req_search_004_taxonomy_addendum.py::test_req_search_004_addendum_excludes_pmax_demand_gen_youtube",

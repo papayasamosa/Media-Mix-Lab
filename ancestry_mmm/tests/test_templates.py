@@ -371,6 +371,64 @@ def test_activity_dictionary_rejects_blank_governance_fields():
         activity_definitions_from_dictionary(dictionary)
 
 
+def test_activity_definitions_from_dictionary_maps_search_taxonomy_columns():
+    """UK FH MMM brief (2026-09-10) Workstream E / REQ-SEARCH-004: when a
+    dictionary supplies search_intent_group_id/search_platform columns,
+    activity_definitions_from_dictionary must actually map them onto
+    ActivityDefinition - the standard-workbook parser previously never
+    read either column at all."""
+    dictionary = _activity_dictionary()
+    dictionary["search_intent_group_id"] = pd.NA
+    dictionary["search_platform"] = ""
+    dictionary.loc[
+        dictionary["activity_id"] == "meta_brand", "search_intent_group_id"
+    ] = "brand_search"
+    dictionary.loc[dictionary["activity_id"] == "meta_brand", "search_platform"] = (
+        "google"
+    )
+
+    definitions = activity_definitions_from_dictionary(dictionary)
+    by_id = {(item.market, item.activity_id): item for item in definitions}
+
+    tagged = by_id[("UK", "meta_brand")]
+    assert tagged.search_intent_group_id == "brand_search"
+    assert tagged.search_platform == "google"
+
+    untagged = by_id[("UK", "meta_mid")]
+    assert untagged.search_intent_group_id is None
+    assert untagged.search_platform == ""
+
+
+def test_activity_definitions_from_dictionary_without_search_columns_is_unaffected():
+    """Backward compatibility: a dictionary predating this capability (no
+    search_intent_group_id/search_platform columns at all) still parses,
+    with every activity's taxonomy fields left unclassified."""
+    dictionary = _activity_dictionary()
+    assert "search_intent_group_id" not in dictionary.columns
+    assert "search_platform" not in dictionary.columns
+
+    definitions = activity_definitions_from_dictionary(dictionary)
+
+    assert all(item.search_intent_group_id is None for item in definitions)
+    assert all(item.search_platform == "" for item in definitions)
+
+
+def test_activity_definitions_from_dictionary_rejects_invalid_search_platform():
+    """The dictionary path reuses ActivityDefinition's own closed-
+    vocabulary validation - it does not bypass it just because the value
+    arrived via a spreadsheet column rather than the Channel Media Units
+    UI."""
+    dictionary = _activity_dictionary()
+    dictionary["search_intent_group_id"] = pd.NA
+    dictionary["search_platform"] = ""
+    dictionary.loc[
+        dictionary["activity_id"] == "meta_brand", "search_platform"
+    ] = "bing_ads"  # not a valid SEARCH_PLATFORMS value
+
+    with pytest.raises(ValueError, match="search_platform"):
+        activity_definitions_from_dictionary(dictionary)
+
+
 def test_workbook_loader_records_workbook_identity_in_source_version():
     raw_bytes = _activity_workbook_bytes()
 

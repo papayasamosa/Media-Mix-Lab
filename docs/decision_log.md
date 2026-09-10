@@ -8955,3 +8955,23 @@ as a REQ-FX-006 addendum. 202 tests across the FX/valuation suites pass, no
 regressions; the Results/Curve Bank page AppTest suite (19 tests) also
 passes, though no dedicated AppTest yet exercises this section specifically
 - coverage is at the service layer (24 tests, 5 new).
+
+## 2026-09-10 (continued) standard workbook now maps Search taxonomy columns (REQ-SEARCH-004 addendum)
+
+`search_intent_group_id`/`search_platform` existed on the governed
+`ActivityDefinition` model and were settable via Channel Media Units, but
+`activity_definitions_from_dictionary` never read either column from a
+standard workbook - the UK FH MMM brief's exact "governed field exists
+but is not correctly mapped from the standard workbook" concern for
+Search (Workstream E), confirmed by both this session's audit and the
+Dictionary Builder generator's own (now-stale) documentation.
+
+`activity_definitions_from_dictionary` now maps both columns when present
+(both optional). Reuses `ActivityDefinition.__post_init__`'s existing
+validation - no second, more permissive path for dictionary-sourced
+values. Catalogue-level cross-validation (unknown group id, parent/child
+double-fit) still runs at Channel Media Units save time, unchanged from
+today's UI-entry timing. The Dictionary Builder generator does not yet
+offer these as guided input fields; its documentation is corrected to
+state the parser gap is closed while the builder-UI gap remains, rather
+than continuing to claim the parser itself doesn't map them.
