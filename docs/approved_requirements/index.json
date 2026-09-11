@@ -1279,7 +1279,8 @@
         "docs/approved_requirements/REQ-FX-002.md",
         "docs/approved_requirements/index.json",
         "ancestry_mmm/core/fx_rates.py",
-        "docs/governed_fx_contract_implementation_decision_record.md"
+        "docs/governed_fx_contract_implementation_decision_record.md",
+        "ancestry_mmm/application/fx_service.py"
       ],
       "required_tests": [
         "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_approved_requirements_readme_exists",
@@ -1294,7 +1295,11 @@
         "ancestry_mmm/tests/test_req_fx_decision_13.py::test_req_fx_002_and_003_indexed",
         "ancestry_mmm/tests/test_fx_rates.py::TestFXRateRecord::test_annual_frequency_with_financial_year_is_valid",
         "ancestry_mmm/tests/test_fx_rates.py::TestDeriveCrossRate::test_round_trip_identity",
-        "ancestry_mmm/tests/test_fx_rates.py::TestFXRateSet::test_new_version_increments_and_preserves_id"
+        "ancestry_mmm/tests/test_fx_rates.py::TestFXRateSet::test_new_version_increments_and_preserves_id",
+        "ancestry_mmm/tests/test_fx_rates.py::TestVintageHelpers::test_available_vintages_from_annual_records",
+        "ancestry_mmm/tests/test_fx_rates.py::TestVintageHelpers::test_latest_vintage_is_the_maximum",
+        "ancestry_mmm/tests/test_fx_service.py::TestFinanceConstantDollarIngestion::test_ingests_two_vintages",
+        "ancestry_mmm/tests/test_fx_service.py::TestFinanceConstantDollarIngestion::test_conversion_direction_is_usd_equals_local_times_rate"
       ]
     },
     {
@@ -1386,8 +1391,12 @@
         "docs/approved_requirements/index.json",
         "ancestry_mmm/core/fx_reporting.py",
         "docs/governed_fx_contract_implementation_decision_record.md",
+        "ancestry_mmm/application/fx_service.py",
         "ancestry_mmm/application/outcome_valuation_reporting_service.py",
-        "ancestry_mmm/pages/07_Results_Curve_Bank.py"
+        "ancestry_mmm/core/fx_rates.py",
+        "ancestry_mmm/core/persistence.py",
+        "ancestry_mmm/pages/07_Results_Curve_Bank.py",
+        "ancestry_mmm/pages/09_Project_Export.py"
       ],
       "required_tests": [
         "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_approved_requirements_readme_exists",
@@ -1400,13 +1409,27 @@
         "ancestry_mmm/tests/test_governed_fx_authority_reconciliation.py::TestGovernedFXOverlayReconciled::test_req_fx_006_indexed_and_classified_incomplete",
         "ancestry_mmm/tests/test_fx_reporting.py::TestLabelCurrencyFigure::test_rejects_currency_not_in_context",
         "ancestry_mmm/tests/test_fx_reporting.py::TestFxTranslationDecompositionComponent::test_computes_translation_effect",
+        "ancestry_mmm/tests/test_fx_rates.py::TestVintageHelpers::test_available_vintages_from_annual_records",
+        "ancestry_mmm/tests/test_fx_rates.py::TestVintageHelpers::test_latest_vintage_is_the_maximum",
+        "ancestry_mmm/tests/test_fx_service.py::TestFinanceConstantDollarIngestion::test_ingests_two_vintages",
+        "ancestry_mmm/tests/test_fx_service.py::TestFinanceConstantDollarIngestion::test_conversion_direction_is_usd_equals_local_times_rate",
+        "ancestry_mmm/tests/test_fx_service.py::TestConstantDollarVintageResolution::test_resolves_the_selected_vintage",
+        "ancestry_mmm/tests/test_fx_service.py::TestConstantDollarVintageResolution::test_never_falls_back_to_a_different_vintage",
         "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_no_spend_currency_declared_is_unchanged",
         "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_matching_spend_currency_is_unchanged",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_matching_usd_spend_currency_is_unchanged",
         "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_mismatched_currency_without_fx_rate_set_blocks_roi_only",
         "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_mismatched_currency_without_matching_fx_rate_blocks_roi_only",
-        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_mismatched_currency_with_approved_rate_converts_and_computes_roi",
-        "ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage::test_mismatched_market_currency_shows_warning_and_hides_roi",
-        "ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage::test_matching_market_currency_shows_no_currency_warning",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_currency_present_in_a_different_vintage_still_blocks",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_mismatched_currency_with_approved_vintage_converts_and_computes_roi",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_omitted_vintage_defaults_to_latest_available",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_selecting_an_older_vintage_changes_economic_values",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_switching_vintage_never_changes_the_count_model_outcome",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_vintage_rate_applies_regardless_of_the_observations_own_calendar_year",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage::test_mismatched_channel_currency_shows_warning_and_hides_roi",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage::test_matching_channel_currency_shows_no_currency_warning",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage::test_uk_channel_explicitly_marked_usd_is_not_converted",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage::test_vintage_selector_renders_and_selecting_older_vintage_changes_spend",
         "ancestry_mmm/tests/test_fx_reporting.py::TestAssessFxStalenessTriggers::test_reporting_currency_selection_alone_never_triggers_staleness"
       ]
     },

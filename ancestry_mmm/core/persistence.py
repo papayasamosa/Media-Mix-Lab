@@ -328,6 +328,7 @@ def export_project(
     currency_context: Optional[dict] = None,
     fx_rate_set: Optional[dict] = None,
     fx_rate_records: Optional[List[dict]] = None,
+    fx_vintage_year_id: Optional[str] = None,
     value_mapping: Optional[dict] = None,
     outcome_valuation_records: Optional[List[dict]] = None,
     causal_graphs: Optional[List[dict]] = None,
@@ -562,6 +563,10 @@ def export_project(
             (tmp / "config" / "fx_rate_records.json").write_text(
                 json.dumps(fx_rate_records, indent=2, default=str)
             )
+        if fx_vintage_year_id is not None:
+            (tmp / "config" / "fx_vintage_year_id.json").write_text(
+                json.dumps(fx_vintage_year_id, indent=2, default=str)
+            )
         if value_mapping is not None:
             (tmp / "config" / "value_mapping.json").write_text(
                 json.dumps(value_mapping, indent=2, default=str)
@@ -795,6 +800,7 @@ def export_project(
                 "fx_rate_set": fx_rate_set is not None,
                 "fx_rate_records": fx_rate_records is not None
                 and bool(fx_rate_records),
+                "fx_vintage_year_id": fx_vintage_year_id is not None,
                 "value_mapping": value_mapping is not None,
                 "outcome_valuation_records": outcome_valuation_records is not None
                 and bool(outcome_valuation_records),
@@ -937,6 +943,7 @@ def import_project(zip_path: Path) -> Dict[str, Any]:
         "currency_context": None,
         "fx_rate_set": None,
         "fx_rate_records": None,
+        "fx_vintage_year_id": None,
         "value_mapping": None,
         "outcome_valuation_records": [],
         # REQ-GRAPH-001: None for bundles exported before this capability
@@ -1189,6 +1196,10 @@ def import_project(zip_path: Path) -> Dict[str, Any]:
         if (config_dir / "fx_rate_records.json").exists():
             result["fx_rate_records"] = json.loads(
                 (config_dir / "fx_rate_records.json").read_text()
+            )
+        if (config_dir / "fx_vintage_year_id.json").exists():
+            result["fx_vintage_year_id"] = json.loads(
+                (config_dir / "fx_vintage_year_id.json").read_text()
             )
         if (config_dir / "value_mapping.json").exists():
             result["value_mapping"] = json.loads(

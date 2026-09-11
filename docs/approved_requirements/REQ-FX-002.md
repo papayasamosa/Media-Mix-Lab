@@ -145,3 +145,37 @@ provider or authoritative-rate-set selection is made, and no actual
 rate value appears anywhere in the new module or its tests - every item
 under "Explicitly excluded" above remains exactly as open as before
 this addendum.
+
+## Addendum, 2026-09-10: Finance constant-dollar table ingestion and vintage helpers
+
+The FX business decision that was open at Phase D's addendum is now
+resolved: the authoritative rate-set source is the analyst-uploaded,
+Finance-approved constant-dollar table, one row per (`year_id`,
+`currency_code`), giving `local_to_usd_conversion_rate`. `year_id` is
+the **vintage** - which table edition a rate comes from, never the
+calendar year of a media, outcome, or valuation observation - and the
+governed default is the latest vintage present in the uploaded file,
+with an explicit analyst override to any other available vintage.
+
+`application.fx_service.build_finance_constant_dollar_rate_set` ingests
+this three-column format directly (verified read-only against the real
+Finance workbook's schema and its own USD identity rows - never altered,
+never committed, never used in automated tests, which use only clearly
+synthetic rates) via a thin reshape into the existing six-column
+`build_manual_fx_rate_set` pipeline - the `annual`/`financial_year`
+vocabulary this record's 2026-08-30 addendum already added, never a
+second parallel schema. `core.fx_rates.available_vintage_year_ids`/
+`latest_vintage_year_id` enumerate and default among the vintages an
+uploaded table contains. No provider or rate-set selection is made by
+this addendum beyond that default; every item under "Explicitly
+excluded" above remains exactly as open as before it.
+
+### Affected modules (this addendum)
+
+- `ancestry_mmm/application/fx_service.py`
+- `ancestry_mmm/core/fx_rates.py`
+
+### Required tests (this addendum)
+
+- `ancestry_mmm/tests/test_fx_rates.py::TestVintageHelpers` (all tests)
+- `ancestry_mmm/tests/test_fx_service.py::TestFinanceConstantDollarIngestion` (all tests)

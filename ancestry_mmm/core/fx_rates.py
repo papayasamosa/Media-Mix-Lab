@@ -289,3 +289,27 @@ def build_derived_cross_rate_record(
         is_derived_cross_rate=True,
         derivation_path=(source_currency, reference_currency, target_currency),
     )
+
+
+def available_vintage_year_ids(records: Sequence[FXRateRecord]) -> Tuple[str, ...]:
+    """Finance constant-dollar correction (2026-09-10): every distinct
+    `financial_year` present across `frequency='annual'` records, sorted
+    ascending. A "vintage" is which Finance table edition a rate comes
+    from - `year_id` in the uploaded file - never the calendar year of
+    the transaction or observation being valued. Non-annual records
+    (daily/weekly/monthly, used by other conversion methods) never
+    contribute a vintage."""
+    years = {
+        record.financial_year
+        for record in records
+        if record.frequency == RATE_FREQUENCY_ANNUAL and record.financial_year
+    }
+    return tuple(sorted(years, key=lambda year: (len(year), year)))
+
+
+def latest_vintage_year_id(records: Sequence[FXRateRecord]) -> Optional[str]:
+    """The most recent available vintage, for "default to the latest
+    available vintage in the uploaded file" - never invented when no
+    annual records exist."""
+    years = available_vintage_year_ids(records)
+    return years[-1] if years else None

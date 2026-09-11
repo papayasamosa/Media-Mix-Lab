@@ -9186,3 +9186,92 @@ never stale - there is no persisted, cached economic-report artefact for
 staleness to apply to; Results recomputes live from whatever is
 currently in the reloaded project state. No new persistence layer was
 invented. 250 tests in `test_persistence.py` pass, no regressions.
+
+## 2026-09-10 (final correction) Finance constant-dollar FX vintage replaces as-of-date FX
+
+User correction, same day: the previous pass's FX design (an as-of-date
+spot-rate lookup joined to each observation's own calendar time) does
+not match how Finance's constant-dollar table actually works and was
+corrected before merge - it was never released. Finance publishes one
+conversion table per year (`year_id` in the real file, confirmed
+read-only against `.local-data/Constant Dollar Conversion Rate by
+Year.xlsx`, which the user added to `.gitignore` themselves and which
+must never be committed or used in automated tests). `year_id` is the
+*vintage* - which table edition a rate comes from - never the calendar
+year of the media, outcome, or valuation observation being converted.
+Selecting vintage 2026 applies the 2026 GBP rate to GBP amounts from
+2023, 2024, 2025, and 2026 alike.
+
+Reason: this is the corrected, final Finance business decision,
+replacing the earlier (incorrect) as-of-date assumption from the prior
+pass. The codebase already anticipated this shape before either pass -
+`core.fx_conversion.CONVERSION_METHOD_FINANCE_CONSTANT_DOLLAR_ANNUAL` was
+already the approved default method, and `apply_finance_constant_
+dollar_annual` already kept `financial_year` and `week` as independent,
+unvalidated-against-each-other parameters - so the fix is a correction
+back toward the repository's own existing design, not a new one.
+
+Impact: `application.fx_service` gained `build_finance_constant_dollar_
+rate_set` (ingests Finance's real 3-column format - `year_id`,
+`currency_code`, `local_to_usd_conversion_rate` - confirmed `USD =
+local x rate` against the real file's own USD identity rows, which are
+dropped rather than built into a same-currency `FXRateRecord`) and
+`resolve_constant_dollar_vintage_rate`/`default_fx_vintage_year_id`
+(vintage-keyed lookup, fails closed with `None` on a missing currency in
+the selected vintage - never a fallback to another vintage, a live
+rate, or an inferred rate). `core.fx_rates` gained `available_vintage_
+year_ids`/`latest_vintage_year_id`. `outcome_valuation_reporting_
+service.HistoricalOutcomeValuationRequest.fx_as_of_date` was replaced by
+`fx_vintage_year_id`; `_resolve_spend_for_roi` now resolves the selected
+(or latest-default) vintage instead of an as-of-date spot rate. Also
+corrected `pages/07_Results_Curve_Bank.py`'s `_fx_request_kwargs`, which
+inferred `spend_currency` from the market-level `MarketCurrency.
+local_currency` - a blanket "market = one currency" assumption the
+correction explicitly forbids, since a market can host channels in
+different currencies and a UK variable may already be in USD. It now
+reads the specific channel's own governed `ChannelMediaUnitConfig.
+currency`; a "Total (all media)" view uses that currency only when every
+currency-declaring channel in the market agrees, otherwise leaves it
+unset (existing "no conversion attempted" behaviour) rather than
+guessing. Added a vintage selector (default: latest available) and a
+"USD constant-dollar basis: Finance {vintage} vintage" caption.
+`core.persistence` and `pages/09_Project_Export.py` gained a persisted
+`fx_vintage_year_id` field (restored verbatim on import, never
+re-defaulted) and a dedicated Finance-table-format upload path, so the
+selected vintage and the FX rate-set's own source/version/fingerprint
+together make the economic result reproducible.
+
+Alternatives considered: keeping the as-of-date mechanism and just
+widening its date-matching window - rejected, since the policy is not
+"nearest date" but "one fixed rate per vintage, applied irrespective of
+date," and a widened-window spot lookup would still silently produce
+different rates for different observation years, the exact defect being
+corrected.
+
+Verified: 8 explicit regression cases requested by the user all added
+and passing - a 2023 GBP observation and a 2025 GBP observation both
+resolve to the identical 2026-vintage rate; a USD observation and a UK
+channel explicitly marked USD are both left unconverted; selecting an
+older vintage changes economic values; switching vintage never changes
+the (non-monetary) count-model outcome; a currency missing from the
+selected vintage blocks economics even when present in a different
+vintage; the system never falls back to the observation's calendar-year
+rate. New/updated: `test_fx_rates.py::TestVintageHelpers`,
+`test_fx_service.py` (new file), `test_outcome_valuation_reporting_
+service.py::TestSpendCurrencyMismatch` (rewritten),
+`test_outcome_valuation_reporting_apptest.py::
+TestSpendCurrencyMismatchOnTheLivePage` (rewritten). `REQ-FX-006.md`
+gained a same-day addendum correcting the as-of-date framing; `docs/
+approved_requirements/index.json` updated to match the renamed/added
+test node IDs.
+
+Outstanding production dependency going into this branch's PR: none on
+the FX business decision itself (resolved) - only the uploaded, Finance-
+approved constant-dollar table needs to be supplied for a live project,
+with the latest available vintage selected by default.
+
+Owner: Mohammed Khaled (product/analyst direction), implemented this
+pass.
+
+Status: Implemented, tests passing, not yet pushed or opened as a PR
+(explicit instruction: prepare only).

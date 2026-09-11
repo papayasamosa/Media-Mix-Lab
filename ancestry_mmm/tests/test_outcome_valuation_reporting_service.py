@@ -140,7 +140,9 @@ def frame():
     }
 
 
-def _valuation_records(weeks, *, market="UK", segment=SEGMENT, aggregate_value=500.0):
+def _valuation_records(
+    weeks, *, market="UK", segment=SEGMENT, aggregate_value=500.0, currency="GBP"
+):
     return [
         WeeklyOutcomeValuationRecord(
             valuation_kind=VALUATION_KIND_FH_LTR,
@@ -150,7 +152,7 @@ def _valuation_records(weeks, *, market="UK", segment=SEGMENT, aggregate_value=5
             denominator_outcome_id="New",
             quality_status=STATE_ESTIMATED,
             aggregate_value=aggregate_value,
-            currency="GBP",
+            currency=currency,
             horizon_months=FH_LTR_HORIZON_MONTHS,
         )
         for week in weeks
@@ -291,11 +293,15 @@ class TestFailsClosed:
 
 
 class TestSpendCurrencyMismatch:
-    """UK FH MMM brief (2026-09-10) Workstream A/F: attributable_spend is
-    in the market's native currency, which may differ from the governed
-    valuation catalogue's currency (here always GBP via
+    """Finance constant-dollar correction (2026-09-10): attributable_spend
+    is in the market's native currency, which may differ from the
+    governed valuation catalogue's currency (here always GBP via
     `_valuation_records`). ROI must never silently divide across
-    currencies."""
+    currencies, and the FX rate applied must always come from the
+    selected Finance constant-dollar *vintage* (`financial_year`) -
+    never joined to the calendar year of the observation being valued.
+    No actual exchange rate appears anywhere in this class - every rate
+    is a clearly synthetic test value."""
 
     def test_no_spend_currency_declared_is_unchanged(self, trace, frame, meta):
         """Backward-compatible default: omitting spend_currency (every
@@ -319,6 +325,27 @@ class TestSpendCurrencyMismatch:
             attributable_spend(frame, meta, market="UK", weeks=WEEK_STARTS)
         )
 
+    def test_matching_usd_spend_currency_is_unchanged(self, trace, frame, meta):
+        """A UK observation explicitly declared in USD (e.g. a UK spend
+        variable already supplied in USD) must never be converted just
+        because the market is UK - there is no blanket 'market currency'
+        assumption anywhere in this path."""
+        records = _valuation_records(WEEK_STARTS, currency="USD")
+        request = _base_request(
+            trace,
+            frame,
+            meta,
+            spend_currency="USD",
+            weekly_valuation_records=records,
+        )
+        result = OutcomeValuationReportingService().evaluate_period(request)
+
+        assert result.errors == []
+        assert result.attribution.spend == pytest.approx(
+            attributable_spend(frame, meta, market="UK", weeks=WEEK_STARTS)
+        )
+        assert not any("currency" in w.lower() for w in result.warnings)
+
     def test_mismatched_currency_without_fx_rate_set_blocks_roi_only(
         self, trace, frame, meta
     ):
@@ -333,49 +360,62 @@ class TestSpendCurrencyMismatch:
         assert any("no Finance FX rate set" in w for w in result.warnings)
 
     @staticmethod
-    def _approved_fx_rate_set_and_records(**rate_overrides):
+    def _two_vintage_fx_rate_set_and_records(**overrides):
+        """Two Finance constant-dollar vintages (2025, 2026), each with
+        its own distinct, clearly synthetic USD->GBP rate - so a test can
+        prove which vintage's rate was actually used, and that selecting
+        a different vintage changes the result."""
         from ancestry_mmm.application.fx_service import build_manual_fx_rate_set
 
-        row = dict(
-            rate_date="2025-01-01",
-            source_currency="USD",
-            target_currency="GBP",
-            rate="0.8",
-            method="finance_constant_dollar_annual",
-            frequency="annual",
-            financial_year="2025",
-        )
-        row.update(rate_overrides)
-        frame_df = pd.DataFrame([row])
-        rate_set, records = build_manual_fx_rate_set(
-            frame_df,
-            rate_set_id="fx-2025",
+        rows = [
+            dict(
+                rate_date="2025-01-01",
+                source_currency="USD",
+                target_currency="GBP",
+                rate="0.75",
+                method="finance_constant_dollar_annual",
+                frequency="annual",
+                financial_year="2025",
+            ),
+            dict(
+                rate_date="2026-01-01",
+                source_currency="USD",
+                target_currency="GBP",
+                rate="0.8",
+                method="finance_constant_dollar_annual",
+                frequency="annual",
+                financial_year="2026",
+            ),
+        ]
+        kwargs = dict(
+            rate_set_id="fx-finance-constant-dollar",
             rate_set_version=1,
-            name="Finance FY2025",
+            name="Finance constant-dollar table",
             provider="finance-approved-upload",
             base_or_reference_currency="GBP",
             start_date="2025-01-01",
-            end_date="2025-12-31",
-            rate_policy="FIN-FX-2025",
+            end_date="2026-12-31",
+            rate_policy="finance_constant_dollar_vintage",
             approval_status="approved",
             approved_by="finance-reviewer",
-            approved_at="2025-08-31T12:00:00Z",
+            approved_at="2026-01-01T00:00:00Z",
         )
+        kwargs.update(overrides)
+        rate_set, records = build_manual_fx_rate_set(pd.DataFrame(rows), **kwargs)
         return rate_set.to_dict(), [record.to_dict() for record in records]
 
     def test_mismatched_currency_without_matching_fx_rate_blocks_roi_only(
         self, trace, frame, meta
     ):
-        rate_set, records = self._approved_fx_rate_set_and_records(
-            source_currency="AUD"  # no USD->GBP rate in this set
-        )
+        rate_set, records = self._two_vintage_fx_rate_set_and_records()
         request = _base_request(
             trace,
             frame,
             meta,
-            spend_currency="USD",
+            spend_currency="AUD",  # no AUD->GBP rate in either vintage
             fx_rate_set=rate_set,
             fx_rate_records=records,
+            fx_vintage_year_id="2026",
         )
         result = OutcomeValuationReportingService().evaluate_period(request)
 
@@ -384,10 +424,68 @@ class TestSpendCurrencyMismatch:
         assert result.attribution.spend is None
         assert any("no applicable" in w for w in result.warnings)
 
-    def test_mismatched_currency_with_approved_rate_converts_and_computes_roi(
+    def test_currency_present_in_a_different_vintage_still_blocks(
         self, trace, frame, meta
     ):
-        rate_set, records = self._approved_fx_rate_set_and_records()
+        """Regression: AUD has a rate in the 2025 vintage but not the
+        2026 vintage. Selecting 2026 must block the economic output -
+        never silently fall back to the 2025 vintage's AUD rate."""
+        from ancestry_mmm.application.fx_service import build_manual_fx_rate_set
+
+        rows = [
+            dict(
+                rate_date="2025-01-01",
+                source_currency="AUD",
+                target_currency="GBP",
+                rate="0.5",
+                method="finance_constant_dollar_annual",
+                frequency="annual",
+                financial_year="2025",
+            ),
+            dict(
+                rate_date="2026-01-01",
+                source_currency="USD",
+                target_currency="GBP",
+                rate="0.8",
+                method="finance_constant_dollar_annual",
+                frequency="annual",
+                financial_year="2026",
+            ),
+        ]
+        rate_set, records = build_manual_fx_rate_set(
+            pd.DataFrame(rows),
+            rate_set_id="fx-finance-constant-dollar-partial",
+            rate_set_version=1,
+            name="Finance constant-dollar table",
+            provider="finance-approved-upload",
+            base_or_reference_currency="GBP",
+            start_date="2025-01-01",
+            end_date="2026-12-31",
+            rate_policy="finance_constant_dollar_vintage",
+            approval_status="approved",
+            approved_by="finance-reviewer",
+            approved_at="2026-01-01T00:00:00Z",
+        )
+        request = _base_request(
+            trace,
+            frame,
+            meta,
+            spend_currency="AUD",
+            fx_rate_set=rate_set.to_dict(),
+            fx_rate_records=[r.to_dict() for r in records],
+            fx_vintage_year_id="2026",
+        )
+        result = OutcomeValuationReportingService().evaluate_period(request)
+
+        assert result.errors == []
+        assert result.attribution.roi_mean is None
+        assert result.attribution.spend is None
+        assert any("no applicable" in w and "2026" in w for w in result.warnings)
+
+    def test_mismatched_currency_with_approved_vintage_converts_and_computes_roi(
+        self, trace, frame, meta
+    ):
+        rate_set, records = self._two_vintage_fx_rate_set_and_records()
         request = _base_request(
             trace,
             frame,
@@ -395,7 +493,7 @@ class TestSpendCurrencyMismatch:
             spend_currency="USD",
             fx_rate_set=rate_set,
             fx_rate_records=records,
-            fx_as_of_date="2025-12-31",
+            fx_vintage_year_id="2026",
         )
         result = OutcomeValuationReportingService().evaluate_period(request)
         native_spend = attributable_spend(frame, meta, market="UK", weeks=WEEK_STARTS)
@@ -403,7 +501,137 @@ class TestSpendCurrencyMismatch:
         assert result.errors == []
         assert result.attribution.spend == pytest.approx(native_spend * 0.8)
         assert result.attribution.roi_mean is not None
-        assert any("converted from USD to GBP" in w for w in result.warnings)
+        assert any(
+            "2026" in w and "converted from USD to GBP" in w for w in result.warnings
+        )
+
+    def test_omitted_vintage_defaults_to_latest_available(self, trace, frame, meta):
+        """"Default to the latest available vintage" - omitting
+        fx_vintage_year_id must behave identically to explicitly
+        selecting the newest vintage present in fx_rate_records (2026,
+        here)."""
+        rate_set, records = self._two_vintage_fx_rate_set_and_records()
+        request = _base_request(
+            trace,
+            frame,
+            meta,
+            spend_currency="USD",
+            fx_rate_set=rate_set,
+            fx_rate_records=records,
+        )
+        result = OutcomeValuationReportingService().evaluate_period(request)
+        native_spend = attributable_spend(frame, meta, market="UK", weeks=WEEK_STARTS)
+
+        assert result.errors == []
+        assert result.attribution.spend == pytest.approx(native_spend * 0.8)
+
+    def test_selecting_an_older_vintage_changes_economic_values(
+        self, trace, frame, meta
+    ):
+        rate_set, records = self._two_vintage_fx_rate_set_and_records()
+        native_spend = attributable_spend(frame, meta, market="UK", weeks=WEEK_STARTS)
+
+        request_2026 = _base_request(
+            trace,
+            frame,
+            meta,
+            spend_currency="USD",
+            fx_rate_set=rate_set,
+            fx_rate_records=records,
+            fx_vintage_year_id="2026",
+        )
+        request_2025 = _base_request(
+            trace,
+            frame,
+            meta,
+            spend_currency="USD",
+            fx_rate_set=rate_set,
+            fx_rate_records=records,
+            fx_vintage_year_id="2025",
+        )
+        result_2026 = OutcomeValuationReportingService().evaluate_period(request_2026)
+        result_2025 = OutcomeValuationReportingService().evaluate_period(request_2025)
+
+        assert result_2026.attribution.spend == pytest.approx(native_spend * 0.8)
+        assert result_2025.attribution.spend == pytest.approx(native_spend * 0.75)
+        assert result_2026.attribution.spend != pytest.approx(
+            result_2025.attribution.spend
+        )
+
+    def test_switching_vintage_never_changes_the_count_model_outcome(
+        self, trace, frame, meta
+    ):
+        """Changing FX vintage recalculates monetary/economic outputs
+        only - it must never affect the non-monetary incremental-outcome
+        (count) result, and must never require refitting: both requests
+        share the identical trace/frame/meta, untouched."""
+        rate_set, records = self._two_vintage_fx_rate_set_and_records()
+
+        request_2026 = _base_request(
+            trace,
+            frame,
+            meta,
+            spend_currency="USD",
+            fx_rate_set=rate_set,
+            fx_rate_records=records,
+            fx_vintage_year_id="2026",
+        )
+        request_2025 = _base_request(
+            trace,
+            frame,
+            meta,
+            spend_currency="USD",
+            fx_rate_set=rate_set,
+            fx_rate_records=records,
+            fx_vintage_year_id="2025",
+        )
+        result_2026 = OutcomeValuationReportingService().evaluate_period(request_2026)
+        result_2025 = OutcomeValuationReportingService().evaluate_period(request_2025)
+
+        assert result_2026.attribution.incremental_outcome_mean == pytest.approx(
+            result_2025.attribution.incremental_outcome_mean
+        )
+        assert result_2026.attribution.incremental_value_mean == pytest.approx(
+            result_2025.attribution.incremental_value_mean
+        )
+
+    def test_vintage_rate_applies_regardless_of_the_observations_own_calendar_year(
+        self, trace, frame, meta
+    ):
+        """The core Finance constant-dollar policy: the selected
+        vintage's rate applies to every historical observation of that
+        currency alike, never joined to the observation's own calendar
+        year. A 2023-dated observation and a 2025-dated one must resolve
+        to the identical 2026-vintage rate - including a week far
+        earlier than any rate_date in the set, which the as-of-date
+        mechanism this replaces would have found no applicable rate for
+        and blocked."""
+        rate_set_dict, records_dicts = self._two_vintage_fx_rate_set_and_records()
+        request = _base_request(
+            trace,
+            frame,
+            meta,
+            spend_currency="USD",
+            fx_rate_set=rate_set_dict,
+            fx_rate_records=records_dicts,
+            fx_vintage_year_id="2026",
+        )
+
+        spend_2023, warnings_2023 = (
+            OutcomeValuationReportingService._resolve_spend_for_roi(
+                request, 1000.0, "GBP", "2023-01-16"
+            )
+        )
+        spend_2025, warnings_2025 = (
+            OutcomeValuationReportingService._resolve_spend_for_roi(
+                request, 1000.0, "GBP", "2025-06-02"
+            )
+        )
+
+        assert spend_2023 == pytest.approx(800.0)
+        assert spend_2025 == pytest.approx(800.0)
+        assert not any("no applicable" in w for w in warnings_2023)
+        assert not any("no applicable" in w for w in warnings_2025)
 
 
 class TestComparePeriods:

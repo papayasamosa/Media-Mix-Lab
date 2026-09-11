@@ -11,9 +11,11 @@ from ancestry_mmm.core.fx_rates import (
     RATE_FREQUENCY_DAILY,
     FXRateRecord,
     FXRateSet,
+    available_vintage_year_ids,
     build_derived_cross_rate_record,
     compute_records_fingerprint,
     derive_cross_rate,
+    latest_vintage_year_id,
     new_rate_set_version,
 )
 
@@ -184,3 +186,74 @@ class TestComputeRecordsFingerprint:
         assert compute_records_fingerprint(records_a) != compute_records_fingerprint(
             records_b
         )
+
+
+class TestVintageHelpers:
+    """Finance constant-dollar correction (2026-09-10): a "vintage" is
+    which Finance table edition (`financial_year`) a rate comes from -
+    never the calendar year of the transaction/observation being
+    converted. No actual exchange rate appears here - every rate is a
+    clearly synthetic test value."""
+
+    def test_available_vintages_from_annual_records(self):
+        records = [
+            _rate(
+                rate_id="r2025",
+                frequency=RATE_FREQUENCY_ANNUAL,
+                financial_year="2025",
+            ),
+            _rate(
+                rate_id="r2026",
+                frequency=RATE_FREQUENCY_ANNUAL,
+                financial_year="2026",
+            ),
+        ]
+        assert available_vintage_year_ids(records) == ("2025", "2026")
+
+    def test_available_vintages_deduplicates_and_sorts(self):
+        records = [
+            _rate(
+                rate_id="r2026-gbp",
+                source_currency="GBP",
+                frequency=RATE_FREQUENCY_ANNUAL,
+                financial_year="2026",
+            ),
+            _rate(
+                rate_id="r2026-eur",
+                source_currency="EUR",
+                frequency=RATE_FREQUENCY_ANNUAL,
+                financial_year="2026",
+            ),
+            _rate(
+                rate_id="r2023-gbp",
+                source_currency="GBP",
+                frequency=RATE_FREQUENCY_ANNUAL,
+                financial_year="2023",
+            ),
+        ]
+        assert available_vintage_year_ids(records) == ("2023", "2026")
+
+    def test_non_annual_records_never_contribute_a_vintage(self):
+        records = [_rate(rate_id="daily1", frequency=RATE_FREQUENCY_DAILY)]
+        assert available_vintage_year_ids(records) == ()
+
+    def test_no_annual_records_yields_no_vintages(self):
+        assert available_vintage_year_ids([]) == ()
+
+    def test_latest_vintage_is_the_maximum(self):
+        records = [
+            _rate(
+                rate_id="r2023",
+                frequency=RATE_FREQUENCY_ANNUAL,
+                financial_year="2023",
+            ),
+            _rate(
+                rate_id="r2026",
+                frequency=RATE_FREQUENCY_ANNUAL,
+                financial_year="2026",
+            ),
+        ]
+        assert latest_vintage_year_id(records) == "2026"
+
+    def test_latest_vintage_is_none_when_no_annual_records_exist(self):
+        assert latest_vintage_year_id([]) is None

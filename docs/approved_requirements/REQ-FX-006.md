@@ -193,3 +193,78 @@ and display/rounding precision remain exactly as open as before.
   drives the real page end to end (not `OutcomeValuationReportingService` in
   isolation), proving `_fx_request_kwargs` actually wires the governed
   market currency through and the resulting warning actually renders
+
+## Addendum, 2026-09-10 (same day): corrected to Finance constant-dollar
+## vintage semantics - the as-of-date mechanism above was never shipped
+
+Finance correction, same day as the addendum above: the as-of-date
+spot-rate design in the previous addendum is **not** how Finance's
+constant-dollar FX table works, and was corrected before merge - it was
+never released. Finance publishes one conversion table per year,
+identified by `year_id`; `year_id` is the **vintage** (which table
+edition a rate comes from), never the calendar year of the transaction,
+outcome, or valuation observation being converted. Selecting vintage
+2026 applies the 2026 GBP→USD rate to GBP amounts from 2023, 2024, 2025,
+and 2026 alike - FX rates are never joined to the observation's own
+calendar time.
+
+`HistoricalOutcomeValuationRequest.fx_as_of_date` is replaced by
+`fx_vintage_year_id`. When `spend_currency` differs from the valuation
+catalogue's currency, `OutcomeValuationReportingService` now resolves
+the selected vintage's rate via `application.fx_service.
+resolve_constant_dollar_vintage_rate` (keyed on `FXRateRecord.
+financial_year == vintage_year_id`, never on `rate_date`/`as_of_date`)
+and applies it via `core.fx_conversion.
+apply_finance_constant_dollar_annual` - the pre-existing, already-
+approved `CONVERSION_METHOD_FINANCE_CONSTANT_DOLLAR_ANNUAL` default
+method this repository already anticipated for exactly this purpose.
+`fx_vintage_year_id=None` defers to `application.fx_service.
+default_fx_vintage_year_id` (the latest available vintage in the
+uploaded Finance table) - the required default. An explicit override to
+an older available vintage is supported. A currency missing from the
+selected vintage blocks the affected economic output (`resolved_rate is
+None` short-circuits ROI with an explicit warning) - it never falls back
+to another vintage, a live rate, an inferred rate, or the observation's
+own calendar-year rate.
+
+`_fx_request_kwargs` (`pages/07_Results_Curve_Bank.py`) no longer infers
+`spend_currency` from the market-level `MarketCurrency.local_currency`
+(a blanket "market = one currency" assumption the correction explicitly
+prohibits - a market can host channels in different currencies, and a
+UK variable may already be in USD). It now reads the specific channel's
+own governed `ChannelMediaUnitConfig.currency`; for a "Total (all
+media)" view it uses that shared currency only when every currency-
+declaring channel in the market agrees, and otherwise leaves
+`spend_currency=None` (existing "no conversion attempted" behaviour).
+The page also gained a vintage selector (`_render_fx_vintage_selector`,
+default: latest available vintage) and a "USD constant-dollar basis:
+Finance {vintage} vintage" caption, and `09_Project_Export.py` gained a
+dedicated Finance-table-format upload path
+(`application.fx_service.build_finance_constant_dollar_rate_set`,
+columns `year_id`/`currency_code`/`local_to_usd_conversion_rate`) and
+persists the selected vintage (`core.persistence`'s `fx_vintage_year_id`
+field) for reproducibility, alongside the existing FX rate-set source/
+version/fingerprint.
+
+Changing the selected vintage recalculates affected monetary/economic
+outputs only; it never invalidates or requires refitting the NBT count
+model (the count-model fit path has no FX dependency of any kind).
+Non-monetary measures (NBT counts, GRPs, TVRs, impressions, clicks,
+sends) are never passed through FX conversion.
+
+### Affected modules (this addendum)
+
+- `ancestry_mmm/application/fx_service.py`
+- `ancestry_mmm/application/outcome_valuation_reporting_service.py`
+- `ancestry_mmm/core/fx_rates.py`
+- `ancestry_mmm/core/persistence.py`
+- `ancestry_mmm/pages/07_Results_Curve_Bank.py`
+- `ancestry_mmm/pages/09_Project_Export.py`
+
+### Required tests (this addendum)
+
+- `ancestry_mmm/tests/test_fx_rates.py::TestVintageHelpers` (all tests)
+- `ancestry_mmm/tests/test_fx_service.py::TestFinanceConstantDollarIngestion` (all tests)
+- `ancestry_mmm/tests/test_fx_service.py::TestConstantDollarVintageResolution` (all tests)
+- `ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch` (all tests)
+- `ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage` (all tests)
