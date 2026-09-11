@@ -401,8 +401,11 @@ class TestAssessEstimationReadiness:
         policy = EstimationReadinessPolicy(
             policy_id="p1", max_reconstruction_error_mape=50.0
         )
+        # The gap's own length (1 week) must match the evidence's holdout
+        # length - assess_estimation_readiness never borrows a different
+        # length's MAPE.
         result = assess_estimation_readiness(
-            self._internal_gap(), policy=policy, evidence=evidence
+            self._internal_gap(missing_week_count=1), policy=policy, evidence=evidence
         )
         assert result.status == READINESS_ESTIMABLE_WITH_EVIDENCE
 
@@ -427,6 +430,79 @@ class TestAssessEstimationReadiness:
             policy_id="p1", max_reconstruction_error_mape=0.1
         )
         result = assess_estimation_readiness(
-            self._internal_gap(), policy=policy, evidence=evidence
+            self._internal_gap(missing_week_count=1), policy=policy, evidence=evidence
         )
         assert result.status == READINESS_BLOCKED_EXCEEDS_RECONSTRUCTION_ERROR
+
+    def test_mape_evidence_at_a_different_gap_length_is_never_borrowed(self):
+        """Regression (automated review finding, P1): a channel that
+        performs well for a holdout matching the actual gap's length but
+        poorly for an unrelated holdout length must be judged on the
+        matching length only - the unrelated trial must never block (or
+        pass) it."""
+        good_1_week = evaluate_candidate_reconstruction_method(
+            TestEvaluateCandidateReconstructionMethod.WEEKS,
+            TestEvaluateCandidateReconstructionMethod.VALUES,
+            method_name="flat_fill",
+            method_description="test",
+            reconstruct=TestEvaluateCandidateReconstructionMethod._flat_fill,
+            holdout_gap_lengths=(1,),
+            holdout_positions=("end",),
+        )
+        bad_4_week = evaluate_candidate_reconstruction_method(
+            TestEvaluateCandidateReconstructionMethod.WEEKS,
+            TestEvaluateCandidateReconstructionMethod.VALUES,
+            method_name="noise_fill",
+            method_description="test",
+            reconstruct=lambda remaining_weeks, remaining_values, held_out_weeks: [
+                v * 100 for v in remaining_values[: len(held_out_weeks)]
+            ],
+            holdout_gap_lengths=(4,),
+            holdout_positions=("end",),
+        )
+        evidence = EstimationEvidenceSummary(
+            variable_id="tv_uk",
+            market="UK",
+            evaluated_at="2026-09-10",
+            n_observed_weeks_used=8,
+            results=good_1_week + bad_4_week,
+        )
+        policy = EstimationReadinessPolicy(
+            policy_id="p1", max_reconstruction_error_mape=50.0
+        )
+        # The actual gap is 1 week - the good 1-week trial applies, the
+        # bad 4-week trial is irrelevant and must not block it.
+        result = assess_estimation_readiness(
+            self._internal_gap(missing_week_count=1), policy=policy, evidence=evidence
+        )
+        assert result.status == READINESS_ESTIMABLE_WITH_EVIDENCE
+
+    def test_mape_missing_for_the_relevant_gap_length_blocks_not_borrows(self):
+        """Fail closed: evidence exists, but none of it is at the gap's own
+        length - this must block (blocked_no_evidence), never silently use
+        a different length's MAPE."""
+        results = evaluate_candidate_reconstruction_method(
+            TestEvaluateCandidateReconstructionMethod.WEEKS,
+            TestEvaluateCandidateReconstructionMethod.VALUES,
+            method_name="flat_fill",
+            method_description="test",
+            reconstruct=TestEvaluateCandidateReconstructionMethod._flat_fill,
+            holdout_gap_lengths=(1,),
+            holdout_positions=("end",),
+        )
+        evidence = EstimationEvidenceSummary(
+            variable_id="tv_uk",
+            market="UK",
+            evaluated_at="2026-09-10",
+            n_observed_weeks_used=8,
+            results=results,
+        )
+        policy = EstimationReadinessPolicy(
+            policy_id="p1", max_reconstruction_error_mape=50.0
+        )
+        # The gap is 3 weeks (the class default); evidence only has 1-week
+        # trials.
+        result = assess_estimation_readiness(
+            self._internal_gap(), policy=policy, evidence=evidence
+        )
+        assert result.status == READINESS_BLOCKED_NO_EVIDENCE

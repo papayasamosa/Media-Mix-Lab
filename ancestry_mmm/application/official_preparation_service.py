@@ -10,7 +10,7 @@ without changing the core preparation contracts.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence, Tuple
 
 from ancestry_mmm.core.activities import ActivityDefinition
 from ancestry_mmm.core.coverage import VariableCoverageMatrix
@@ -59,7 +59,7 @@ def review_official_preparation(
     pipeline_steps: Sequence[Mapping[str, Any]] = (),
     estimation_readiness_policy: Optional[EstimationReadinessPolicy] = None,
     estimation_evidence_by_variable: Optional[
-        Mapping[str, EstimationEvidenceSummary]
+        Mapping[Tuple[str, str], EstimationEvidenceSummary]
     ] = None,
 ) -> OfficialPreparationReview:
     """Build the capability, readiness, and explicit alignment review.

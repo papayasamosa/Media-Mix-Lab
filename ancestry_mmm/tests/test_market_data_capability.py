@@ -194,6 +194,7 @@ class TestCheckMarketChannelCapability:
             "channels": ["TV"],
             "supported": True,
             "issues": [],
+            "recommendation_only_notes": [],
             "decision_report": "",
         }
 
@@ -305,6 +306,19 @@ def _approved_estimated_record(
     )
 
 
+def _adopted_policy(**overrides) -> EstimationReadinessPolicy:
+    """An `EstimationReadinessPolicy` that has actually gone through
+    Product/Finance approval (`is_recommendation_only=False`) - the only
+    kind of policy allowed to gate the official capability result."""
+    defaults = dict(
+        is_recommendation_only=False,
+        approved_by="finance-reviewer",
+        approved_at="2026-01-01",
+    )
+    defaults.update(overrides)
+    return EstimationReadinessPolicy(**defaults)
+
+
 class TestEstimationReadinessPolicyIntegration:
     """UK FH MMM brief (2026-09-10) Workstream D follow-up: wiring
     assess_estimation_readiness into the actual production fit-readiness
@@ -330,7 +344,7 @@ class TestEstimationReadinessPolicyIntegration:
 
     def test_policy_supplied_and_gap_exceeds_missing_week_count_blocks(self):
         matrix = _matrix(_approved_estimated_record())
-        policy = EstimationReadinessPolicy(policy_id="p1", max_missing_week_count=1)
+        policy = _adopted_policy(policy_id="p1", max_missing_week_count=1)
         result = check_market_channel_capability(
             ["UK"], ["TV"], matrix, estimation_readiness_policy=policy
         )
@@ -339,15 +353,15 @@ class TestEstimationReadinessPolicyIntegration:
 
     def test_policy_requiring_evidence_with_none_supplied_blocks(self):
         matrix = _matrix(_approved_estimated_record())
-        policy = EstimationReadinessPolicy(
-            policy_id="p1", max_reconstruction_error_mape=20.0
-        )
+        policy = _adopted_policy(policy_id="p1", max_reconstruction_error_mape=20.0)
         result = check_market_channel_capability(
             ["UK"], ["TV"], matrix, estimation_readiness_policy=policy
         )
         assert result.supported is False
 
     def test_policy_requiring_evidence_with_matching_evidence_supplied_passes(self):
+        # _approved_estimated_record()'s default gap (2026-02-01..2026-02-08)
+        # is 2 weeks - the evidence below must match that exact length.
         matrix = _matrix(_approved_estimated_record())
         policy = EstimationReadinessPolicy(
             policy_id="p1", max_reconstruction_error_mape=50.0
@@ -361,10 +375,10 @@ class TestEstimationReadinessPolicyIntegration:
                 HoldoutEvaluationResult(
                     method_name="flat_fill",
                     method_description="test",
-                    holdout_gap_length_weeks=1,
+                    holdout_gap_length_weeks=2,
                     holdout_position="middle",
                     holdout_start_week="2026-01-15",
-                    n_holdout_weeks=1,
+                    n_holdout_weeks=2,
                     reconstruction_error_mae=5.0,
                     reconstruction_error_mape=10.0,
                 ),
@@ -375,11 +389,11 @@ class TestEstimationReadinessPolicyIntegration:
             ["TV"],
             matrix,
             estimation_readiness_policy=policy,
-            estimation_evidence_by_variable={"TV": evidence},
+            estimation_evidence_by_variable={("TV", "UK"): evidence},
         )
         assert result.supported is True
 
-    def test_edge_gap_blocked_by_default_policy(self):
+    def test_edge_gap_blocked_by_an_adopted_policy(self):
         matrix = _matrix(
             _approved_estimated_record(
                 gap_start="2026-01-01",
@@ -388,7 +402,7 @@ class TestEstimationReadinessPolicyIntegration:
                 observed_end="2026-03-01",
             )
         )
-        policy = EstimationReadinessPolicy(policy_id="p1")
+        policy = _adopted_policy(policy_id="p1")
         result = check_market_channel_capability(
             ["UK"], ["TV"], matrix, estimation_readiness_policy=policy
         )
@@ -413,3 +427,152 @@ class TestEstimationReadinessPolicyIntegration:
             ["UK"], ["TV"], matrix, estimation_readiness_policy=policy
         )
         assert result.supported is True
+
+
+def _mape_evidence(
+    *, variable_id: str, market: str, mape: float, gap_length_weeks: int = 2
+) -> EstimationEvidenceSummary:
+    return EstimationEvidenceSummary(
+        variable_id=variable_id,
+        market=market,
+        evaluated_at="2026-09-10",
+        n_observed_weeks_used=10,
+        results=(
+            HoldoutEvaluationResult(
+                method_name="flat_fill",
+                method_description="test",
+                holdout_gap_length_weeks=gap_length_weeks,
+                holdout_position="middle",
+                holdout_start_week="2026-01-15",
+                n_holdout_weeks=gap_length_weeks,
+                reconstruction_error_mae=5.0,
+                reconstruction_error_mape=mape,
+            ),
+        ),
+    )
+
+
+class TestEvidenceIsScopedByMarket:
+    """Regression (automated review finding, P1): the same `variable_id`
+    can exist in more than one market (e.g. "TV" in both UK and AU).
+    Evidence measured for one market must never approve or block the
+    same variable in a different market - `estimation_evidence_by_
+    variable` is keyed by `(variable_id, market)`, never `variable_id`
+    alone."""
+
+    def test_each_market_uses_only_its_own_evidence(self):
+        # Same variable_id ("TV") in two markets: UK's evidence passes the
+        # policy, AU's evidence fails it - if evidence were shared by
+        # variable_id alone, both markets would get the same verdict.
+        matrix = _matrix(
+            _approved_estimated_record("TV", "UK"),
+            _approved_estimated_record("TV", "AU"),
+        )
+        policy = _adopted_policy(policy_id="p1", max_reconstruction_error_mape=20.0)
+        evidence_by_variable = {
+            ("TV", "UK"): _mape_evidence(variable_id="TV", market="UK", mape=10.0),
+            ("TV", "AU"): _mape_evidence(variable_id="TV", market="AU", mape=90.0),
+        }
+        result = check_market_channel_capability(
+            ["UK", "AU"],
+            ["TV"],
+            matrix,
+            estimation_readiness_policy=policy,
+            estimation_evidence_by_variable=evidence_by_variable,
+        )
+        assert result.supported is False
+        assert len(result.issues) == 1
+        assert result.issues[0].market == "AU"
+        assert result.issues[0].channel == "TV"
+
+    def test_evidence_supplied_only_for_one_market_never_covers_another(self):
+        """Only UK has an evidence entry; AU (same variable_id, no entry
+        under its own market key) must be treated as having no evidence at
+        all, never silently approved using UK's."""
+        matrix = _matrix(
+            _approved_estimated_record("TV", "UK"),
+            _approved_estimated_record("TV", "AU"),
+        )
+        policy = _adopted_policy(policy_id="p1", max_reconstruction_error_mape=20.0)
+        evidence_by_variable = {
+            ("TV", "UK"): _mape_evidence(variable_id="TV", market="UK", mape=10.0),
+        }
+        result = check_market_channel_capability(
+            ["UK", "AU"],
+            ["TV"],
+            matrix,
+            estimation_readiness_policy=policy,
+            estimation_evidence_by_variable=evidence_by_variable,
+        )
+        assert result.supported is False
+        assert len(result.issues) == 1
+        assert result.issues[0].market == "AU"
+        assert "requires reconstruction-error evidence, but none" in (
+            result.issues[0].reason
+        )
+
+
+class TestRecommendationOnlyPolicyNeverGatesOfficialReadiness:
+    """Regression (automated review finding, P2): `is_recommendation_
+    only=True` (the default, unadopted-by-Product/Finance state) must
+    never gate the official capability result - only an adopted policy
+    (`is_recommendation_only=False`, which requires `approved_by`/
+    `approved_at`) can."""
+
+    def test_recommendation_only_policy_cannot_block_official_readiness(self):
+        matrix = _matrix(_approved_estimated_record())
+        policy = EstimationReadinessPolicy(
+            policy_id="p1",
+            max_missing_week_count=1,  # recommendation-only by default
+        )
+        result = check_market_channel_capability(
+            ["UK"], ["TV"], matrix, estimation_readiness_policy=policy
+        )
+        assert policy.is_recommendation_only is True
+        assert result.supported is True
+        assert result.issues == ()
+        # The finding still exists - it is surfaced diagnostically, not
+        # silently dropped.
+        assert len(result.recommendation_only_notes) == 1
+        assert result.recommendation_only_notes[0].market == "UK"
+        assert result.recommendation_only_notes[0].channel == "TV"
+        assert "does not meet policy 'p1'" in result.recommendation_only_notes[0].reason
+
+    def test_adopted_policy_can_block_readiness_when_thresholds_fail(self):
+        matrix = _matrix(_approved_estimated_record())
+        policy = _adopted_policy(policy_id="p1", max_missing_week_count=1)
+        result = check_market_channel_capability(
+            ["UK"], ["TV"], matrix, estimation_readiness_policy=policy
+        )
+        assert policy.is_recommendation_only is False
+        assert result.supported is False
+        assert len(result.issues) == 1
+        assert result.recommendation_only_notes == ()
+
+    def test_distinction_is_visible_in_to_dict(self):
+        """The same threshold failure lands in a different, clearly-named
+        field depending on adoption status - never ambiguous about which
+        one actually blocks."""
+        matrix = _matrix(_approved_estimated_record())
+        recommendation_only_policy = EstimationReadinessPolicy(
+            policy_id="p1", max_missing_week_count=1
+        )
+        adopted_policy = _adopted_policy(policy_id="p1", max_missing_week_count=1)
+
+        recommendation_result = check_market_channel_capability(
+            ["UK"],
+            ["TV"],
+            matrix,
+            estimation_readiness_policy=recommendation_only_policy,
+        ).to_dict()
+        adopted_result = check_market_channel_capability(
+            ["UK"], ["TV"], matrix, estimation_readiness_policy=adopted_policy
+        ).to_dict()
+
+        assert recommendation_result["supported"] is True
+        assert recommendation_result["issues"] == []
+        assert len(recommendation_result["recommendation_only_notes"]) == 1
+
+        assert adopted_result["supported"] is False
+        assert len(adopted_result["issues"]) == 1
+        assert adopted_result["recommendation_only_notes"] == []

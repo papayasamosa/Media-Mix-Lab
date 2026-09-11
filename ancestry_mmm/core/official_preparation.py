@@ -14,7 +14,7 @@ join cannot become the official model input by accident.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -291,7 +291,7 @@ def build_official_capability_report(
     pipeline_steps: Sequence[Mapping[str, Any]] = (),
     estimation_readiness_policy: Optional[EstimationReadinessPolicy] = None,
     estimation_evidence_by_variable: Optional[
-        Mapping[str, EstimationEvidenceSummary]
+        Mapping[Tuple[str, str], EstimationEvidenceSummary]
     ] = None,
 ) -> OfficialCapabilityReport:
     """Build capability evidence for every source-backed consumed variable.

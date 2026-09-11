@@ -376,6 +376,21 @@ class EstimationEvidenceSummary:
         ]
         return max(matching) if matching else None
 
+    def worst_mape_for_gap_length(self, gap_length: int) -> Optional[float]:
+        """The same exact-gap-length matching as `worst_mae_for_gap_length`,
+        for MAPE. Returns `None` (never a nearby-length substitute) when no
+        holdout trial was evaluated at exactly `gap_length`, or every trial
+        at that length had an unscoreable MAPE (a true zero in the window) -
+        `assess_estimation_readiness` treats either case as missing evidence
+        and blocks."""
+        matching = [
+            r.reconstruction_error_mape
+            for r in self.results
+            if r.holdout_gap_length_weeks == gap_length
+            and r.reconstruction_error_mape is not None
+        ]
+        return max(matching) if matching else None
+
     def to_dict(self) -> dict:
         return {
             "variable_id": self.variable_id,
@@ -550,22 +565,19 @@ def assess_estimation_readiness(
                     "error evidence, but none was supplied for this gap.",
                 ),
             )
-        worst_mape = max(
-            (
-                r.reconstruction_error_mape
-                for r in evidence.results
-                if r.reconstruction_error_mape is not None
-            ),
-            default=None,
-        )
+        worst_mape = evidence.worst_mape_for_gap_length(diagnostics.missing_week_count)
         if worst_mape is None:
             return EstimationReadinessResult(
                 status=READINESS_BLOCKED_NO_EVIDENCE,
                 reasons=(
                     f"Policy {policy.policy_id!r} requires reconstruction-"
-                    "error evidence, but no candidate method's MAPE could "
-                    "be computed (every holdout window included a true "
-                    "zero value).",
+                    "error evidence, but no candidate method has a "
+                    f"{diagnostics.missing_week_count}-week holdout trial "
+                    "matching this gap's exact length with a computable "
+                    "MAPE (either none was evaluated at that length, or "
+                    "every trial at that length included a true zero "
+                    "value) - evidence from a different holdout length is "
+                    "never substituted.",
                 ),
             )
         if worst_mape > policy.max_reconstruction_error_mape:
