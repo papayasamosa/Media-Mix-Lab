@@ -70,10 +70,9 @@ from ancestry_mmm.core.curve_artifact import (
     load_curve_artifact_store,
 )
 from ancestry_mmm.core.outcome_approval import OutcomeApproval
-from ancestry_mmm.core.fx_rates import (
-    FXRateRecord,
-    available_vintage_year_ids,
-    latest_vintage_year_id,
+from ancestry_mmm.core.fx_rates import FXRateRecord
+from ancestry_mmm.application.fx_service import (
+    available_constant_dollar_vintage_year_ids,
 )
 from ancestry_mmm.application.curve_service import (
     CurveGovernanceError,
@@ -459,14 +458,14 @@ def _render_fx_vintage_selector() -> None:
     if not fx_records_state:
         return
     fx_records = [FXRateRecord.from_dict(item) for item in fx_records_state]
-    available_vintages = available_vintage_year_ids(fx_records)
+    available_vintages = available_constant_dollar_vintage_year_ids(fx_records)
     if not available_vintages:
         return
     stored_vintage = get_state("fx_vintage_year_id")
     default_vintage = (
         stored_vintage
         if stored_vintage in available_vintages
-        else (latest_vintage_year_id(fx_records))
+        else available_vintages[-1]
     )
     selected_vintage = st.selectbox(
         "Finance constant-dollar vintage",

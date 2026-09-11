@@ -13,7 +13,9 @@ import pytest
 
 from ancestry_mmm.application.fx_service import (
     FXUploadValidationError,
+    available_constant_dollar_vintage_year_ids,
     build_finance_constant_dollar_rate_set,
+    build_manual_fx_rate_set,
     default_fx_vintage_year_id,
     resolve_constant_dollar_vintage_rate,
 )
@@ -144,6 +146,23 @@ class TestFinanceConstantDollarIngestion:
         with pytest.raises(FXUploadValidationError, match="non-integer year_id"):
             _build(frame=frame)
 
+    def test_fractional_year_id_is_rejected_not_silently_truncated(self):
+        """Regression (automated review finding): pandas' `astype(int)`
+        truncates a float like 2026.5 to 2026 without raising - an
+        upload with a fractional year_id must be rejected outright,
+        never silently assigned to the truncated integer vintage."""
+        frame = pd.DataFrame(
+            [
+                {
+                    "year_id": 2026.5,
+                    "currency_code": "GBP",
+                    "local_to_usd_conversion_rate": 1.3,
+                }
+            ]
+        )
+        with pytest.raises(FXUploadValidationError, match="non-integer year_id"):
+            _build(frame=frame)
+
     def test_default_vintage_is_the_latest_ingested(self):
         _rate_set, records = _build()
         assert default_fx_vintage_year_id(records) == "2026"
@@ -249,3 +268,69 @@ class TestConstantDollarVintageResolution:
                 target_currency="USD",
                 vintage_year_id="2026",
             )
+
+
+class TestConstantDollarMethodScoping:
+    """Regression (automated review finding, P1): an annual-frequency
+    record approved under a DIFFERENT conversion method (e.g. a generic
+    manual/budget-rate upload) must never be treated as a Finance
+    constant-dollar vintage, even though it shares `frequency='annual'`
+    and a `financial_year` with a genuine constant-dollar record. No
+    actual exchange rate appears here - every rate is synthetic."""
+
+    @staticmethod
+    def _mixed_method_rate_set_and_records():
+        rows = [
+            dict(
+                rate_date="2026-01-01",
+                source_currency="GBP",
+                target_currency="USD",
+                rate="1.30",
+                method="finance_constant_dollar_annual",
+                frequency="annual",
+                financial_year="2026",
+            ),
+            dict(
+                rate_date="2027-01-01",
+                source_currency="GBP",
+                target_currency="USD",
+                rate="9.99",  # deliberately implausible - proves it is never picked
+                method="manual_approved_rate",
+                frequency="annual",
+                financial_year="2027",
+            ),
+        ]
+        rate_set, records = build_manual_fx_rate_set(
+            pd.DataFrame(rows),
+            rate_set_id="fx-mixed-method",
+            rate_set_version=1,
+            name="Mixed-method rate set",
+            provider="finance-approved-upload",
+            base_or_reference_currency="USD",
+            start_date="2026-01-01",
+            end_date="2027-12-31",
+            rate_policy="mixed",
+            approval_status="approved",
+            approved_by="finance-reviewer",
+            approved_at="2026-01-01T00:00:00Z",
+        )
+        return rate_set, records
+
+    def test_available_vintages_excludes_a_different_approved_method(self):
+        _rate_set, records = self._mixed_method_rate_set_and_records()
+        assert available_constant_dollar_vintage_year_ids(records) == ("2026",)
+
+    def test_default_vintage_never_picks_a_different_methods_vintage(self):
+        _rate_set, records = self._mixed_method_rate_set_and_records()
+        assert default_fx_vintage_year_id(records) == "2026"
+
+    def test_resolve_never_returns_a_different_methods_rate(self):
+        rate_set, records = self._mixed_method_rate_set_and_records()
+        rate = resolve_constant_dollar_vintage_rate(
+            rate_set,
+            records,
+            source_currency="GBP",
+            target_currency="USD",
+            vintage_year_id="2027",
+        )
+        assert rate is None

@@ -30,6 +30,7 @@ from ancestry_mmm.core.fx_rates import (
     RATE_FREQUENCY_ANNUAL,
     FXRateRecord,
     FXRateSet,
+    available_vintage_year_ids,
     compute_records_fingerprint,
     latest_vintage_year_id,
 )
@@ -222,11 +223,18 @@ def build_finance_constant_dollar_rate_set(
             "to convert - every row is the USD identity."
         )
     try:
-        year_ids = non_identity["year_id"].astype(int)
+        numeric_year_ids = non_identity["year_id"].astype(float)
     except (TypeError, ValueError) as exc:
         raise FXUploadValidationError(
             f"Finance constant-dollar upload has a non-integer year_id: {exc}"
         ) from exc
+    non_integral = numeric_year_ids[numeric_year_ids != numeric_year_ids.round()]
+    if not non_integral.empty:
+        raise FXUploadValidationError(
+            "Finance constant-dollar upload has a non-integer year_id: "
+            f"{non_integral.tolist()}"
+        )
+    year_ids = numeric_year_ids.astype(int)
 
     reshaped = pd.DataFrame(
         {
@@ -256,6 +264,24 @@ def build_finance_constant_dollar_rate_set(
     )
 
 
+def _constant_dollar_annual_records(
+    records: Sequence[FXRateRecord],
+) -> List[FXRateRecord]:
+    """Records approved under the Finance constant-dollar annual method
+    specifically - never a record that merely happens to share
+    `frequency='annual'` and a `financial_year` but was approved under a
+    different method (e.g. a generic manual/budget-rate annual upload
+    via `build_manual_fx_rate_set`). Without this filter, such a record
+    would be silently treated as a constant-dollar vintage and applied
+    through `core.fx_conversion.apply_finance_constant_dollar_annual`,
+    mixing two distinct, independently-approved conversion policies."""
+    return [
+        record
+        for record in records
+        if record.method == CONVERSION_METHOD_FINANCE_CONSTANT_DOLLAR_ANNUAL
+    ]
+
+
 def resolve_constant_dollar_vintage_rate(
     rate_set: FXRateSet,
     records: Sequence[FXRateRecord],
@@ -277,7 +303,9 @@ def resolve_constant_dollar_vintage_rate(
     currency pair, so the caller can block. Same-currency identity
     conversion (e.g. a value already declared USD) is the caller's job,
     exactly as in `resolve_approved_fx_rate` - this function is never
-    called for a pair where source == target.
+    called for a pair where source == target. Only records approved
+    under the constant-dollar method itself are eligible - see
+    `_constant_dollar_annual_records`.
     """
     if rate_set.approval_status != "approved":
         return None
@@ -289,7 +317,7 @@ def resolve_constant_dollar_vintage_rate(
     target = target_currency.upper()
     candidates = [
         record
-        for record in records
+        for record in _constant_dollar_annual_records(records)
         if record.source_currency == source
         and record.target_currency == target
         and record.frequency == RATE_FREQUENCY_ANNUAL
@@ -306,11 +334,22 @@ def resolve_constant_dollar_vintage_rate(
     return candidates[0].rate
 
 
+def available_constant_dollar_vintage_year_ids(
+    records: Sequence[FXRateRecord],
+) -> Tuple[str, ...]:
+    """The UI-facing counterpart to `core.fx_rates.
+    available_vintage_year_ids` that only counts vintages backed by a
+    record approved under the Finance constant-dollar method - a generic
+    annual upload under a different method must never appear as a
+    selectable "vintage" with no valid constant-dollar rate behind it."""
+    return available_vintage_year_ids(_constant_dollar_annual_records(records))
+
+
 def default_fx_vintage_year_id(records: Sequence[FXRateRecord]) -> str | None:
     """ "Default to the latest available vintage in the uploaded file" -
-    a thin, named re-export so callers resolving a default do not need to
-    know this lives on `core.fx_rates` specifically."""
-    return latest_vintage_year_id(records)
+    only among vintages backed by a Finance-constant-dollar-method
+    record (see `_constant_dollar_annual_records`)."""
+    return latest_vintage_year_id(_constant_dollar_annual_records(records))
 
 
 def validate_persisted_fx_rate_set(
@@ -379,6 +418,7 @@ def new_manual_rate_set_id() -> str:
 
 __all__ = [
     "FXUploadValidationError",
+    "available_constant_dollar_vintage_year_ids",
     "build_finance_constant_dollar_rate_set",
     "build_manual_fx_rate_set",
     "default_fx_vintage_year_id",
