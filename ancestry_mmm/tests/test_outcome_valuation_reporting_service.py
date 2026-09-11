@@ -506,7 +506,7 @@ class TestSpendCurrencyMismatch:
         )
 
     def test_omitted_vintage_defaults_to_latest_available(self, trace, frame, meta):
-        """"Default to the latest available vintage" - omitting
+        """ "Default to the latest available vintage" - omitting
         fx_vintage_year_id must behave identically to explicitly
         selecting the newest vintage present in fx_rate_records (2026,
         here)."""

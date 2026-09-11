@@ -463,8 +463,10 @@ def _render_fx_vintage_selector() -> None:
     if not available_vintages:
         return
     stored_vintage = get_state("fx_vintage_year_id")
-    default_vintage = stored_vintage if stored_vintage in available_vintages else (
-        latest_vintage_year_id(fx_records)
+    default_vintage = (
+        stored_vintage
+        if stored_vintage in available_vintages
+        else (latest_vintage_year_id(fx_records))
     )
     selected_vintage = st.selectbox(
         "Finance constant-dollar vintage",

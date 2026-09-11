@@ -438,9 +438,7 @@ def assess_official_maturity_readiness(
         metadata = NetBillthroughCompletenessMetadata.from_dict(metadata)
 
     try:
-        latest = pd.Timestamp(
-            metadata.latest_complete_net_billthrough_week
-        ).normalize()
+        latest = pd.Timestamp(metadata.latest_complete_net_billthrough_week).normalize()
         as_of = pd.Timestamp(metadata.data_as_of_date).normalize()
     except (TypeError, ValueError):
         return {

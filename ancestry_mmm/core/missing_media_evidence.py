@@ -111,7 +111,10 @@ class GapDiagnostics:
 def _segment_overlaps(
     segment: CoverageSegment, other_period_start: str, other_period_end: str
 ) -> bool:
-    return segment.period_start <= other_period_end and other_period_start <= segment.period_end
+    return (
+        segment.period_start <= other_period_end
+        and other_period_start <= segment.period_end
+    )
 
 
 def _other_measure_covers_gap(
@@ -139,7 +142,9 @@ def diagnose_gaps(
     named_event_occurrences: Sequence[NamedEventOccurrence] = (),
     spend_companion: Optional[VariableCoverageRecord] = None,
     delivery_companion: Optional[VariableCoverageRecord] = None,
-    observed_like_states: frozenset[str] = frozenset({"observed_zero", "estimated", "modelled"}),
+    observed_like_states: frozenset[str] = frozenset(
+        {"observed_zero", "estimated", "modelled"}
+    ),
 ) -> tuple[GapDiagnostics, ...]:
     """Classify every gap-state run in ``record.coverage_segments``.
 
@@ -197,7 +202,9 @@ def diagnose_gaps(
                 gap_start=segment.period_start,
                 gap_end=segment.period_end,
                 state=segment.state,
-                missing_week_count=_week_count(segment.period_start, segment.period_end),
+                missing_week_count=_week_count(
+                    segment.period_start, segment.period_end
+                ),
                 is_internal=not (is_at_start or is_at_end),
                 is_at_start_of_history=is_at_start,
                 is_at_end_of_history=is_at_end,
@@ -215,7 +222,9 @@ def diagnose_gaps(
 # Estimation-evidence harness
 # ---------------------------------------------------------------------------
 
-ReconstructFn = Callable[[Sequence[str], Sequence[float], Sequence[str]], Sequence[float]]
+ReconstructFn = Callable[
+    [Sequence[str], Sequence[float], Sequence[str]], Sequence[float]
+]
 
 
 @dataclass(frozen=True)
@@ -420,7 +429,9 @@ class EstimationReadinessPolicy:
             self.max_reconstruction_error_mape < 0
         ):
             raise ValueError("max_reconstruction_error_mape must be non-negative.")
-        if not self.is_recommendation_only and not (self.approved_by and self.approved_at):
+        if not self.is_recommendation_only and not (
+            self.approved_by and self.approved_at
+        ):
             raise ValueError(
                 "A policy that is not recommendation-only requires "
                 "approved_by and approved_at (mirrors "

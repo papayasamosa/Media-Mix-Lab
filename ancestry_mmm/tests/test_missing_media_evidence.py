@@ -35,7 +35,9 @@ from ancestry_mmm.core.named_events import NamedEventOccurrence
 
 def _freq() -> FrequencyMetadata:
     return FrequencyMetadata(
-        native_frequency="weekly", target_frequency="weekly", variable_class="flow_count"
+        native_frequency="weekly",
+        target_frequency="weekly",
+        variable_class="flow_count",
     )
 
 

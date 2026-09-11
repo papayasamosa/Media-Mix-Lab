@@ -5798,15 +5798,18 @@ class TestEconomicReportingStateRoundTrip:
         imported = import_project(output_path)
 
         # Round-trips as raw dicts (persistence layer) ...
-        assert imported["outcome_valuation_records"] == project["outcome_valuation_records"]
+        assert (
+            imported["outcome_valuation_records"]
+            == project["outcome_valuation_records"]
+        )
         assert imported["currency_context"] == project["currency_context"]
         assert imported["fx_rate_set"] == project["fx_rate_set"]
         assert imported["fx_rate_records"] == project["fx_rate_records"]
 
         # ... and survives the quarantine resolvers a real import handler
         # (09_Project_Export.py) actually calls before trusting them.
-        resolved_valuation, valuation_warnings = resolve_imported_outcome_valuation_records(
-            imported
+        resolved_valuation, valuation_warnings = (
+            resolve_imported_outcome_valuation_records(imported)
         )
         assert valuation_warnings == []
         assert resolved_valuation[0]["denominator_outcome_id"] == "fh_new_gsa"
@@ -5816,7 +5819,9 @@ class TestEconomicReportingStateRoundTrip:
         assert fx_set_warnings == []
         assert resolved_fx_set["rate_set_id"] == project["fx_rate_set"]["rate_set_id"]
 
-        resolved_fx_records, fx_records_warnings = resolve_imported_fx_rate_records(imported)
+        resolved_fx_records, fx_records_warnings = resolve_imported_fx_rate_records(
+            imported
+        )
         assert fx_records_warnings == []
         assert resolved_fx_records[0]["source_currency"] == "GBP"
         assert resolved_fx_records[0]["target_currency"] == "USD"
@@ -5861,11 +5866,15 @@ class TestEconomicReportingStateRoundTrip:
         ]
         first_path = export_project(tmp_path / "v1.zip", **project)
         first_imported = import_project(first_path)
-        assert first_imported["outcome_valuation_records"][0]["aggregate_value"] == 100.0
+        assert (
+            first_imported["outcome_valuation_records"][0]["aggregate_value"] == 100.0
+        )
 
         project["outcome_valuation_records"] = [
             _valid_valuation_record_dict(aggregate_value=999.0)
         ]
         second_path = export_project(tmp_path / "v2.zip", **project)
         second_imported = import_project(second_path)
-        assert second_imported["outcome_valuation_records"][0]["aggregate_value"] == 999.0
+        assert (
+            second_imported["outcome_valuation_records"][0]["aggregate_value"] == 999.0
+        )

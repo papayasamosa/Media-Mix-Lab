@@ -499,7 +499,9 @@ def test_activity_dictionary_builder_offers_governed_search_taxonomy_fields(
         for dv in builder.data_validations.dataValidation
     }
     search_intent_col = [
-        cell.column_letter for cell in builder[7] if cell.value == "search_intent_group_id"
+        cell.column_letter
+        for cell in builder[7]
+        if cell.value == "search_intent_group_id"
     ][0]
     search_platform_col = [
         cell.column_letter for cell in builder[7] if cell.value == "search_platform"
@@ -514,7 +516,10 @@ def test_activity_dictionary_builder_offers_governed_search_taxonomy_fields(
         for sqref, values in dv_sqrefs.items()
         if sqref.startswith(f"{search_platform_col}8")
     )
-    assert intent_values == {SEARCH_INTENT_GROUP_ID_BRAND, SEARCH_INTENT_GROUP_ID_NON_BRAND}
+    assert intent_values == {
+        SEARCH_INTENT_GROUP_ID_BRAND,
+        SEARCH_INTENT_GROUP_ID_NON_BRAND,
+    }
     assert platform_values == set(SEARCH_PLATFORMS)
 
 
@@ -531,7 +536,9 @@ def test_activity_dictionary_builder_search_taxonomy_round_trips_through_the_rea
         parse_standard_workbook,
     )
 
-    def _row(activity_id: str, search_intent_group_id: str, search_platform: str) -> dict:
+    def _row(
+        activity_id: str, search_intent_group_id: str, search_platform: str
+    ) -> dict:
         return {
             "activity_id": activity_id,
             "market": "UK",
@@ -862,16 +869,15 @@ def test_currency_rag_rows_point_to_the_separate_fx_governance(guide):
     activity_currency = next(
         r for r in guide.ACTIVITY_RAG if r["Field name"] == "currency"
     )
-    assert "does not perform FX conversion" in activity_currency["Why the tool needs it"]
+    assert (
+        "does not perform FX conversion" in activity_currency["Why the tool needs it"]
+    )
     assert "never inferred from market" in activity_currency["Why the tool needs it"]
 
     outcome_value_currency = next(
         r for r in guide.OUTCOME_RAG if r["Field name"] == "value_currency"
     )
-    assert (
-        "never converts it"
-        in outcome_value_currency["Why the tool needs it"]
-    )
+    assert "never converts it" in outcome_value_currency["Why the tool needs it"]
 
 
 def test_activity_dictionary_builder_id_has_exactly_three_identity_inputs(

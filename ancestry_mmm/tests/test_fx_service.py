@@ -24,12 +24,36 @@ def _finance_frame(**overrides) -> pd.DataFrame:
     rows = overrides.pop(
         "rows",
         [
-            {"year_id": 2025, "currency_code": "GBP", "local_to_usd_conversion_rate": 1.25},
-            {"year_id": 2025, "currency_code": "EUR", "local_to_usd_conversion_rate": 1.05},
-            {"year_id": 2025, "currency_code": "USD", "local_to_usd_conversion_rate": 1.0},
-            {"year_id": 2026, "currency_code": "GBP", "local_to_usd_conversion_rate": 1.30},
-            {"year_id": 2026, "currency_code": "EUR", "local_to_usd_conversion_rate": 1.08},
-            {"year_id": 2026, "currency_code": "USD", "local_to_usd_conversion_rate": 1.0},
+            {
+                "year_id": 2025,
+                "currency_code": "GBP",
+                "local_to_usd_conversion_rate": 1.25,
+            },
+            {
+                "year_id": 2025,
+                "currency_code": "EUR",
+                "local_to_usd_conversion_rate": 1.05,
+            },
+            {
+                "year_id": 2025,
+                "currency_code": "USD",
+                "local_to_usd_conversion_rate": 1.0,
+            },
+            {
+                "year_id": 2026,
+                "currency_code": "GBP",
+                "local_to_usd_conversion_rate": 1.30,
+            },
+            {
+                "year_id": 2026,
+                "currency_code": "EUR",
+                "local_to_usd_conversion_rate": 1.08,
+            },
+            {
+                "year_id": 2026,
+                "currency_code": "USD",
+                "local_to_usd_conversion_rate": 1.0,
+            },
         ],
     )
     return pd.DataFrame(rows)
@@ -84,7 +108,13 @@ class TestFinanceConstantDollarIngestion:
 
     def test_all_usd_rows_with_no_other_currency_is_rejected(self):
         frame = pd.DataFrame(
-            [{"year_id": 2026, "currency_code": "USD", "local_to_usd_conversion_rate": 1.0}]
+            [
+                {
+                    "year_id": 2026,
+                    "currency_code": "USD",
+                    "local_to_usd_conversion_rate": 1.0,
+                }
+            ]
         )
         with pytest.raises(FXUploadValidationError, match="USD identity"):
             _build(frame=frame)
@@ -95,7 +125,9 @@ class TestFinanceConstantDollarIngestion:
             _build(frame=frame)
 
     def test_empty_upload_is_rejected(self):
-        frame = pd.DataFrame(columns=["year_id", "currency_code", "local_to_usd_conversion_rate"])
+        frame = pd.DataFrame(
+            columns=["year_id", "currency_code", "local_to_usd_conversion_rate"]
+        )
         with pytest.raises(FXUploadValidationError, match="no rows"):
             _build(frame=frame)
 

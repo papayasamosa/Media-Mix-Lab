@@ -202,7 +202,9 @@ def build_finance_constant_dollar_rate_set(
     a thin column-reshape adapter - never a second, parallel ingestion
     path.
     """
-    frame = _read_upload(source) if not isinstance(source, pd.DataFrame) else source.copy()
+    frame = (
+        _read_upload(source) if not isinstance(source, pd.DataFrame) else source.copy()
+    )
     required = {"year_id", "currency_code", "local_to_usd_conversion_rate"}
     missing = sorted(required - set(frame.columns))
     if missing:
@@ -213,9 +215,7 @@ def build_finance_constant_dollar_rate_set(
     if frame.empty:
         raise FXUploadValidationError("Finance constant-dollar upload has no rows.")
 
-    non_identity = frame[
-        frame["currency_code"].astype(str).str.upper() != "USD"
-    ].copy()
+    non_identity = frame[frame["currency_code"].astype(str).str.upper() != "USD"].copy()
     if non_identity.empty:
         raise FXUploadValidationError(
             "Finance constant-dollar upload has no non-USD currency rows "
@@ -307,7 +307,7 @@ def resolve_constant_dollar_vintage_rate(
 
 
 def default_fx_vintage_year_id(records: Sequence[FXRateRecord]) -> str | None:
-    """"Default to the latest available vintage in the uploaded file" -
+    """ "Default to the latest available vintage in the uploaded file" -
     a thin, named re-export so callers resolving a default do not need to
     know this lives on `core.fx_rates` specifically."""
     return latest_vintage_year_id(records)

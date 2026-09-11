@@ -421,9 +421,9 @@ def test_activity_definitions_from_dictionary_rejects_invalid_search_platform():
     dictionary = _activity_dictionary()
     dictionary["search_intent_group_id"] = pd.NA
     dictionary["search_platform"] = ""
-    dictionary.loc[
-        dictionary["activity_id"] == "meta_brand", "search_platform"
-    ] = "bing_ads"  # not a valid SEARCH_PLATFORMS value
+    dictionary.loc[dictionary["activity_id"] == "meta_brand", "search_platform"] = (
+        "bing_ads"  # not a valid SEARCH_PLATFORMS value
+    )
 
     with pytest.raises(ValueError, match="search_platform"):
         activity_definitions_from_dictionary(dictionary)
