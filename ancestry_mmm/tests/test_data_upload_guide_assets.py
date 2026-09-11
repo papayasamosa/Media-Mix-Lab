@@ -752,6 +752,128 @@ def test_invalid_search_taxonomy_combination_fails_clearly():
         canonicalize_standard_workbook(workbook)
 
 
+def test_guide_html_documents_the_generic_denominator_outcome_mechanism(guide):
+    """Finance constant-dollar / LTR documentation audit (2026-09-10):
+    the guide must state that denominator_outcome_id's per-week match is
+    generic (not NBT-specific) and name the exact UK cohort
+    correspondence, so a future GSA-week LTR is documented as equally
+    valid without implying a code change is needed."""
+    html = guide.build_html()
+    assert "denominator mechanism is generic" in html
+    assert "fh_net_billthrough_count_new" in html
+    assert "fh_net_billthrough_count_dna_cross_sell" in html
+    assert "fh_net_billthrough_count_winback" in html
+    assert "fh_gsa</code>-week LTR" in html
+    assert "own matching cohort's count for that week" in html
+
+
+def test_guide_html_documents_finance_constant_dollar_fx_vintage(guide):
+    """The guide must explain the real Finance upload format and the
+    vintage-not-observation-year rule, the latest-vintage default with
+    override, and that a USD-declared amount is never converted again -
+    the exact points corrected in the FX business decision."""
+    html = guide.build_html()
+    assert 'id="fx"' in html
+    assert "year_id" in html
+    assert "currency_code" in html
+    assert "local_to_usd_conversion_rate" in html
+    assert "never the calendar year" in html
+    assert "defaults to the latest one" in html
+    assert "never converted again" in html
+    assert "never falls back to another vintage" in html
+
+
+def test_guide_html_names_the_actual_ui_labels_for_the_fx_workflow(guide):
+    """The guide must not just explain the FX file format and vintage
+    rules in the abstract - it must tell the analyst exactly where in
+    the running app to upload the Finance table and where to select or
+    override the vintage, using the real, current UI labels (page
+    titles, section/expander names, button and dropdown labels) rather
+    than an internal filename or a generic description."""
+    html = guide.build_html()
+    assert "Where to actually do this in the app" in html
+    # Upload location: Export & Recovery page's "Finance FX rate set"
+    # section, "Upload Finance constant-dollar table" expander.
+    assert "Export &amp; Recovery" in html
+    assert "Finance FX rate set" in html
+    assert "Upload Finance constant-dollar table" in html
+    assert "Validate and load Finance table" in html
+    # Vintage selection/override location: Results & Response Curves
+    # page's "Economic outcome valuation &amp; ROI" section.
+    assert "Results &amp; Response Curves" in html
+    assert "Economic outcome valuation" in html
+    assert "Finance constant-dollar vintage" in html
+    assert "USD constant-dollar basis" in html
+
+
+def test_guide_fx_ui_labels_match_the_live_pages():
+    """Cross-check against the actual running pages, not just the guide's
+    own text: if the Export & Recovery upload widgets or the Results page
+    vintage selector are ever relabelled, this must fail so the guide
+    gets updated in the same change rather than silently going stale."""
+    export_page = Path(__file__).parents[1] / "pages" / "09_Project_Export.py"
+    results_page = Path(__file__).parents[1] / "pages" / "07_Results_Curve_Bank.py"
+    export_src = export_page.read_text(encoding="utf-8")
+    results_src = results_page.read_text(encoding="utf-8")
+
+    assert '"Finance FX rate set"' in export_src
+    assert '"Upload Finance constant-dollar table"' in export_src
+    assert '"Validate and load Finance table"' in export_src
+    assert '"Finance constant-dollar vintage"' in results_src
+    assert "USD constant-dollar basis" in results_src
+
+
+def test_guide_faq_and_glossary_cover_fx_vintage(guide):
+    html = guide.build_html()
+    assert "Finance FX &#x201c;vintage&#x201d;" in html or "vintage" in html
+    assert "FX vintage" in html
+    assert "constant-dollar rate" in html
+
+
+def test_dictionary_builders_never_carry_an_fx_rate_value_column(guide):
+    """Architecture guard: FX rates must stay a separate governed project
+    input (application.fx_service, Project Export page) - never a column
+    on the normal Outcome or Activity Dictionary. This must keep failing
+    if anyone ever adds year_id/currency_code/local_to_usd_conversion_rate
+    (or a plain 'rate'/'exchange_rate' column) to either dictionary's
+    output contract."""
+    forbidden = {
+        "year_id",
+        "currency_code",
+        "local_to_usd_conversion_rate",
+        "exchange_rate",
+        "fx_rate",
+    }
+    for columns_name in (
+        "OUTCOME_DICTIONARY_OUTPUT_COLUMNS",
+        "ACTIVITY_DICTIONARY_OUTPUT_COLUMNS",
+        "CONTEXT_DICTIONARY_OUTPUT_COLUMNS",
+    ):
+        columns = set(getattr(guide, columns_name))
+        assert not (columns & forbidden), (
+            f"{columns_name} must never carry an FX-rate column: {columns & forbidden}"
+        )
+
+
+def test_currency_rag_rows_point_to_the_separate_fx_governance(guide):
+    """Regression guard for the audit finding that currency/value_currency
+    are identification-only: their guide text must say so and must not
+    silently start implying they perform conversion."""
+    activity_currency = next(
+        r for r in guide.ACTIVITY_RAG if r["Field name"] == "currency"
+    )
+    assert "does not perform FX conversion" in activity_currency["Why the tool needs it"]
+    assert "never inferred from market" in activity_currency["Why the tool needs it"]
+
+    outcome_value_currency = next(
+        r for r in guide.OUTCOME_RAG if r["Field name"] == "value_currency"
+    )
+    assert (
+        "never converts it"
+        in outcome_value_currency["Why the tool needs it"]
+    )
+
+
 def test_activity_dictionary_builder_id_has_exactly_three_identity_inputs(
     tmp_path, guide
 ):
