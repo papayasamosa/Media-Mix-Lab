@@ -1910,9 +1910,16 @@
         "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_supplied_and_gap_exceeds_missing_week_count_blocks",
         "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_requiring_evidence_with_none_supplied_blocks",
         "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_requiring_evidence_with_matching_evidence_supplied_passes",
-        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_edge_gap_blocked_by_default_policy",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_edge_gap_blocked_by_an_adopted_policy",
         "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_never_examines_non_estimated_states",
-        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_does_not_affect_fully_observed_records"
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_does_not_affect_fully_observed_records",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEvidenceIsScopedByMarket::test_each_market_uses_only_its_own_evidence",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEvidenceIsScopedByMarket::test_evidence_supplied_only_for_one_market_never_covers_another",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestRecommendationOnlyPolicyNeverGatesOfficialReadiness::test_recommendation_only_policy_cannot_block_official_readiness",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestRecommendationOnlyPolicyNeverGatesOfficialReadiness::test_adopted_policy_can_block_readiness_when_thresholds_fail",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestRecommendationOnlyPolicyNeverGatesOfficialReadiness::test_distinction_is_visible_in_to_dict",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_evidence_at_a_different_gap_length_is_never_borrowed",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_missing_for_the_relevant_gap_length_blocks_not_borrows"
       ]
     }
   ]
