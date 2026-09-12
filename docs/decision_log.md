@@ -8866,3 +8866,412 @@ completeness are governed by the supplied source metadata.
 This decision is intentionally scoped to the current UK production onboarding
 path. It does not replace the versioned outcome-definition registry or make NBT
 a global default for unrelated projects.
+
+## 2026-09-10 UK Family History MMM implementation brief: 30-day maturity readiness window
+
+Recorded as `REQ-NBT-005`. For the current UK Family History production
+delivery, official MMM readiness treats the latest supplied NBT week as
+mature once 30 days have elapsed since `data_as_of_date`. This is a
+distinct, more conservative production readiness window from `REQ-NBT-002`'s
+14-day historical-test completeness horizon, which `REQ-NBT-004` already
+forbids treating as a production default; neither prior record is
+superseded.
+
+`NetBillthroughCompletenessMetadata` gains an optional `maturity_window_days`
+field (default `None` - never silently assumed) and a new
+`assess_official_maturity_readiness` function surfaces the readiness signal
+without changing the existing structural-completeness gate
+(`validate_supplied_net_billthrough`). The 30-day number is supplied
+configuration for this specific UK FH production pack, not a hard-coded
+universal threshold.
+
+This brief's audit against current `main` found the target-state
+architecture for NBT segment definitions, the generic NBT/GSA denominator
+mechanism, weekly-rate-before-aggregation, fail-closed missing valuation,
+and the FX rate/conversion primitives already implemented and tested (see
+`REQ-NBT-002`-`004`, `REQ-ECON-002`/`003`, `REQ-FX-001`-`004`). Remaining
+UK FH deltas identified but not yet closed by this pass: fingerprint/
+staleness wiring for `outcome_valuation`/`fx_rate` records into
+`core/fingerprint.py`, FX year-lookup-and-block integration into the Results
+page and `outcome_valuation_reporting.py`, and the missing-media
+estimation-evidence/holdout framework (the brief's own stated "main area
+still needing technical work").
+
+## 2026-09-10 (continued) import-time quarantine for outcome-valuation and FX records
+
+`outcome_valuation_records`, `fx_rate_set`, and `fx_rate_records` were being
+restored from an imported project bundle raw (`imported.get(...)`), unlike
+every other governed artefact type (`outcome_approvals`, `causal_graphs`,
+`search_objects`, `named_events`) which already round-trip through a
+`resolve_imported_*` quarantine function. `core/persistence.py` gains
+`resolve_imported_outcome_valuation_records`, `resolve_imported_fx_rate_set`,
+and `resolve_imported_fx_rate_records`, mirroring
+`resolve_imported_outcome_approvals`'s never-trust-silently contract; wired
+into `pages/09_Project_Export.py`'s import handler. Recorded as a REQ-ECON-002
+addendum. No regression in the persistence or Project Export page test
+suites (268 tests).
+
+Investigated wiring valuation/FX into `core/fingerprint.py`'s fit-level
+staleness gate as the brief's Workstream A checklist literally names, but
+found this would duplicate an existing, finer-grained provenance mechanism:
+`WeeklyOutcomeValuationRecord.fingerprint()` already threads through
+`outcome_valuation_rates.py` into `source_record_fingerprint` and then into
+`PosteriorEconomicAttribution.source_rate_fingerprints`. There is also no
+persisted economic-report artefact yet for a fit-level fingerprint to gate -
+the Results page recomputes live from session state on every view. Deferred
+pending a persisted artefact that would actually need it, rather than adding
+a second parallel invalidation path.
+
+## 2026-09-10 (continued) currency-aware historical ROI (REQ-FX-006 addendum)
+
+Found a real bug matching the brief's section 10 concern almost exactly:
+`attributable_spend`'s native media-input currency and the governed
+`WeeklyOutcomeValuationRecord` catalogue's currency can differ, and
+`pages/07_Results_Curve_Bank.py`'s historical ROI section displayed
+`attribution.spend` labelled with the *value's* currency regardless of
+what currency it was actually in, dividing the two for ROI with no
+conversion or block.
+
+First built a bespoke `resolve_annual_fx_rate` lookup in `core/fx_rates.py`
+before discovering `application.fx_service.resolve_approved_fx_rate`
+already exists and is already used by Official Curve Generation
+(`pages/13_Official_Curve_Generation.py`) for the identical problem on
+monetary curves - it additionally checks the rate set's approval status
+and records-fingerprint integrity, neither of which the bespoke version
+did. Reverted the bespoke function and its tests; wired
+`OutcomeValuationReportingService` to the existing mechanism instead.
+
+`HistoricalOutcomeValuationRequest` gains `spend_currency`, `fx_rate_set`,
+`fx_rate_records`, `fx_as_of_date`. A genuine, explicitly-declared currency
+mismatch converts spend into the value's currency before computing ROI, or
+withholds ROI (and the spend figure) with an explicit warning when no
+approved rate covers the pair - reusing the pre-existing "no spend means no
+ROI" contract rather than a new field. `spend_currency=None` (the default,
+and every pre-existing caller) leaves single-currency behaviour unchanged.
+The Results page now resolves `spend_currency` from the same
+`MarketCurrency.local_currency` Official Curve Generation reads, and
+renders `result.warnings` (computed before, but never displayed). Recorded
+as a REQ-FX-006 addendum. 202 tests across the FX/valuation suites pass, no
+regressions; the Results/Curve Bank page AppTest suite (19 tests) also
+passes, though no dedicated AppTest yet exercises this section specifically
+- coverage is at the service layer (24 tests, 5 new).
+
+## 2026-09-10 (continued) standard workbook now maps Search taxonomy columns (REQ-SEARCH-004 addendum)
+
+`search_intent_group_id`/`search_platform` existed on the governed
+`ActivityDefinition` model and were settable via Channel Media Units, but
+`activity_definitions_from_dictionary` never read either column from a
+standard workbook - the UK FH MMM brief's exact "governed field exists
+but is not correctly mapped from the standard workbook" concern for
+Search (Workstream E), confirmed by both this session's audit and the
+Dictionary Builder generator's own (now-stale) documentation.
+
+`activity_definitions_from_dictionary` now maps both columns when present
+(both optional). Reuses `ActivityDefinition.__post_init__`'s existing
+validation - no second, more permissive path for dictionary-sourced
+values. Catalogue-level cross-validation (unknown group id, parent/child
+double-fit) still runs at Channel Media Units save time, unchanged from
+today's UI-entry timing. The Dictionary Builder generator does not yet
+offer these as guided input fields; its documentation is corrected to
+state the parser gap is closed while the builder-UI gap remains, rather
+than continuing to claim the parser itself doesn't map them.
+
+## 2026-09-10 (continued) missing-media gap diagnostics and estimation-evidence framework (REQ-COVERAGE-002)
+
+The brief's own stated "main area that still needs technical work"
+(Workstream D). Confirmed by audit that nothing under any name existed for
+this: fitting a candidate spend-to-activity relationship on observed
+weeks, carving synthetic holdout gaps and scoring reconstruction error,
+any numeric missing-run/coverage-percentage threshold, or an
+evidence-summary artifact. `REQ-COVERAGE-001`'s own "Out of scope" section
+explicitly withholds approval of any specific imputation formula or
+validation threshold for a future, separately-approved requirement -
+`core/missing_media_evidence.py` (new) is that dependent capability, not a
+reopening of `REQ-COVERAGE-001`.
+
+Three pieces: `diagnose_gaps` (consecutive-run length, edge-vs-internal
+position, named-event overlap scoped to the event's own `market_scope`,
+optional cross-measure evidence), `evaluate_candidate_reconstruction_method`
+(a method-agnostic synthetic-holdout harness - selects, endorses, or
+hard-codes no specific imputation formula; the candidate method is always
+caller-supplied), and `assess_estimation_readiness` (fail-closed:
+`policy=None` always blocks; `EstimationReadinessPolicy` mirrors
+`core.coverage.DefinitionBreak`'s approval-requires-attribution pattern
+and defaults `is_recommendation_only=True`).
+
+Ran the harness against a synthetic two-year weekly series (trend +
+seasonality + noise + promotional spikes, seed 42 - no real Ancestry data)
+across three candidate methods and five gap lengths, and wrote the actual
+results into `docs/missing_media_threshold_recommendation.md`, mirroring
+`docs/frequency_conversion_method_options.md`'s established survey-not-
+approval pattern. Worst-case MAPE stayed in the 25-36% range across every
+method/gap-length combination tested in this synthetic scenario, and
+linear interpolation's relative advantage inverted at the longest gap
+tested (13 weeks) - evidence against a permissive intuition that short
+gaps are cheap to estimate or that error shrinks smoothly with gap length.
+The document explicitly proposes no MAPE ceiling number (a business
+risk-tolerance choice, not a statistical one) and states plainly that real
+UK FH data must be run through the same harness before any policy is
+adopted.
+
+Investigated Workstream C (automatic detection of an `activity_id`'s
+semantic grain changing through time) alongside this. Found no reliable
+technical signal to key an automatic detector off without inventing a
+business rule about what a "genuine" grain change looks like in raw data
+versus ordinary variation - the existing analyst-declared
+`core.coverage.DefinitionBreak` mechanism (with required approval
+attribution) already covers the manual-declaration side. Recorded as
+investigated-and-not-built in `REQ-COVERAGE-002` rather than forcing a
+speculative heuristic.
+
+25 new tests (`test_missing_media_evidence.py`), all passing; zero new
+mypy errors (225 total, unchanged); ruff clean.
+
+## 2026-09-10 (continued) live-page verification of the currency-aware ROI fix
+
+Ran `test_outcome_valuation_reporting_apptest.py` (the dedicated AppTest
+file for the Results page's "Economic outcome valuation & ROI" section) -
+missed earlier when verifying the REQ-FX-006 addendum, since
+`test_curve_bank_page_apptest.py` (which was run at the time) never
+populates `outcome_valuation_records` and so never actually reaches
+`_render_economic_valuation_reporting`/`_fx_request_kwargs` at all. All
+11 pre-existing tests passed unmodified against the new code. Added two
+new tests driving the real page end to end with a deliberately mismatched
+`market_spec_config` currency, proving `_fx_request_kwargs` actually wires
+the governed market currency through and the resulting warning/hidden-ROI
+behaviour actually renders - not just that the underlying service call is
+correct in isolation.
+
+## 2026-09-10 (next pass) starting-point verification, no conflict found
+
+Received a follow-up instructions document for the same UK FH MMM work.
+Verified the branch (`feature/dictionary-builders`, HEAD `3c1a1182`) and
+working tree exactly matched the previous report. `origin/main` had moved
+3 commits ahead of local `main` (`4e70c4ba`, titled identically to this
+branch's own earlier `2cc6167e` commit) - investigated whether this was a
+real conflict rather than assuming either way. Confirmed benign: `git diff
+origin/main HEAD` is exactly this session's own work (22 files, the same
+set already reported), meaning the branch's foundational Dictionary
+Builder commits were already squash-merged upstream with matching content
+and nothing has drifted. No rebase needed; proceeding on the existing
+branch.
+
+## 2026-09-10 (next pass) missing-media readiness wired into the real fit gate
+
+Traced the actual call chain first (`04_Model_Config.py` -> `application.
+official_preparation_service.review_official_preparation` -> `core.
+official_preparation.build_official_capability_report` -> `core.
+market_data_capability.check_market_channel_capability` -> `core.
+frequency_alignment.assess_official_preparation`'s `capability_evidence`
+check -> `OfficialPreparationResult.ready` -> `05_Model_Training.py`'s
+`_official_fit_gate_blocked`) to confirm there is exactly one authoritative
+gate for media/channel coverage before wiring anything in - avoided
+creating a second, competing gate.
+
+`check_market_channel_capability` gains optional `estimation_readiness_
+policy`/`estimation_evidence_by_variable` parameters, threaded through
+`build_official_capability_report` and `review_official_preparation`
+unchanged in every other respect. `approved_for_official_use=True` alone
+still suffices when no policy is supplied - confirmed by the full existing
+regression suite (market_data_capability, market_channel_capability_gate,
+official_preparation_service, official_preparation_wp2, coverage,
+missing_media_evidence: 199 tests) passing unmodified. When a policy is
+supplied, an `estimated`/`modelled` segment on an otherwise-approved
+record is additionally required to pass `assess_estimation_readiness`
+(reusing `diagnose_gaps`, no duplicated diagnostic logic);
+`unknown`/`missing_expected`/other unresolved states remain hard-blocked
+regardless of policy. No UI to *configure* a policy was added - building
+one would be premature with no approved threshold to plug into it yet.
+
+Also found and closed a related integration gap while verifying the real
+UK production configuration (next entry below): `NetBillthroughCompleteness
+Metadata.maturity_window_days` (added last pass) had no UI control on
+`03_Structure_Segments_Markets.py` at all - an analyst could never actually
+set it through the real app. Added the field plus a live readiness
+read-out via `assess_official_maturity_readiness`.
+
+9 new tests (`test_market_data_capability.py::
+TestEstimationReadinessPolicyIntegration`), all passing; ruff clean.
+
+Regression-tested against `test_uk_production_decisions.py::
+test_current_uk_production_uses_supplied_nbt_ids`, an existing REQ-NBT-004
+acceptance guard asserting the historical-test completeness horizon's
+exact day-count never appears in the production Structure page's source
+text. My first draft of the new NBT UI comment cited that number to
+explain what the new field is *not* (a legitimate, correct explanation),
+which still tripped the guard. Reworded the comment to make the same
+point without the literal figure, rather than weakening the guard test -
+it is doing exactly its job.
+
+## 2026-09-10 (next pass) end-to-end GSA-denominator test (REQ-ECON-002 addendum)
+
+The generic denominator mechanism was already unit-tested against a
+GSA-named `denominator_outcome_id` at the `outcome_valuation`/
+`outcome_valuation_rates` layer, but no test exercised the full
+`OutcomeValuationReportingService.evaluate_period` path with anything
+other than an NBT/FH_LTR-flavoured request. Added an end-to-end GSA-style
+request (same code path, different `denominator_outcome_id`/
+`valuation_kind`) alongside the pre-existing NBT-style tests - both pass
+unmodified - plus a structural guard asserting the runtime valuation/
+rate/attribution/reporting-service modules never hardcode an NBT-specific
+string. No separate GSA valuation engine was built.
+
+## 2026-09-10 (next pass) Dictionary Builder GUI now offers Search taxonomy fields
+
+Closed the remaining half of the earlier parser-mapping addendum:
+`scripts/build_data_upload_guide_assets.py`'s Activity Dictionary Builder
+now offers `search_intent_group_id`/`search_platform` as real,
+dropdown-validated BUILDER-sheet inputs (derived from
+`APPROVED_MINIMUM_SEARCH_INTENT_GROUPS`/`SEARCH_PLATFORMS` - never a
+second, hand-typed vocabulary), passed straight through to
+DICTIONARY_OUTPUT via a plain formula reference rather than the
+"or-default" placeholder pattern (which would have produced an invalid
+enum value on a blank cell instead of a genuinely unclassified one).
+Added the two columns to `ACTIVITY_DICTIONARY_OUTPUT_COLUMNS` as this
+builder's own additive output list, not via `_ACTIVITY_V2_EXTRA_COLUMNS`
+- the latter would have made every v2 upload's header row require the
+columns present, breaking any existing v2 dictionary file.
+
+Flipped the one existing test that asserted the fields' *absence*
+(correct at the time, now the opposite of the intended behaviour) and
+added round-trip coverage: Brand+Google, Non-Brand+Bing, and
+Brand-with-no-platform (aggregate Search) all survive builder ->
+workbook -> parser -> governed `ActivityDefinition`; a non-Search
+activity is unaffected; a PMax activity carrying either field is
+rejected with the existing `ActivityDefinition` validation message.
+Regenerated the actual committed Activity Dictionary Builder `.xlsx`,
+HTML guide, and schema inventory from the updated generator - reverted
+the Context/Outcome builder `.xlsx` files, whose regeneration touched
+only an embedded creation timestamp with zero logical-content change.
+
+## 2026-09-10 (next pass) full repository verification: 5338/5338 passing
+
+Ran the full repository suite (`ancestry_mmm/tests`, 5340 collected
+tests) rather than targeted suites only, per this pass's explicit
+requirement. Took ~6 hours; found 3 failures, all in
+`test_graphify_tooling_contract.py`, all caused by an uncommitted,
+environment-side mutation of `.mcp.json` (the `graphify-project` entry
+went missing - almost certainly a side effect of the Graphify MCP
+connection failing at session start, not anything this pass touched;
+noted and deliberately left uncommitted earlier in this pass). Restored
+`.mcp.json` to its committed state and re-ran that file: 80/80 pass.
+Full suite is 5338/5338 passing, 2 skipped (pre-existing, unrelated), on
+the actual committed code. `ruff check ancestry_mmm scripts`: clean.
+Full-core mypy ratchet (`uv run mypy ancestry_mmm/core --ignore-missing-
+imports`): 225/225, matching `.mypy-baseline-count` exactly (caught and
+fixed a transient 227 during this same pass - see the earlier entry).
+The three narrower CI mypy commands (planning, validation_policy,
+application) are all clean.
+
+Also found `.gitignore` locally modified (adding a `.local-data/`
+ignore rule) - like `.mcp.json`, not something this pass's work
+intentionally changed; left uncommitted rather than assumed either way.
+
+## 2026-09-10 (next pass) economic reporting state round-trip verified end to end
+
+Section 6's ask: confirm a saved/reloaded project preserves outcome-
+valuation source data, denominator linkage, currency identity, and FX
+configuration *together*, and doesn't spuriously invalidate the model
+fingerprints that already govern the dependent fit. Each field had
+already been round-trip-tested individually (previous pass's quarantine-
+resolver tests); added `TestEconomicReportingStateRoundTrip` to
+`test_persistence.py` proving all four fields survive one real
+`export_project`/`import_project` cycle together, that the imported
+records still pass the quarantine resolvers a real import handler
+actually calls, that `model_approval` is completely unaffected (by
+design - REQ-ECON-002/006 deliberately exclude valuation/FX inputs from
+fit-identity fingerprinting), and that replacing the valuation source
+between two export/import cycles is reflected immediately on reload,
+never stale - there is no persisted, cached economic-report artefact for
+staleness to apply to; Results recomputes live from whatever is
+currently in the reloaded project state. No new persistence layer was
+invented. 250 tests in `test_persistence.py` pass, no regressions.
+
+## 2026-09-10 (final correction) Finance constant-dollar FX vintage replaces as-of-date FX
+
+User correction, same day: the previous pass's FX design (an as-of-date
+spot-rate lookup joined to each observation's own calendar time) does
+not match how Finance's constant-dollar table actually works and was
+corrected before merge - it was never released. Finance publishes one
+conversion table per year (`year_id` in the real file, confirmed
+read-only against `.local-data/Constant Dollar Conversion Rate by
+Year.xlsx`, which the user added to `.gitignore` themselves and which
+must never be committed or used in automated tests). `year_id` is the
+*vintage* - which table edition a rate comes from - never the calendar
+year of the media, outcome, or valuation observation being converted.
+Selecting vintage 2026 applies the 2026 GBP rate to GBP amounts from
+2023, 2024, 2025, and 2026 alike.
+
+Reason: this is the corrected, final Finance business decision,
+replacing the earlier (incorrect) as-of-date assumption from the prior
+pass. The codebase already anticipated this shape before either pass -
+`core.fx_conversion.CONVERSION_METHOD_FINANCE_CONSTANT_DOLLAR_ANNUAL` was
+already the approved default method, and `apply_finance_constant_
+dollar_annual` already kept `financial_year` and `week` as independent,
+unvalidated-against-each-other parameters - so the fix is a correction
+back toward the repository's own existing design, not a new one.
+
+Impact: `application.fx_service` gained `build_finance_constant_dollar_
+rate_set` (ingests Finance's real 3-column format - `year_id`,
+`currency_code`, `local_to_usd_conversion_rate` - confirmed `USD =
+local x rate` against the real file's own USD identity rows, which are
+dropped rather than built into a same-currency `FXRateRecord`) and
+`resolve_constant_dollar_vintage_rate`/`default_fx_vintage_year_id`
+(vintage-keyed lookup, fails closed with `None` on a missing currency in
+the selected vintage - never a fallback to another vintage, a live
+rate, or an inferred rate). `core.fx_rates` gained `available_vintage_
+year_ids`/`latest_vintage_year_id`. `outcome_valuation_reporting_
+service.HistoricalOutcomeValuationRequest.fx_as_of_date` was replaced by
+`fx_vintage_year_id`; `_resolve_spend_for_roi` now resolves the selected
+(or latest-default) vintage instead of an as-of-date spot rate. Also
+corrected `pages/07_Results_Curve_Bank.py`'s `_fx_request_kwargs`, which
+inferred `spend_currency` from the market-level `MarketCurrency.
+local_currency` - a blanket "market = one currency" assumption the
+correction explicitly forbids, since a market can host channels in
+different currencies and a UK variable may already be in USD. It now
+reads the specific channel's own governed `ChannelMediaUnitConfig.
+currency`; a "Total (all media)" view uses that currency only when every
+currency-declaring channel in the market agrees, otherwise leaves it
+unset (existing "no conversion attempted" behaviour) rather than
+guessing. Added a vintage selector (default: latest available) and a
+"USD constant-dollar basis: Finance {vintage} vintage" caption.
+`core.persistence` and `pages/09_Project_Export.py` gained a persisted
+`fx_vintage_year_id` field (restored verbatim on import, never
+re-defaulted) and a dedicated Finance-table-format upload path, so the
+selected vintage and the FX rate-set's own source/version/fingerprint
+together make the economic result reproducible.
+
+Alternatives considered: keeping the as-of-date mechanism and just
+widening its date-matching window - rejected, since the policy is not
+"nearest date" but "one fixed rate per vintage, applied irrespective of
+date," and a widened-window spot lookup would still silently produce
+different rates for different observation years, the exact defect being
+corrected.
+
+Verified: 8 explicit regression cases requested by the user all added
+and passing - a 2023 GBP observation and a 2025 GBP observation both
+resolve to the identical 2026-vintage rate; a USD observation and a UK
+channel explicitly marked USD are both left unconverted; selecting an
+older vintage changes economic values; switching vintage never changes
+the (non-monetary) count-model outcome; a currency missing from the
+selected vintage blocks economics even when present in a different
+vintage; the system never falls back to the observation's calendar-year
+rate. New/updated: `test_fx_rates.py::TestVintageHelpers`,
+`test_fx_service.py` (new file), `test_outcome_valuation_reporting_
+service.py::TestSpendCurrencyMismatch` (rewritten),
+`test_outcome_valuation_reporting_apptest.py::
+TestSpendCurrencyMismatchOnTheLivePage` (rewritten). `REQ-FX-006.md`
+gained a same-day addendum correcting the as-of-date framing; `docs/
+approved_requirements/index.json` updated to match the renamed/added
+test node IDs.
+
+Outstanding production dependency going into this branch's PR: none on
+the FX business decision itself (resolved) - only the uploaded, Finance-
+approved constant-dollar table needs to be supplied for a live project,
+with the latest available vintage selected by default.
+
+Owner: Mohammed Khaled (product/analyst direction), implemented this
+pass.
+
+Status: Implemented, tests passing, not yet pushed or opened as a PR
+(explicit instruction: prepare only).

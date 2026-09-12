@@ -25,6 +25,10 @@ from ancestry_mmm.core.activities import (
     MODEL_ROLES,
     OWNERSHIP,
     PLANNING_ELIGIBILITY,
+    SEARCH_PLATFORMS,
+)
+from ancestry_mmm.core.search_intent_taxonomy import (
+    APPROVED_MINIMUM_SEARCH_INTENT_GROUPS,
 )
 from ancestry_mmm.core.coverage import (
     DOMAIN_ACTIVITY_AND_MEDIA,
@@ -98,15 +102,32 @@ OUTCOME_DICTIONARY_OUTPUT_COLUMNS = list(OUTCOME_DICTIONARY_V2_COLUMNS) + [
     for c in _OUTCOME_DEFINITION_OPTIONAL_COLUMNS
     if c not in OUTCOME_OMITTED_OPTIONAL_COLUMNS
 ]
-ACTIVITY_DICTIONARY_OUTPUT_COLUMNS = list(ACTIVITY_DICTIONARY_BASE_COLUMNS) + [
-    c for c in _ACTIVITY_V2_EXTRA_COLUMNS if c not in ACTIVITY_OMITTED_V2_COLUMNS
-]
+ACTIVITY_DICTIONARY_OUTPUT_COLUMNS = (
+    list(ACTIVITY_DICTIONARY_BASE_COLUMNS)
+    + [c for c in _ACTIVITY_V2_EXTRA_COLUMNS if c not in ACTIVITY_OMITTED_V2_COLUMNS]
+    # search_intent_group_id/search_platform (2026-09-10): genuinely optional
+    # columns -- most activities are not Paid Search -- so they are appended
+    # here (this builder's own output list) rather than added to
+    # _ACTIVITY_V2_EXTRA_COLUMNS, which would make every v2 upload's header
+    # row require them present (even blank), breaking any existing v2
+    # dictionary that predates this capability. activity_definitions_from_
+    # dictionary already tolerates the column being entirely absent.
+    + ["search_intent_group_id", "search_platform"]
+)
 CONTEXT_DICTIONARY_OUTPUT_COLUMNS = list(CONTEXT_DICTIONARY_BASE_COLUMNS) + [
     c for c in _CONTEXT_V2_EXTRA_COLUMNS if c not in CONTEXT_OMITTED_V2_COLUMNS
 ]
 
 OUTCOME_METRIC_KEY_CHOICES = [*METRIC_REGISTRY.keys(), METRIC_KEY_CUSTOM]
 TRUE_FALSE_BLANK = ["TRUE", "FALSE"]
+# Governed minimum Search intent taxonomy (REQ-SEARCH-004) -- derived from
+# the approved catalogue rather than a second, hand-typed vocabulary. Only
+# the two approved top-level groups (Brand/Non-Brand); a deeper Non-Brand
+# child group remains a draft-only, evidence-gated capability this builder
+# does not offer.
+SEARCH_INTENT_GROUP_ID_CHOICES = [
+    group.search_intent_group_id for group in APPROVED_MINIMUM_SEARCH_INTENT_GROUPS
+]
 
 
 RAG_HEAD = [
@@ -594,7 +615,7 @@ OUTCOME_RAG = [
         "No",
         "Currency of an approved value weight.",
         "GBP",
-        "Prevents mixing monetary units.",
+        "Prevents mixing monetary units; identifies currency only, never converts it. Actual conversion is a separate, governed Finance constant-dollar upload — see Currency and FX.",
         "Monetary output is blocked pending currency governance.",
         "economics; FX",
         "Uppercase ISO 4217 code",
@@ -1005,7 +1026,7 @@ ACTIVITY_RAG = [
         "No",
         "Currency of monetary spend.",
         "GBP",
-        "Identifies the monetary unit; it does not perform FX conversion.",
+        "Identifies the monetary unit only; it does not perform FX conversion, and it is never inferred from market. Actual conversion is a separate, governed Finance constant-dollar upload — see Currency and FX.",
         "Monetary economics is blocked pending mapping.",
         "economics; FX",
         "Uppercase ISO 4217",
@@ -1663,7 +1684,15 @@ def build_html() -> str:
         ),
         (
             "Does a currency column convert money between currencies?",
-            "No. It just labels what currency the number is in. Actual conversion needs a separate, approved exchange rate.",
+            'No. It just labels what currency the number is in — the app never infers it from market. Actual conversion needs a separate, approved Finance exchange-rate upload. See <a href="#fx">Currency and FX</a>.',
+        ),
+        (
+            "What is a Finance FX “vintage”, and why does it matter?",
+            'The year on Finance\'s constant-dollar table (<code>year_id</code>) names which table edition a rate comes from, never the calendar year of the data it converts. Once you (or the default) pick a vintage, its rate for a currency applies to every historical week in your upload alike — a 2023 GBP amount and a 2025 GBP amount use the identical rate. See <a href="#fx">Currency and FX</a>.',
+        ),
+        (
+            "Do I need to upload FX rates in the Outcome or Activity dictionary?",
+            "No. FX rates are a separate, governed upload (the Project Export page), never a column in either dictionary. The dictionaries only ever carry a <code>currency</code>/<code>value_currency</code> label identifying what currency a monetary field is in.",
         ),
         (
             "What happens if two rows have the same key (same date, market, and ID)?",
@@ -1816,12 +1845,25 @@ def build_html() -> str:
         "<p>One row is one <code>valuation_kind</code> (fh_ltr or dna_revenue), in one market, in one week, for one segment. The required columns are <code>valuation_kind, market, week, segment, denominator_outcome_id, quality_status, segment_dimension, aggregate_value, currency, source, source_version, schema_version, horizon_months</code>.</p>"
         "<p><code>aggregate_value</code> is a total pound/dollar value for that market-week-segment cell, never a per-customer figure. The app divides it by the matching count outcome's real observed number to work out a rate per unit — it never multiplies or invents a rate. <code>denominator_outcome_id</code> must be a real, existing <code>outcome_id</code> from your Outcomes dictionary that counts things (not a rate), such as an approved NBT or GSA outcome — there is no default; you must name it explicitly.</p>"
         '<div class="callout"><b>The 48-month rule.</b> For <code>fh_ltr</code> rows, <code>horizon_months</code> must be exactly <b>48</b> — this is an approved, fixed rule, not a number you choose. For <code>dna_revenue</code> rows, leave <code>horizon_months</code> blank. Any other value is rejected.</p>'
+        "<p><b>The denominator mechanism is generic, not tied to any one outcome.</b> Every LTR/DNA-revenue row states its own <code>denominator_outcome_id</code> explicitly, and the app always divides that row's <code>aggregate_value</code> by that named outcome's real observed count for the same market and week — never a different segment's count, never a market- or study-level total, and never a value implied by the segment label alone. Today's UK production rows happen to name an NBT outcome (see below); a future <code>fh_gsa</code>-week LTR would simply name the matching GSA <code>outcome_id</code> instead — no code change is needed, because the mechanism was never NBT-specific.</p>"
+        '<p><b>Currency is always stated explicitly on the row</b>, via the required <code>currency</code> column — the app never infers it from the market (a UK row is not assumed to be GBP) or from any other row. See <a href="#fx">Currency and FX</a> for how a non-USD amount is actually converted for USD reporting.</p>'
         '<h3 id="uk-nbt-production">UK production Net Bill Through (NBT)</h3>'
         "<div class=\"callout warning\"><b>This is a specific UK production example, not a general rule.</b> It doesn't change anything above, and it doesn't apply automatically to other markets or projects.</div>"
         "<p>UK production uses three separate NBT outcomes: <code>fh_net_billthrough_count_new</code>, <code>fh_net_billthrough_count_dna_cross_sell</code>, and <code>fh_net_billthrough_count_winback</code>. They share <code>metric_key=fh_net_billthrough_count</code>, with New, DNA cross-sell, and Winback as separate <code>segment</code> values — the same pattern shown for GSA above. GSA stays a separate, secondary measure: NBT is never built from GSA, and GSA is never built from NBT.</p>"
+        "<p>Applying the generic denominator mechanism above to these three cohorts: a <code>New</code> LTR row for a given week must name <code>fh_net_billthrough_count_new</code> as its <code>denominator_outcome_id</code> and is divided by that outcome's <code>New</code> count for that same week; a <code>DNA cross-sell</code> LTR row must name <code>fh_net_billthrough_count_dna_cross_sell</code> and divides by that week's DNA cross-sell count; a <code>Winback</code> LTR row must name <code>fh_net_billthrough_count_winback</code> and divides by that week's Winback count. Each segment's LTR is only ever divided by its own matching cohort's count for that week — never another segment's count, and never summed or blended across segments first.</p>"
         "<p>Production NBT needs its own completeness evidence supplied with the source pack — the approved definition, what's excluded, where it reconciles to, the data-as-of date, and a source fingerprint. This is a stricter, separate rule from the illustrative 14-day example used elsewhere in this guide for exploratory work. The full rule is recorded in <code>docs/uk_production_onboarding_runbook.md</code> and requirement records <code>REQ-NBT-001</code> through <code>REQ-NBT-004</code>; this guide only summarises them for someone preparing an upload.</p>"
         + "<h3>Optional outcome completeness sheet (<code>outcome_completeness</code>)</h3><p>Use the outcome completeness sheet for freshness, model-window, maturity, and ownership information. Required for official NBT use.</p>"
-        + html_table(COMPLETENESS_RAG, "wide"),
+        + html_table(COMPLETENESS_RAG, "wide")
+        + '<h3 id="fx">Currency and FX (Finance constant-dollar rates)</h3>'
+        + '<div class="callout warning"><b>A <code>currency</code>/<code>value_currency</code> column only labels money — it never converts it.</b> Actual conversion to USD is a separate, governed upload, not part of the Outcomes or Activity Dictionary.</div>'
+        + '<p>Every monetary input — <code>aggregate_value</code> here, and <code>spend</code> in the Activity workbook — must explicitly declare its own currency on its own row/column. The app never infers currency from market: a UK row is not assumed to be GBP, because a UK variable may already be supplied in USD. There is no blanket "market = one currency" rule anywhere in this application.</p>'
+        + "<p>When a monetary input's declared currency differs from the currency it needs to be reported in, conversion uses Finance's own <b>constant-dollar</b> table, uploaded separately on the <b>Export &amp; Recovery</b> page (never through this Outcomes/Activity workbook). That table has exactly three columns: <code>year_id</code>, <code>currency_code</code>, and <code>local_to_usd_conversion_rate</code>, and <code>USD amount = local currency amount &times; local_to_usd_conversion_rate</code>.</p>"
+        + '<div class="callout"><b><code>year_id</code> is a vintage, not the year of your data.</b> Finance publishes a new constant-dollar table every year; <code>year_id</code> says which published table edition a rate comes from — never the calendar year of the media, outcome, or valuation observation it converts. Once a vintage is selected, its GBP rate applies identically to GBP amounts from every historical year, past or present, in your upload — it is never looked up by the observation\'s own date.</div>'
+        + "<h3>Where to actually do this in the app</h3>"
+        + "<p><b>Upload the Finance table</b> on the <b>Export &amp; Recovery</b> page, in its <b>“Finance FX rate set”</b> section — open the <b>“Upload Finance constant-dollar table”</b> panel, choose your file, and select <b>“Validate and load Finance table.”</b> This is a project-level input, separate from the Outcomes/Activity workbooks you upload on the Data Upload page.</p>"
+        + "<p><b>Select or override the vintage</b> on the <b>Results &amp; Response Curves</b> page, in its <b>“Economic outcome valuation &amp; ROI”</b> section — a <b>“Finance constant-dollar vintage”</b> dropdown lets you pick any vintage present in the uploaded table (it defaults to the latest one), and a <b>“USD constant-dollar basis: Finance {vintage} vintage”</b> caption there always shows which vintage the figures on screen are actually using.</p>"
+        + "<p>An analyst may explicitly select an older available vintage instead of the default; that choice is applied across the entire historical reporting period at once, and it is recalculated into the monetary/economic outputs only — it never invalidates or requires refitting the underlying count model. An amount already declared in USD is never converted again, regardless of vintage. If a required currency is missing from the selected vintage, the affected economic output is blocked — the app never falls back to another vintage, a live rate, or an inferred rate.</p>"
+        + "<p>See <code>docs/approved_requirements/REQ-FX-002.md</code> and <code>REQ-FX-006.md</code> for the full governed contract.</p>",
         builder_html=dictionary_builder_section(
             "Ancestry_MMM_Outcome_Dictionary_Builder.xlsx",
             "outcome_dictionary",
@@ -1928,8 +1970,8 @@ def build_html() -> str:
             ],
             [
                 "search_intent_group_id, search_platform",
-                "Only for Paid Search activities you want split by Brand/Non-Brand and Google/Bing.",
-                "brand_search or non_brand_search; google or bing. Note: today these must be set up separately after upload — the standard sheet doesn't apply them automatically yet.",
+                "Only for Paid Search activities you want split by Brand/Non-Brand and/or Google/Bing. Leave both blank otherwise.",
+                "brand_search or non_brand_search; google or bing.",
             ],
         ],
         [
@@ -1991,7 +2033,7 @@ def build_html() -> str:
                 "pooling_group_id, funnel_stage, marketing_objective, product_advertised, and message_type — the necessity review confirmed the model, canonicalisation, and optimiser never read their values; only reporting rollups and the causal-graph display do. Fill in what you have. If you leave one blank, the DICTIONARY_OUTPUT sheet automatically fills in a harmless placeholder (unclassified for funnel_stage, not specified for the others) — testing this builder's output against the live parser confirmed a truly empty value is currently rejected for these columns, even though nothing meaningful reads them.",
                 "currency, effective_from, effective_to — optional provenance metadata.",
             ],
-            "This builder does not ask for model_input_unit, model_input_kind, spend_column, response_unit_column, or response_unit — the necessity review confirmed these five columns are currently write-only in the standard upload path (see the callout above). Their column headers still appear, blank, in DICTIONARY_OUTPUT, because the current schema requires them once other v2 columns are present — this builder just never asks you to fill them in. It also does not ask for search_platform or search_intent_group_id: they are not activity_dictionary columns today — activity_definitions_from_dictionary still doesn't map them from a standard workbook — so this builder does not pretend they are ordinary fields. Use platform and campaign_type above to keep your activity_id readable; the governed Search-taxonomy mapping (Brand/Non-Brand, Google/Bing at the ActivityDefinition level) is configured separately, after upload, until that mapping gap is closed. The actual weekly activity numbers still go in the <code>activity_data</code> sheet, not this builder.",
+            "This builder does not ask for model_input_unit, model_input_kind, spend_column, response_unit_column, or response_unit — the necessity review confirmed these five columns are currently write-only in the standard upload path (see the callout above). Their column headers still appear, blank, in DICTIONARY_OUTPUT, because the current schema requires them once other v2 columns are present — this builder just never asks you to fill them in. As of 2026-09-10 it does ask for search_intent_group_id (brand_search / non_brand_search) and search_platform (google / bing) as governed, dropdown-validated columns next to platform/campaign_type — leave both blank for a non-Search activity, or when your Search history only supports an aggregate Brand/Non-Brand view without a platform split. The actual weekly activity numbers still go in the <code>activity_data</code> sheet, not this builder.",
         ),
     )
 
@@ -2224,6 +2266,10 @@ def build_html() -> str:
                 "The new column name the app creates after processing.",
             ],
             ["outcome_id", "A stable name for one outcome definition."],
+            [
+                "denominator_outcome_id",
+                "The outcome whose real observed count an LTR/DNA-revenue row is divided by, for that same market and week — always stated explicitly on the row, never defaulted or guessed.",
+            ],
             ["variable_id", "A stable name for one context variable."],
             ["native frequency", "How often the source data is really published."],
             [
@@ -2235,6 +2281,14 @@ def build_html() -> str:
             [
                 "maturity rule",
                 "The rule for when an outcome's data is complete enough to trust.",
+            ],
+            [
+                "FX vintage",
+                "Which edition of Finance's constant-dollar rate table (year_id) a conversion rate comes from — never the calendar year of the data being converted.",
+            ],
+            [
+                "constant-dollar rate",
+                "A Finance-approved USD rate for one currency, fixed for a whole vintage — the same rate applies to every historical week alike, not just the vintage's own year.",
             ],
             [
                 "RED / AMBER / GREEN",
@@ -2251,7 +2305,7 @@ def build_html() -> str:
 *{{box-sizing:border-box}} html{{scroll-behavior:smooth}} body{{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;color:var(--ink);line-height:1.55;background:#fff}} a{{color:var(--blue)}} a:visited{{color:#5b2a86}} code{{background:#eef3f7;color:#173b5e;border-radius:4px;padding:.1em .3em;font-size:.93em;overflow-wrap:anywhere}} footer a:visited{{color:#fff}} .skip{{position:absolute;left:-9999px}} .skip:focus{{left:1rem;top:1rem;background:#fff;padding:.5rem;z-index:10}}
 .layout{{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100vh}} aside{{position:sticky;top:0;height:100vh;overflow:auto;background:var(--navy);color:#fff;padding:1.25rem}} aside h2{{font-size:1.1rem;color:#fff;margin:.2rem 0 1rem}} aside p{{font-size:.82rem;color:#c9d8e5}} nav a{{display:block;color:#e0edf7;text-decoration:none;padding:.32rem .2rem;font-size:.88rem}} nav a:hover,nav a:focus{{color:#fff;background:rgba(255,255,255,.1);border-radius:4px}} .search{{width:100%;padding:.55rem;border-radius:5px;border:1px solid #6e91aa;margin:.4rem 0 1rem}} main{{min-width:0}} .hero{{background:linear-gradient(135deg,#eaf4ff,#fff);padding:4rem clamp(1rem,5vw,5rem) 3.25rem;border-bottom:1px solid var(--line)}} .hero h1{{font-size:clamp(2rem,4vw,3.6rem);line-height:1.08;color:var(--navy);max-width:850px;margin:.2rem 0 1rem}} .hero p{{max-width:780px;font-size:1.08rem}} .badge{{display:inline-block;background:#dbeeff;color:#084d8d;padding:.25rem .55rem;border-radius:999px;font-weight:700;font-size:.78rem}} .section{{padding:3rem clamp(1rem,5vw,5rem);max-width:1500px}} .section:nth-of-type(even){{background:#fff}} .domain{{border-top:1px solid var(--line)}} h2{{font-size:2rem;color:var(--navy);margin:.15rem 0 1.1rem}} h3{{color:#234f72;margin-top:1.8rem}} .eyebrow{{text-transform:uppercase;letter-spacing:.12em;font-size:.76rem;color:var(--blue);font-weight:800;margin:0}} .callout{{border-left:5px solid var(--blue);background:var(--wash);padding:1rem 1.2rem;margin:1.2rem 0}} .warning{{border-left-color:#c67a00;background:#fff8e7}} .builder{{border-left-color:#1a7a4c;background:#f1faf5}} .builder h3{{margin-top:.2rem}} .builder ul{{margin:.3rem 0 .8rem;padding-left:1.2rem}} .builder li{{margin:.25rem 0}} .table-wrap{{overflow:auto;margin:1rem 0 1.25rem;border:1px solid var(--line);border-radius:7px}} table{{border-collapse:collapse;width:100%;background:#fff;font-size:.87rem}} th,td{{border-bottom:1px solid var(--line);padding:.55rem .65rem;text-align:left;vertical-align:top}} th{{background:#eaf1f6;color:var(--navy);font-weight:800;position:sticky;top:0;z-index:1}} tr:last-child td{{border-bottom:0}} .rag td:nth-child(2){{font-weight:800;min-width:150px}} .rag-red{{background:var(--red)}} .rag-amber{{background:var(--amber)}} .rag-green{{background:var(--green)}} .rag-grey{{background:var(--grey)}} .compact{{max-width:1100px}} .wide{{max-width:1400px}} pre{{overflow:auto;background:#f5f8fb;color:#17222d;border:1px solid #b8c7d3;padding:1rem;border-radius:6px;font-size:.86rem}} pre code{{background:transparent;color:#17222d;padding:0}} .mistakes{{padding-left:1.2rem}} .mistakes li{{margin:.35rem 0}} .steps{{counter-reset:step;list-style:none;padding:0;display:grid;gap:.7rem;max-width:850px}} .steps li{{counter-increment:step;display:flex;gap:.7rem;background:var(--wash);padding:.75rem;border-radius:6px}} .steps li::before{{content:counter(step);background:var(--blue);color:#fff;width:1.6rem;height:1.6rem;border-radius:50%;display:inline-grid;place-items:center;font-weight:800;flex:0 0 auto}} .diagram{{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;background:#fff;padding:1rem;border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow);margin:1rem 0 2rem}} .diagram-box{{border:2px solid var(--blue);border-radius:7px;padding:.75rem;min-width:180px;background:#f7fbff}} .diagram-box span{{display:block;font-size:.8rem;color:var(--muted);margin-top:.35rem}} .diagram-box.model{{border-color:#258b4d;background:#f5fff7}} .diagram-box.activity{{border-color:#8c5a00;background:#fffbf0}} .diagram-box.context{{border-color:#7846a7;background:#fbf7ff}} .arrow{{font-size:.77rem;color:var(--muted);text-align:center}} details{{border:1px solid var(--line);border-radius:6px;margin:.55rem 0;padding:.7rem 1rem;max-width:1400px}} summary{{cursor:pointer;font-weight:700;color:var(--navy)}} .back{{display:inline-block;margin-top:1.3rem;font-size:.85rem}} footer{{padding:2rem clamp(1rem,5vw,5rem);background:var(--navy);color:#d9e7f2;font-size:.85rem}} footer a{{color:#fff}}
 @media(max-width:900px){{.layout{{display:block}} aside{{position:relative;height:auto}} nav{{columns:2}} .hero{{padding-top:2.5rem}} .section{{padding-top:2.3rem;padding-bottom:2.3rem}}}} @media print{{aside,.search,.skip,.back{{display:none!important}}.layout{{display:block}}.hero{{padding:1rem 0;border:0}}.section{{padding:1rem 0;break-inside:auto}}details{{break-inside:avoid}}pre{{white-space:pre-wrap}}a{{color:#000;text-decoration:none}}}}
-</style></head><body><a class="skip" href="#main">Skip to content</a><div class="layout"><aside><h2>Ancestry MMM</h2><p>Data Upload Guide</p><input class="search" id="guideSearch" type="search" placeholder="Filter sections" aria-label="Filter guide sections"><nav id="toc"><a href="#top">Overview</a><a href="#workflow">What do I need?</a><a href="#outcomes">1. Outcomes</a><a href="#activity">2. Activity and Media</a><a href="#context">3. Context</a><a href="#ltr">FH LTR / DNA revenue</a><a href="#advanced">Add these later</a><a href="#faq">FAQ</a><a href="#glossary">Glossary</a><a href="#review">Source and review</a></nav></aside><main id="main"><header class="hero" id="top"><span class="badge">Version 2 · source-pack contract</span><h1>Ancestry MMM data upload guide</h1><p>This guide helps a first-time analyst prepare data the application can use. For every field, it tells you if you need it, what it means, what to type, and what happens if you skip it.</p><div class="callout"><b>Most important:</b> uploading a file successfully does not mean it's approved for reporting, planning, or optimisation. Those are separate, later steps.</div>{relationship}</header>{workflow}{outcomes}{activity}{context}{advanced}<section id="faq" class="section"><p class="eyebrow">Questions analysts ask</p><h2>FAQ</h2><p>If a question isn't answered here, check the “Fields you may need” table for that section, or the full technical reference at the end of each section.</p>{faq_html}</section><section id="glossary" class="section"><p class="eyebrow">Quick reference</p><h2>Glossary</h2>{glossary}</section><section id="review" class="section"><p class="eyebrow">Traceability</p><h2>Source and review</h2><p>This guide was built and checked against the current application code, not copied from an older version. The exact files, requirement IDs, and review results are recorded in <code>Ancestry_MMM_Data_Upload_Guide_REVIEW.md</code> and <code>Ancestry_MMM_Data_Upload_Guide_Simplification_Report.md</code>.</p><p>Primary implementation references include <code>ancestry_mmm/data/templates.py</code>, <code>template_downloads.py</code>, <code>loader.py</code>, <code>source_pack_adoption.py</code>, the Data Upload and Model Training pages, and the upload/template tests. Approved requirement IDs include REQ-DATAIN-001, REQ-COVERAGE-001, REQ-ACTIVITY-001, REQ-OUT-001/002/003, REQ-NBT-001/002/003/004, REQ-SEARCH-001/002/004/005, REQ-SEO-001, REQ-EVENT-001, REQ-EXPMODE-001, REQ-CALIB-001, REQ-ECON-002/003, REQ-FUTURE-001, and REQ-FX-001–006. The UK production NBT boundary is recorded in <code>docs/uk_production_onboarding_runbook.md</code>.</p><a class="back" href="#top">↑ Back to top</a></section></main></div><footer><p><b>Internal analyst guide.</b> No external libraries, fonts, images, or network calls are required. Print this page or open it locally in a browser.</p></footer><script>(function(){{const input=document.getElementById('guideSearch');const links=[...document.querySelectorAll('#toc a')];const sections=[...document.querySelectorAll('main .section, main .hero')];input.addEventListener('input',function(){{const q=input.value.toLowerCase().trim();sections.forEach(s=>{{s.hidden=!!q&&!s.innerText.toLowerCase().includes(q)}});links.forEach(a=>{{const id=a.getAttribute('href').slice(1),s=document.getElementById(id);a.hidden=!!q&&(!s||s.hidden)}})}})}})();</script></body></html>"""
+</style></head><body><a class="skip" href="#main">Skip to content</a><div class="layout"><aside><h2>Ancestry MMM</h2><p>Data Upload Guide</p><input class="search" id="guideSearch" type="search" placeholder="Filter sections" aria-label="Filter guide sections"><nav id="toc"><a href="#top">Overview</a><a href="#workflow">What do I need?</a><a href="#outcomes">1. Outcomes</a><a href="#activity">2. Activity and Media</a><a href="#context">3. Context</a><a href="#ltr">FH LTR / DNA revenue</a><a href="#fx">Currency &amp; FX</a><a href="#advanced">Add these later</a><a href="#faq">FAQ</a><a href="#glossary">Glossary</a><a href="#review">Source and review</a></nav></aside><main id="main"><header class="hero" id="top"><span class="badge">Version 2 · source-pack contract</span><h1>Ancestry MMM data upload guide</h1><p>This guide helps a first-time analyst prepare data the application can use. For every field, it tells you if you need it, what it means, what to type, and what happens if you skip it.</p><div class="callout"><b>Most important:</b> uploading a file successfully does not mean it's approved for reporting, planning, or optimisation. Those are separate, later steps.</div>{relationship}</header>{workflow}{outcomes}{activity}{context}{advanced}<section id="faq" class="section"><p class="eyebrow">Questions analysts ask</p><h2>FAQ</h2><p>If a question isn't answered here, check the “Fields you may need” table for that section, or the full technical reference at the end of each section.</p>{faq_html}</section><section id="glossary" class="section"><p class="eyebrow">Quick reference</p><h2>Glossary</h2>{glossary}</section><section id="review" class="section"><p class="eyebrow">Traceability</p><h2>Source and review</h2><p>This guide was built and checked against the current application code, not copied from an older version. The exact files, requirement IDs, and review results are recorded in <code>Ancestry_MMM_Data_Upload_Guide_REVIEW.md</code> and <code>Ancestry_MMM_Data_Upload_Guide_Simplification_Report.md</code>.</p><p>Primary implementation references include <code>ancestry_mmm/data/templates.py</code>, <code>template_downloads.py</code>, <code>loader.py</code>, <code>source_pack_adoption.py</code>, the Data Upload and Model Training pages, and the upload/template tests. Approved requirement IDs include REQ-DATAIN-001, REQ-COVERAGE-001, REQ-ACTIVITY-001, REQ-OUT-001/002/003, REQ-NBT-001/002/003/004, REQ-SEARCH-001/002/004/005, REQ-SEO-001, REQ-EVENT-001, REQ-EXPMODE-001, REQ-CALIB-001, REQ-ECON-002/003, REQ-FUTURE-001, and REQ-FX-001–006. The UK production NBT boundary is recorded in <code>docs/uk_production_onboarding_runbook.md</code>.</p><a class="back" href="#top">↑ Back to top</a></section></main></div><footer><p><b>Internal analyst guide.</b> No external libraries, fonts, images, or network calls are required. Print this page or open it locally in a browser.</p></footer><script>(function(){{const input=document.getElementById('guideSearch');const links=[...document.querySelectorAll('#toc a')];const sections=[...document.querySelectorAll('main .section, main .hero')];input.addEventListener('input',function(){{const q=input.value.toLowerCase().trim();sections.forEach(s=>{{s.hidden=!!q&&!s.innerText.toLowerCase().includes(q)}});links.forEach(a=>{{const id=a.getAttribute('href').slice(1),s=document.getElementById(id);a.hidden=!!q&&(!s||s.hidden)}})}})}})();</script></body></html>"""
 
 
 def clean_token_formula(cell_ref: str) -> str:
@@ -3032,10 +3086,9 @@ def build_activity_dictionary_builder(path: Path) -> None:
                 "What is required, conditional, and optional",
                 [
                     "Required (white columns): channel, market, activity_ownership, intended_model_role, model_input_measure, economic_treatment, planning_eligibility, source.",
-                    "Conditional (amber columns): platform, campaign_type -- fill these in when they help distinguish one activity from another (Google vs Bing, Brand vs Non-Brand); the upload does currently reject a truly empty cell, so a blank one defaults to not specified in DICTIONARY_OUTPUT.",
+                    "Conditional (amber columns): platform, campaign_type, search_intent_group_id, search_platform -- fill these in when they help distinguish one activity from another (Google vs Bing, Brand vs Non-Brand); platform/campaign_type default to not specified when left blank, while search_intent_group_id/search_platform stay genuinely blank (unclassified) -- a non-Search activity, or a Search activity whose history only supports an aggregate Brand/Non-Brand view without a platform split, should leave them blank rather than guessing.",
                     "Optional / advanced (grey columns): pooling_group_id, funnel_stage, marketing_objective, product_advertised, message_type, currency, effective_from, effective_to. The schema-necessity review confirmed the model, canonicalisation, and optimiser never read these values -- only reporting rollups and the causal-graph display do. Leave the BUILDER cell blank if you don't have the information; DICTIONARY_OUTPUT automatically writes a harmless placeholder (unclassified for funnel_stage, not specified for the rest, pooling_group_id genuinely blank) instead of a truly empty cell, because the live upload currently rejects an empty value in those columns even though nothing meaningful reads it.",
                     "Not asked at all in this builder: model_input_unit, model_input_kind, spend_column, response_unit_column, response_unit. The necessity review confirmed these five v2 dictionary columns are currently write-only in the standard upload path -- filling them in does nothing today, and the real place to set units and cost mappings is inside the app, in Channel Media Units and Curve Generation, after your data is uploaded. Their column headers still appear (blank) in DICTIONARY_OUTPUT: once other v2 columns like currency are present, the current schema requires the full v2 column set to exist, so removing these headers entirely would make the whole row rejected. This builder never asks you to fill them in.",
-                    "Also not asked at all: search_platform and search_intent_group_id. They are not activity_dictionary columns today -- activity_definitions_from_dictionary still doesn't map them from a standard workbook -- so this builder does not pretend they are ordinary fields. The governed Search-taxonomy mapping (Brand/Non-Brand, Google/Bing at the ActivityDefinition level) is configured separately, after upload, until that mapping gap is closed. Use platform and campaign_type above to keep your activity_id readable in the meantime.",
                 ],
             ),
             (
@@ -3083,6 +3136,8 @@ def build_activity_dictionary_builder(path: Path) -> None:
         "Row status",
         "platform",
         "campaign_type",
+        "search_intent_group_id",
+        "search_platform",
         "pooling_group_id",
         "funnel_stage",
         "marketing_objective",
@@ -3142,8 +3197,12 @@ def build_activity_dictionary_builder(path: Path) -> None:
     example_rows = [row + [""] * pad for row in example_rows]
     example_rows[0][headers.index("platform")] = "Google"
     example_rows[0][headers.index("campaign_type")] = "Brand"
+    example_rows[0][headers.index("search_intent_group_id")] = "brand_search"
+    example_rows[0][headers.index("search_platform")] = "google"
     example_rows[1][headers.index("platform")] = "Bing"
     example_rows[1][headers.index("campaign_type")] = "Brand"
+    example_rows[1][headers.index("search_intent_group_id")] = "brand_search"
+    example_rows[1][headers.index("search_platform")] = "bing"
     rows = example_rows + [[""] * len(headers) for _ in range(20)]
     add_candidate_table(builder, headers, rows, "ActivityCandidates")
     first_row, last_row = 8, 7 + len(rows)
@@ -3200,7 +3259,7 @@ def build_activity_dictionary_builder(path: Path) -> None:
         builder,
         7,
         headers.index("platform") + 1,
-        headers.index("campaign_type") + 1,
+        headers.index("search_platform") + 1,
         "8C6A00",
     )
     color_header_range(
@@ -3253,6 +3312,18 @@ def build_activity_dictionary_builder(path: Path) -> None:
         ["Brand", "Non-Brand"],
         "campaign_type",
     )
+    add_dropdown(
+        builder,
+        f"{col('search_intent_group_id')}{first_row}:{col('search_intent_group_id')}{last_row}",
+        SEARCH_INTENT_GROUP_ID_CHOICES,
+        "search_intent_group_id",
+    )
+    add_dropdown(
+        builder,
+        f"{col('search_platform')}{first_row}:{col('search_platform')}{last_row}",
+        list(SEARCH_PLATFORMS),
+        "search_platform",
+    )
     add_soft_dropdown(
         builder,
         f"{col('marketing_objective')}{first_row}:{col('marketing_objective')}{last_row}",
@@ -3272,6 +3343,15 @@ def build_activity_dictionary_builder(path: Path) -> None:
         "channel": builder_ref(ch),
         "platform": builder_ref_or_default(col("platform"), "not specified"),
         "campaign_type": builder_ref_or_default(col("campaign_type"), "not specified"),
+        # Plain pass-through, never builder_ref_or_default: these are
+        # governed closed vocabularies (ActivityDefinition validates
+        # search_platform against SEARCH_PLATFORMS and rejects either
+        # field on a PMax/Demand Gen/YouTube campaign_type) - injecting a
+        # placeholder string here the way "not specified" is used above
+        # would produce an invalid, unparseable value instead of a
+        # genuinely blank/unclassified one.
+        "search_intent_group_id": builder_ref(col("search_intent_group_id")),
+        "search_platform": builder_ref(col("search_platform")),
         "marketing_objective": builder_ref_or_default(
             col("marketing_objective"), "not specified"
         ),
@@ -3364,10 +3444,16 @@ def build_activity_dictionary_builder(path: Path) -> None:
                 "Free text is also accepted.",
             ],
             [
-                "search_platform / search_intent_group_id",
-                "Not offered by this builder",
-                "Not activity_dictionary columns today -- the standard upload doesn't map them.",
-                "Configured separately, after upload, in the governed Search-taxonomy admin mapping. Use platform and campaign_type above to keep your activity_id readable in the meantime.",
+                "search_intent_group_id",
+                " / ".join(SEARCH_INTENT_GROUP_ID_CHOICES),
+                "Governed closed enum -- a blank cell (not a random typed value) means unclassified.",
+                "Leave blank for a non-Search activity, or a Search activity whose history only supports an aggregate Brand/Non-Brand view. Rejected on a PMax/Demand Gen/YouTube campaign_type.",
+            ],
+            [
+                "search_platform",
+                " / ".join(SEARCH_PLATFORMS),
+                "Governed closed enum -- a blank cell means unclassified (platform-aggregate).",
+                "Leave blank when your Search history does not reliably support a Google/Bing split. Rejected on a PMax/Demand Gen/YouTube campaign_type.",
             ],
         ]
         + [
@@ -3757,6 +3843,8 @@ Logical domain does not mean one file. `source_pack_adoption.py` accepts multipl
 - `source_column` must exactly exist in `outcomes`; definitions are not inferred from IDs or column names. GSA, Sign-up, Gross Bill Through, Bill Through, Net Bill Through, revenue, contribution, and LTV remain distinct. Supplied weekly NBT is accepted only under the approved definition/completeness boundary; raw event-level NBT reconstruction is not an upload path.
 - `outcome_group_id` is semantic grouping/reconciliation metadata. A group does not automatically choose components, total-only, or descriptive fit treatment.
 - UK production NBT boundary (`docs/uk_production_onboarding_runbook.md`, `REQ-NBT-001..004`, `core/net_billthrough.py`): three separate FH NBT outcomes (`fh_net_billthrough_count_new`, `fh_net_billthrough_count_dna_cross_sell`, `fh_net_billthrough_count_winback`); GSA stays a distinct secondary measure and is never used to reconstruct NBT; production requires its own maturity/completeness evidence bundle (definition, exclusions, reconciliation source, `data_as_of_date`, source fingerprint) and is not the bounded historical-test 14-day rule. `definition_version`/`definition_fingerprint` on completeness metadata are parser-computed from the matching `outcome_dictionary` row (`templates.py`), not analyst-supplied completeness columns — confirmed still accurate in the current guide.
+- Weekly outcome valuation's `denominator_outcome_id` is a fully generic mechanism, not NBT-specific: each row names its own denominator `outcome_id` explicitly, and the app divides that row's `aggregate_value` by that outcome's real observed count for the same market and week. UK production's three NBT cohorts (`New`, `DNA cross-sell`, `Winback`) each name their own matching NBT outcome as `denominator_outcome_id` today; a future GSA-week LTR would name the matching `fh_gsa*` outcome instead, with no parser or generator change required.
+- `currency` (Activity) and `value_currency` (Outcome) are identification-only metadata — they name which currency a monetary field is in and are never used to perform conversion, and are never inferred from `market`. FX rates (Finance's constant-dollar table: `year_id`/`currency_code`/`local_to_usd_conversion_rate`, `year_id` being the rate *vintage*, not the observation year) are a separate governed project input (`application/fx_service.py`, uploaded on the Project Export page) and are deliberately absent from `OUTCOME_DICTIONARY_V2_COLUMNS`/`_ACTIVITY_V2_EXTRA_COLUMNS` — see `docs/approved_requirements/REQ-FX-002.md`/`REQ-FX-006.md`.
 
 ### Activity and Media
 
@@ -3765,7 +3853,7 @@ Logical domain does not mean one file. `source_pack_adoption.py` accepts multipl
 - v2 extra dictionary columns: `model_input_unit`, `model_input_kind`, `spend_column`, `response_unit_column`, `response_unit`, `currency`, `effective_from`, `effective_to`.
 - The parser selects `model_input_measure` from raw data and writes to `model_input_column` at the canonical wide boundary. v2 physical mappings are retained for review; they are not silently turned into a cost contract.
 - `pooling_group_id` is identity only and does not force pooling. Paid, owned, earned, and external-event records share the Activity domain but use explicit ownership and model role. Missing is not zero.
-- Since the 2026-09-03 baseline, `core/search_intent_taxonomy.py` added a governed deeper Non-Brand Search child-group catalogue (`governed_search_intent_groups`, `validate_search_intent_group_catalogue`, `resolve_search_intent_model_grain`, `roll_up_paid_search_reporting_hierarchy`): only `brand_search`/`non_brand_search` are pre-approved; a child starts `approval_status="draft"`, cannot be fitted at the same model grain as its parent, and has no planning/cost-bearing treatment until child-level observed data and governed cost support exist. `activity_definitions_from_dictionary` (`templates.py:569-616`) still does not auto-map `search_intent_group_id`/`search_platform` from a standard workbook — unchanged, still an open documentation-boundary finding.
+- Since the 2026-09-03 baseline, `core/search_intent_taxonomy.py` added a governed deeper Non-Brand Search child-group catalogue (`governed_search_intent_groups`, `validate_search_intent_group_catalogue`, `resolve_search_intent_model_grain`, `roll_up_paid_search_reporting_hierarchy`): only `brand_search`/`non_brand_search` are pre-approved; a child starts `approval_status="draft"`, cannot be fitted at the same model grain as its parent, and has no planning/cost-bearing treatment until child-level observed data and governed cost support exist. As of 2026-09-10, `activity_definitions_from_dictionary` (`templates.py`) does auto-map `search_intent_group_id`/`search_platform` from a standard workbook when the two columns are present (optional - most activities are not Paid Search); catalogue-level cross-validation against the approved taxonomy (unknown group id, parent/child double-fit) still happens at Channel Media Units save time, the same timing as a UI-entered value.
 
 ### Context and External Factors
 
@@ -3798,8 +3886,9 @@ Logical domain does not mean one file. `source_pack_adoption.py` accepts multipl
 ## Known implementation/documentation gaps carried to review
 
 1. Generated standard outcome examples use the display string `DNA cross-sell`, while the approved core constant is `DNA_CrossSell`; current parser validation accepts both because it requires a nonblank supplied segment rather than normalising it. The guide does not silently alter existing app behaviour; use the project-approved spelling consistently and review the template/parser mismatch. Confirmed still open at the pass-3 baseline (`template_downloads.py` unchanged since 2026-09-03).
-2. Search taxonomy fields exist on the governed `ActivityDefinition` and admin UI, but the standard source dictionary parser currently maps the base dictionary fields and does not automatically map `search_intent_group_id` or `search_platform`. The guide labels these fields as a dedicated mapping/admin boundary and does not claim they are applied by the upload parser. Confirmed still open at the pass-3 baseline (`activity_definitions_from_dictionary` in `templates.py` unchanged since 2026-09-03, even though downstream Search-taxonomy machinery around it grew).
+2. Closed 2026-09-10 (parser and builder both): search taxonomy fields exist on the governed `ActivityDefinition` and admin UI, the standard source dictionary parser (`activity_definitions_from_dictionary`) maps `search_intent_group_id`/`search_platform` from a standard workbook when the two columns are present, and this builder now offers both as governed, dropdown-validated BUILDER-sheet columns (amber, optional) that round-trip through the real parser for Brand/Google, Non-Brand/Bing, and platform-unspecified aggregate-Search rows alike.
 3. The generic downloadable sample outcome dictionary (`template_downloads.py`) still teaches GSA ids (`fh_gsa_new`, etc.) as its worked example, not the UK production NBT ids. This is accurate to disclose, not to silently fix — the sample is deliberately generic/cross-project, and UK production ids come from the approved UK source pack, not the generic sample. The guide now says this explicitly (see the UK production NBT note and its FAQ entry).
+4. Closed 2026-09-10 (final pre-PR documentation audit, Finance constant-dollar FX correction): audited this guide, both Dictionary Builders, and the schema inventory against the now-approved LTR-denominator and constant-dollar-FX-vintage rules. `denominator_outcome_id`'s generic, per-week matching mechanism and the UK NBT cohort correspondence are now spelled out explicitly (previously only implied by "such as an approved NBT or GSA outcome"); a new "Currency and FX" guide section, two new FAQ entries, and two new glossary terms now document the Finance constant-dollar table format (`year_id`/`currency_code`/`local_to_usd_conversion_rate`), the vintage-not-observation-year rule, the latest-vintage default with analyst override, and that USD-declared inputs are never converted again. Confirmed by design, not changed: no FX-rate-value column was added to either Dictionary Builder or `templates.py`'s column contracts — `currency`/`value_currency` remain currency-*identification*-only metadata, and FX rates stay a separate governed upload (`application/fx_service.py`, Project Export page). See `docs/approved_requirements/REQ-FX-002.md`/`REQ-FX-006.md`.
 """
 
 

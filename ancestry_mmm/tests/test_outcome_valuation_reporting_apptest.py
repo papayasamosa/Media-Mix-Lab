@@ -21,6 +21,10 @@ from ancestry_mmm.core.fingerprint import (
 )
 from ancestry_mmm.core.hierarchical_model import FHModelMeta
 from ancestry_mmm.core.approval import ModelApproval
+from ancestry_mmm.core.market_config import (
+    ChannelMediaUnitConfig,
+    MarketSpecConfig,
+)
 from ancestry_mmm.core.outcome_valuation import (
     VALUATION_KIND_FH_LTR,
     WeeklyOutcomeValuationRecord,
@@ -164,7 +168,14 @@ def _january_2024_weeks() -> list[str]:
 
 
 def _seed_session_state(
-    at: AppTest, *, valuation_records=None, with_waterfall_support: bool = False
+    at: AppTest,
+    *,
+    valuation_records=None,
+    with_waterfall_support: bool = False,
+    channel_currency: str | None = None,
+    fx_rate_set: dict | None = None,
+    fx_rate_records: list | None = None,
+    fx_vintage_year_id: str | None = None,
 ) -> None:
     meta = _meta()
     trace = _trace(meta, n_obs=16 if with_waterfall_support else None)
@@ -231,9 +242,27 @@ def _seed_session_state(
     at.session_state["outcome_valuation_records"] = [
         r.to_dict() for r in (valuation_records or [])
     ]
+    if channel_currency:
+        # Finance constant-dollar correction (2026-09-10): spend currency
+        # is governed per-channel (`ChannelMediaUnitConfig.currency`),
+        # never inferred from the market - there is no "UK = GBP" default
+        # anywhere in this path.
+        market_spec_config = MarketSpecConfig()
+        market_spec_config.set_media_unit_config(
+            ChannelMediaUnitConfig(
+                market=MARKET,
+                channel="TV_Brand",
+                spend_column="TV_Brand",
+                currency=channel_currency,
+            )
+        )
+        at.session_state["market_spec_config"] = market_spec_config.to_dict()
+    at.session_state["fx_rate_set"] = fx_rate_set
+    at.session_state["fx_rate_records"] = fx_rate_records or []
+    at.session_state["fx_vintage_year_id"] = fx_vintage_year_id
 
 
-def _january_records() -> list[WeeklyOutcomeValuationRecord]:
+def _january_records_with_currency(currency: str) -> list[WeeklyOutcomeValuationRecord]:
     return [
         WeeklyOutcomeValuationRecord(
             valuation_kind=VALUATION_KIND_FH_LTR,
@@ -243,11 +272,15 @@ def _january_records() -> list[WeeklyOutcomeValuationRecord]:
             denominator_outcome_id="New",
             quality_status=STATE_ESTIMATED,
             aggregate_value=500.0,
-            currency="GBP",
+            currency=currency,
             horizon_months=FH_LTR_HORIZON_MONTHS,
         )
         for week in _january_2024_weeks()
     ]
+
+
+def _january_records() -> list[WeeklyOutcomeValuationRecord]:
+    return _january_records_with_currency("GBP")
 
 
 class TestEconomicValuationSectionRenders:
@@ -393,6 +426,152 @@ class TestPeriodComparison:
         assert "Incremental value - change" not in metric_labels
         # Period A's own card still renders successfully.
         assert "Incremental value" in metric_labels
+
+
+def _two_vintage_fx_rate_set_and_records():
+    """Two Finance constant-dollar vintages (2025, 2026), each with its
+    own distinct, clearly synthetic USD->GBP rate. No actual exchange
+    rate appears anywhere in this file."""
+    from ancestry_mmm.application.fx_service import build_manual_fx_rate_set
+
+    rows = [
+        dict(
+            rate_date="2025-01-01",
+            source_currency="USD",
+            target_currency="GBP",
+            rate="0.75",
+            method="finance_constant_dollar_annual",
+            frequency="annual",
+            financial_year="2025",
+        ),
+        dict(
+            rate_date="2026-01-01",
+            source_currency="USD",
+            target_currency="GBP",
+            rate="0.8",
+            method="finance_constant_dollar_annual",
+            frequency="annual",
+            financial_year="2026",
+        ),
+    ]
+    rate_set, records = build_manual_fx_rate_set(
+        pd.DataFrame(rows),
+        rate_set_id="fx-finance-constant-dollar",
+        rate_set_version=1,
+        name="Finance constant-dollar table",
+        provider="finance-approved-upload",
+        base_or_reference_currency="GBP",
+        start_date="2025-01-01",
+        end_date="2026-12-31",
+        rate_policy="finance_constant_dollar_vintage",
+        approval_status="approved",
+        approved_by="finance-reviewer",
+        approved_at="2026-01-01T00:00:00Z",
+    )
+    return rate_set.to_dict(), [record.to_dict() for record in records]
+
+
+class TestSpendCurrencyMismatchOnTheLivePage:
+    """Finance constant-dollar correction (2026-09-10), end to end
+    through the real page (not just OutcomeValuationReportingService in
+    isolation) - proves `_fx_request_kwargs` actually wires the governed
+    per-channel currency through (never a blanket market-level
+    inference), `_render_fx_vintage_selector` actually renders and
+    persists the selected vintage, and `_render_valuation_result`
+    actually surfaces the resulting warning."""
+
+    def test_mismatched_channel_currency_shows_warning_and_hides_roi(self):
+        at = AppTest.from_file(str(PAGE), default_timeout=60)
+        _seed_session_state(
+            at,
+            valuation_records=_january_records(),  # currency="GBP"
+            channel_currency="USD",  # deliberately mismatched for this test
+        )
+        at.run()
+        assert not at.exception
+
+        at.selectbox(key="ev_report_grain").set_value("Month").run()
+        at.selectbox(key="ev_report_period").set_value("2024-01").run()
+        assert not at.exception
+
+        warnings = [w.value for w in at.warning]
+        assert any("no Finance FX rate set" in w for w in warnings)
+        metric_labels = [m.label for m in at.metric]
+        assert "Incremental value" in metric_labels
+        assert "ROI" in metric_labels
+        roi_metrics = [m for m in at.metric if m.label == "ROI"]
+        assert roi_metrics[0].value == "Not available"
+
+    def test_matching_channel_currency_shows_no_currency_warning(self):
+        at = AppTest.from_file(str(PAGE), default_timeout=60)
+        _seed_session_state(
+            at,
+            valuation_records=_january_records(),  # currency="GBP"
+            channel_currency="GBP",  # matches - no conversion needed
+        )
+        at.run()
+
+        at.selectbox(key="ev_report_grain").set_value("Month").run()
+        at.selectbox(key="ev_report_period").set_value("2024-01").run()
+        assert not at.exception
+
+        warnings = [w.value for w in at.warning]
+        assert not any("Finance FX rate set" in w for w in warnings)
+        roi_metrics = [m for m in at.metric if m.label == "ROI"]
+        assert roi_metrics[0].value != "Not available"
+
+    def test_uk_channel_explicitly_marked_usd_is_not_converted(self):
+        """The exact "blanket UK = GBP" bug the correction forbids: a UK
+        channel's spend already supplied in USD, valued against a
+        catalogue already in USD, must show no currency warning and no
+        conversion at all - never assume GBP because the market is UK."""
+        at = AppTest.from_file(str(PAGE), default_timeout=60)
+        _seed_session_state(
+            at,
+            valuation_records=_january_records_with_currency("USD"),
+            channel_currency="USD",
+        )
+        at.run()
+
+        at.selectbox(key="ev_report_grain").set_value("Month").run()
+        at.selectbox(key="ev_report_period").set_value("2024-01").run()
+        assert not at.exception
+
+        warnings = [w.value for w in at.warning]
+        assert not any("currency" in w.lower() for w in warnings)
+        roi_metrics = [m for m in at.metric if m.label == "ROI"]
+        assert roi_metrics[0].value != "Not available"
+
+    def test_vintage_selector_renders_and_selecting_older_vintage_changes_spend(self):
+        fx_rate_set, fx_rate_records = _two_vintage_fx_rate_set_and_records()
+        at = AppTest.from_file(str(PAGE), default_timeout=60)
+        _seed_session_state(
+            at,
+            valuation_records=_january_records(),  # currency="GBP"
+            channel_currency="USD",
+            fx_rate_set=fx_rate_set,
+            fx_rate_records=fx_rate_records,
+        )
+        at.run()
+        assert not at.exception
+
+        captions = [c.value for c in at.caption]
+        assert any("Finance 2026 vintage" in c for c in captions)
+
+        at.selectbox(key="ev_report_grain").set_value("Month").run()
+        at.selectbox(key="ev_report_period").set_value("2024-01").run()
+        assert not at.exception
+        spend_2026 = [m for m in at.metric if m.label == "Attributable spend"][0].value
+
+        at.selectbox(key="ev_fx_vintage_select").set_value("2025").run()
+        captions = [c.value for c in at.caption]
+        assert any("Finance 2025 vintage" in c for c in captions)
+        at.selectbox(key="ev_report_grain").set_value("Month").run()
+        at.selectbox(key="ev_report_period").set_value("2024-01").run()
+        assert not at.exception
+        spend_2025 = [m for m in at.metric if m.label == "Attributable spend"][0].value
+
+        assert spend_2026 != spend_2025
 
 
 class TestContributionWaterfall:

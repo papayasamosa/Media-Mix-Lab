@@ -115,3 +115,6 @@ storage-state.json
 # graph.html are large, and community numbering is not stable across
 # rebuilds). .graphifyignore (the exclusion list) IS committed.
 graphify-out/
+
+# Local project data - never commit
+.local-data/

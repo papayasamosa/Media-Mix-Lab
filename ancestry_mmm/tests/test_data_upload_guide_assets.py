@@ -473,23 +473,411 @@ def test_context_rag_discloses_role_is_not_enforced(guide):
     assert "not currently enforced" in row["Status"]
 
 
-def test_activity_dictionary_builder_never_asks_for_search_taxonomy_pseudo_fields(
+def test_activity_dictionary_builder_offers_governed_search_taxonomy_fields(
     tmp_path, guide
 ):
-    """search_platform/search_intent_group_id are not activity_dictionary
-    columns today, so the builder must not ask for them as if they were
-    ordinary fields -- platform/campaign_type (real columns) build the id
-    instead."""
+    """2026-09-10: activity_definitions_from_dictionary now maps
+    search_intent_group_id/search_platform when present (REQ-SEARCH-004
+    addendum) - the builder must offer them as real, validated inputs,
+    not merely blank headers the parser tolerates. Both use the strict
+    (non-"soft") dropdown, since these are governed closed vocabularies,
+    not free-text suggestions like platform/campaign_type."""
     import openpyxl
 
     path = tmp_path / "activity.xlsx"
     guide.build_activity_dictionary_builder(path)
     wb = openpyxl.load_workbook(path)
-    builder_headers = {cell.value for cell in wb["BUILDER"][7]}
-    assert "search_platform" not in builder_headers
-    assert "search_intent_group_id" not in builder_headers
+    builder = wb["BUILDER"]
+    builder_headers = {cell.value for cell in builder[7]}
+    assert "search_platform" in builder_headers
+    assert "search_intent_group_id" in builder_headers
     assert "platform" in builder_headers
     assert "campaign_type" in builder_headers
+
+    dv_sqrefs = {
+        str(dv.sqref): set(dv.formula1.strip('"').split(","))
+        for dv in builder.data_validations.dataValidation
+    }
+    search_intent_col = [
+        cell.column_letter
+        for cell in builder[7]
+        if cell.value == "search_intent_group_id"
+    ][0]
+    search_platform_col = [
+        cell.column_letter for cell in builder[7] if cell.value == "search_platform"
+    ][0]
+    intent_values = next(
+        values
+        for sqref, values in dv_sqrefs.items()
+        if sqref.startswith(f"{search_intent_col}8")
+    )
+    platform_values = next(
+        values
+        for sqref, values in dv_sqrefs.items()
+        if sqref.startswith(f"{search_platform_col}8")
+    )
+    assert intent_values == {
+        SEARCH_INTENT_GROUP_ID_BRAND,
+        SEARCH_INTENT_GROUP_ID_NON_BRAND,
+    }
+    assert platform_values == set(SEARCH_PLATFORMS)
+
+
+def test_activity_dictionary_builder_search_taxonomy_round_trips_through_the_real_parser():
+    """Brand+Google and Non-Brand+Bing both survive builder -> workbook ->
+    parser -> governed ActivityDefinition, and a Brand activity with no
+    platform specified (aggregate Search, REQ-SEARCH-004 S4) is equally
+    valid."""
+    import pandas as pd
+
+    from ancestry_mmm.core.coverage import DOMAIN_ACTIVITY_AND_MEDIA
+    from ancestry_mmm.data.templates import (
+        canonicalize_standard_workbook,
+        parse_standard_workbook,
+    )
+
+    def _row(
+        activity_id: str, search_intent_group_id: str, search_platform: str
+    ) -> dict:
+        return {
+            "activity_id": activity_id,
+            "market": "UK",
+            "pooling_group_id": "",
+            "channel": "Paid Search",
+            "platform": "not specified",
+            "campaign_type": "not specified",
+            "marketing_objective": "not specified",
+            "funnel_stage": "unclassified",
+            "product_advertised": "not specified",
+            "message_type": "not specified",
+            "activity_ownership": "paid",
+            "intended_model_role": "intervention",
+            "model_input_column": activity_id,
+            "model_input_measure": "spend",
+            "economic_treatment": "paid_media_cost",
+            "planning_eligibility": "optimisable",
+            "source": "Google Ads export",
+            "model_input_unit": "",
+            "model_input_kind": "",
+            "spend_column": "",
+            "response_unit_column": "",
+            "response_unit": "",
+            "currency": "",
+            "effective_from": "",
+            "effective_to": "",
+            "search_intent_group_id": search_intent_group_id,
+            "search_platform": search_platform,
+        }
+
+    activity_dictionary = pd.DataFrame(
+        [
+            _row(
+                "paid_search_google_brand",
+                SEARCH_INTENT_GROUP_ID_BRAND,
+                "google",
+            ),
+            _row(
+                "paid_search_bing_non_brand",
+                SEARCH_INTENT_GROUP_ID_NON_BRAND,
+                "bing",
+            ),
+            _row("paid_search_brand_aggregate", SEARCH_INTENT_GROUP_ID_BRAND, ""),
+        ]
+    )
+    activity_data = pd.DataFrame(
+        [
+            {
+                "period_start": "2026-01-05",
+                "market": "UK",
+                "activity_id": row["activity_id"],
+                "spend": 1200,
+            }
+            for _, row in activity_dictionary.iterrows()
+        ]
+    )
+    raw = _write_workbook(
+        {"activity_data": activity_data, "activity_dictionary": activity_dictionary}
+    )
+    workbook = parse_standard_workbook(
+        raw,
+        source_id="s3",
+        filename="test.xlsx",
+        logical_domain=DOMAIN_ACTIVITY_AND_MEDIA,
+    )
+    assert workbook.manifest.errors == ()
+    bundle = canonicalize_standard_workbook(workbook)
+    by_id = {d.activity_id: d for d in bundle.activity_definitions}
+
+    assert by_id["paid_search_google_brand"].search_intent_group_id == (
+        SEARCH_INTENT_GROUP_ID_BRAND
+    )
+    assert by_id["paid_search_google_brand"].search_platform == "google"
+    assert by_id["paid_search_bing_non_brand"].search_intent_group_id == (
+        SEARCH_INTENT_GROUP_ID_NON_BRAND
+    )
+    assert by_id["paid_search_bing_non_brand"].search_platform == "bing"
+    assert by_id["paid_search_brand_aggregate"].search_intent_group_id == (
+        SEARCH_INTENT_GROUP_ID_BRAND
+    )
+    assert by_id["paid_search_brand_aggregate"].search_platform == ""
+
+
+def test_non_search_activity_is_not_forced_to_supply_search_taxonomy_fields():
+    """A TV activity leaving both new columns blank is exactly as valid as
+    before this capability existed - search taxonomy is never required
+    just because the columns now exist in DICTIONARY_OUTPUT."""
+    import pandas as pd
+
+    from ancestry_mmm.core.coverage import DOMAIN_ACTIVITY_AND_MEDIA
+    from ancestry_mmm.data.templates import (
+        canonicalize_standard_workbook,
+        parse_standard_workbook,
+    )
+
+    activity_dictionary = pd.DataFrame(
+        [
+            {
+                "activity_id": "tv_brand",
+                "market": "UK",
+                "pooling_group_id": "",
+                "channel": "TV",
+                "platform": "not specified",
+                "campaign_type": "not specified",
+                "marketing_objective": "not specified",
+                "funnel_stage": "unclassified",
+                "product_advertised": "not specified",
+                "message_type": "not specified",
+                "activity_ownership": "paid",
+                "intended_model_role": "intervention",
+                "model_input_column": "tv_brand",
+                "model_input_measure": "spend",
+                "economic_treatment": "paid_media_cost",
+                "planning_eligibility": "optimisable",
+                "source": "Broadcaster invoice",
+                "model_input_unit": "",
+                "model_input_kind": "",
+                "spend_column": "",
+                "response_unit_column": "",
+                "response_unit": "",
+                "currency": "",
+                "effective_from": "",
+                "effective_to": "",
+                "search_intent_group_id": "",
+                "search_platform": "",
+            }
+        ]
+    )
+    activity_data = pd.DataFrame(
+        [
+            {
+                "period_start": "2026-01-05",
+                "market": "UK",
+                "activity_id": "tv_brand",
+                "spend": 5000,
+            }
+        ]
+    )
+    raw = _write_workbook(
+        {"activity_data": activity_data, "activity_dictionary": activity_dictionary}
+    )
+    workbook = parse_standard_workbook(
+        raw,
+        source_id="s4",
+        filename="test.xlsx",
+        logical_domain=DOMAIN_ACTIVITY_AND_MEDIA,
+    )
+    assert workbook.manifest.errors == ()
+    bundle = canonicalize_standard_workbook(workbook)
+    assert bundle.activity_definitions[0].search_intent_group_id is None
+    assert bundle.activity_definitions[0].search_platform == ""
+
+
+def test_invalid_search_taxonomy_combination_fails_clearly():
+    """A PMax activity carrying a search_intent_group_id must be rejected
+    with a specific, attributable reason, never silently accepted or
+    silently dropped."""
+    import pandas as pd
+
+    from ancestry_mmm.core.coverage import DOMAIN_ACTIVITY_AND_MEDIA
+    from ancestry_mmm.data.templates import parse_standard_workbook
+
+    activity_dictionary = pd.DataFrame(
+        [
+            {
+                "activity_id": "pmax_shopping",
+                "market": "UK",
+                "pooling_group_id": "",
+                "channel": "Paid Search",
+                "platform": "not specified",
+                "campaign_type": "pmax",
+                "marketing_objective": "not specified",
+                "funnel_stage": "unclassified",
+                "product_advertised": "not specified",
+                "message_type": "not specified",
+                "activity_ownership": "paid",
+                "intended_model_role": "intervention",
+                "model_input_column": "pmax_shopping",
+                "model_input_measure": "spend",
+                "economic_treatment": "paid_media_cost",
+                "planning_eligibility": "optimisable",
+                "source": "Google Ads export",
+                "model_input_unit": "",
+                "model_input_kind": "",
+                "spend_column": "",
+                "response_unit_column": "",
+                "response_unit": "",
+                "currency": "",
+                "effective_from": "",
+                "effective_to": "",
+                "search_intent_group_id": SEARCH_INTENT_GROUP_ID_BRAND,
+                "search_platform": "google",
+            }
+        ]
+    )
+    activity_data = pd.DataFrame(
+        [
+            {
+                "period_start": "2026-01-05",
+                "market": "UK",
+                "activity_id": "pmax_shopping",
+                "spend": 1200,
+            }
+        ]
+    )
+    raw = _write_workbook(
+        {"activity_data": activity_data, "activity_dictionary": activity_dictionary}
+    )
+    workbook = parse_standard_workbook(
+        raw,
+        source_id="s5",
+        filename="test.xlsx",
+        logical_domain=DOMAIN_ACTIVITY_AND_MEDIA,
+    )
+    from ancestry_mmm.data.templates import canonicalize_standard_workbook
+
+    with pytest.raises(ValueError, match="excluded from the Paid Search taxonomy"):
+        canonicalize_standard_workbook(workbook)
+
+
+def test_guide_html_documents_the_generic_denominator_outcome_mechanism(guide):
+    """Finance constant-dollar / LTR documentation audit (2026-09-10):
+    the guide must state that denominator_outcome_id's per-week match is
+    generic (not NBT-specific) and name the exact UK cohort
+    correspondence, so a future GSA-week LTR is documented as equally
+    valid without implying a code change is needed."""
+    html = guide.build_html()
+    assert "denominator mechanism is generic" in html
+    assert "fh_net_billthrough_count_new" in html
+    assert "fh_net_billthrough_count_dna_cross_sell" in html
+    assert "fh_net_billthrough_count_winback" in html
+    assert "fh_gsa</code>-week LTR" in html
+    assert "own matching cohort's count for that week" in html
+
+
+def test_guide_html_documents_finance_constant_dollar_fx_vintage(guide):
+    """The guide must explain the real Finance upload format and the
+    vintage-not-observation-year rule, the latest-vintage default with
+    override, and that a USD-declared amount is never converted again -
+    the exact points corrected in the FX business decision."""
+    html = guide.build_html()
+    assert 'id="fx"' in html
+    assert "year_id" in html
+    assert "currency_code" in html
+    assert "local_to_usd_conversion_rate" in html
+    assert "never the calendar year" in html
+    assert "defaults to the latest one" in html
+    assert "never converted again" in html
+    assert "never falls back to another vintage" in html
+
+
+def test_guide_html_names_the_actual_ui_labels_for_the_fx_workflow(guide):
+    """The guide must not just explain the FX file format and vintage
+    rules in the abstract - it must tell the analyst exactly where in
+    the running app to upload the Finance table and where to select or
+    override the vintage, using the real, current UI labels (page
+    titles, section/expander names, button and dropdown labels) rather
+    than an internal filename or a generic description."""
+    html = guide.build_html()
+    assert "Where to actually do this in the app" in html
+    # Upload location: Export & Recovery page's "Finance FX rate set"
+    # section, "Upload Finance constant-dollar table" expander.
+    assert "Export &amp; Recovery" in html
+    assert "Finance FX rate set" in html
+    assert "Upload Finance constant-dollar table" in html
+    assert "Validate and load Finance table" in html
+    # Vintage selection/override location: Results & Response Curves
+    # page's "Economic outcome valuation &amp; ROI" section.
+    assert "Results &amp; Response Curves" in html
+    assert "Economic outcome valuation" in html
+    assert "Finance constant-dollar vintage" in html
+    assert "USD constant-dollar basis" in html
+
+
+def test_guide_fx_ui_labels_match_the_live_pages():
+    """Cross-check against the actual running pages, not just the guide's
+    own text: if the Export & Recovery upload widgets or the Results page
+    vintage selector are ever relabelled, this must fail so the guide
+    gets updated in the same change rather than silently going stale."""
+    export_page = Path(__file__).parents[1] / "pages" / "09_Project_Export.py"
+    results_page = Path(__file__).parents[1] / "pages" / "07_Results_Curve_Bank.py"
+    export_src = export_page.read_text(encoding="utf-8")
+    results_src = results_page.read_text(encoding="utf-8")
+
+    assert '"Finance FX rate set"' in export_src
+    assert '"Upload Finance constant-dollar table"' in export_src
+    assert '"Validate and load Finance table"' in export_src
+    assert '"Finance constant-dollar vintage"' in results_src
+    assert "USD constant-dollar basis" in results_src
+
+
+def test_guide_faq_and_glossary_cover_fx_vintage(guide):
+    html = guide.build_html()
+    assert "Finance FX &#x201c;vintage&#x201d;" in html or "vintage" in html
+    assert "FX vintage" in html
+    assert "constant-dollar rate" in html
+
+
+def test_dictionary_builders_never_carry_an_fx_rate_value_column(guide):
+    """Architecture guard: FX rates must stay a separate governed project
+    input (application.fx_service, Project Export page) - never a column
+    on the normal Outcome or Activity Dictionary. This must keep failing
+    if anyone ever adds year_id/currency_code/local_to_usd_conversion_rate
+    (or a plain 'rate'/'exchange_rate' column) to either dictionary's
+    output contract."""
+    forbidden = {
+        "year_id",
+        "currency_code",
+        "local_to_usd_conversion_rate",
+        "exchange_rate",
+        "fx_rate",
+    }
+    for columns_name in (
+        "OUTCOME_DICTIONARY_OUTPUT_COLUMNS",
+        "ACTIVITY_DICTIONARY_OUTPUT_COLUMNS",
+        "CONTEXT_DICTIONARY_OUTPUT_COLUMNS",
+    ):
+        columns = set(getattr(guide, columns_name))
+        assert not (columns & forbidden), (
+            f"{columns_name} must never carry an FX-rate column: {columns & forbidden}"
+        )
+
+
+def test_currency_rag_rows_point_to_the_separate_fx_governance(guide):
+    """Regression guard for the audit finding that currency/value_currency
+    are identification-only: their guide text must say so and must not
+    silently start implying they perform conversion."""
+    activity_currency = next(
+        r for r in guide.ACTIVITY_RAG if r["Field name"] == "currency"
+    )
+    assert (
+        "does not perform FX conversion" in activity_currency["Why the tool needs it"]
+    )
+    assert "never inferred from market" in activity_currency["Why the tool needs it"]
+
+    outcome_value_currency = next(
+        r for r in guide.OUTCOME_RAG if r["Field name"] == "value_currency"
+    )
+    assert "never converts it" in outcome_value_currency["Why the tool needs it"]
 
 
 def test_activity_dictionary_builder_id_has_exactly_three_identity_inputs(

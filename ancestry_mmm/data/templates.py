@@ -606,6 +606,29 @@ def activity_definitions_from_dictionary(
                 if pd.isna(row.get("pooling_group_id"))
                 else str(row["pooling_group_id"])
             ),
+            # UK FH MMM brief (2026-09-10) Workstream E: search_intent_
+            # group_id/search_platform (REQ-SEARCH-004) are optional on
+            # every activity - most activities are not Paid Search at all
+            # - so a blank/absent cell is "not classified", never an error.
+            # ActivityDefinition.__post_init__ still validates a populated
+            # search_platform against the closed vocabulary and rejects a
+            # PMax/Demand Gen/YouTube campaign_type carrying either field,
+            # exactly as it already does for a UI-entered value; catalogue-
+            # level cross-validation against the approved taxonomy (unknown
+            # group id, parent/child double-fit) remains
+            # validate_activity_search_taxonomy's job, run whenever Channel
+            # Media Units saves the activity list, the same timing as
+            # today's UI-entry path.
+            "search_intent_group_id": (
+                None
+                if pd.isna(row.get("search_intent_group_id"))
+                else str(row["search_intent_group_id"]).strip() or None
+            ),
+            "search_platform": (
+                ""
+                if pd.isna(row.get("search_platform"))
+                else str(row["search_platform"]).strip()
+            ),
         }
         definitions.append(ActivityDefinition(**payload))
     identities = [(item.market, item.activity_id) for item in definitions]

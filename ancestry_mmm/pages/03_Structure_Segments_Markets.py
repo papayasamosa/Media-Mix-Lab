@@ -96,7 +96,10 @@ from ancestry_mmm.core.pathways import (
     validate_legacy_governance_review,
     validate_media_outcome_pathways,
 )
-from ancestry_mmm.core.net_billthrough import NBT_METRIC_KEY
+from ancestry_mmm.core.net_billthrough import (
+    NBT_METRIC_KEY,
+    assess_official_maturity_readiness,
+)
 from ancestry_mmm.data import (
     validate_modeling_frame,
     detect_column_types,
@@ -1600,6 +1603,27 @@ if _has_nbt:
         "NBT maturity/finalisation rule",
         value=str(_saved_nbt.get("maturity_rule_description", "")),
     )
+    # REQ-NBT-005 (UK FH MMM brief, 2026-09-10): an explicit, per-source-
+    # pack official readiness window (e.g. 30 days for the current UK FH
+    # production pack) - distinct from, and never a stand-in for, this
+    # form's own free-text maturity_rule_description or the historical-
+    # test-only completeness horizon (REQ-NBT-002), which REQ-NBT-004
+    # forbids treating as a production default. 0 means "not configured"
+    # here - assess_official_maturity_readiness never assumes a value in
+    # its absence.
+    nbt_maturity_window_days = st.number_input(
+        "Official maturity readiness window (days, 0 = not configured)",
+        min_value=0,
+        value=int(_saved_nbt.get("maturity_window_days") or 0),
+        help=(
+            "Days that must elapse between the data as-of date and the "
+            "latest complete NBT week before that week is treated as "
+            "mature for official reporting/planning. Leave at 0 until "
+            "Product/Finance has approved a specific window for this "
+            "source pack - REQ-COVERAGE-001/REQ-NBT-004's fail-closed "
+            "principle applies here too."
+        ),
+    )
     net_billthrough_metadata = {
         "data_as_of_date": nbt_as_of,
         "model_start_week": nbt_start,
@@ -1607,7 +1631,20 @@ if _has_nbt:
         "latest_complete_net_billthrough_week": nbt_latest,
         "maturity_rule_description": nbt_rule,
         "source_owner": nbt_owner,
+        "maturity_window_days": (
+            int(nbt_maturity_window_days) if nbt_maturity_window_days else None
+        ),
     }
+    if nbt_as_of and nbt_latest:
+        _maturity_readiness = assess_official_maturity_readiness(
+            net_billthrough_metadata
+        )
+        if _maturity_readiness["is_mature"] is None:
+            st.caption(f"Official readiness: {_maturity_readiness['reason']}")
+        elif _maturity_readiness["is_mature"]:
+            st.success(f"Official readiness: {_maturity_readiness['reason']}")
+        else:
+            st.warning(f"Official readiness: {_maturity_readiness['reason']}")
 else:
     st.caption("No fitted net bill-through outcome is currently configured.")
 _nbt_section.__exit__(None, None, None)

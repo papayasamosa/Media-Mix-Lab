@@ -32,8 +32,16 @@ substitutes a nearby rate.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from decimal import Decimal
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from ancestry_mmm.application.fx_service import (
+    FXUploadValidationError,
+    default_fx_vintage_year_id,
+    resolve_constant_dollar_vintage_rate,
+)
+from ancestry_mmm.core.fx_conversion import apply_finance_constant_dollar_annual
+from ancestry_mmm.core.fx_rates import FXRateRecord, FXRateSet
 from ancestry_mmm.core.hierarchical_model import FHModelMeta
 from ancestry_mmm.core.outcome_valuation import WeeklyOutcomeValuationRecord
 from ancestry_mmm.core.outcome_valuation_attribution import (
@@ -75,6 +83,30 @@ class HistoricalOutcomeValuationRequest:
     n_permutations: int = DEFAULT_REPORTING_N_PERMUTATIONS
     seed: int = 42
     credible_mass: float = DEFAULT_CRED_MASS
+    # UK FH MMM brief (2026-09-10) + Finance constant-dollar correction
+    # (2026-09-10, same day): `attributable_spend` is in the specific
+    # channel's own governed currency (`ChannelMediaUnitConfig.currency` -
+    # never a market-level default; a market can host channels in
+    # different currencies), which may differ from the governed
+    # valuation catalogue's `currency`. `spend_currency` is never
+    # inferred from `market` - the caller (the Results page, from that
+    # per-channel governed metadata) supplies it explicitly, or leaves it
+    # `None` when unknown/not yet governed, in which case no conversion
+    # is attempted (existing single-currency behaviour is unchanged).
+    #
+    # Finance publishes a *constant-dollar* conversion table: one rate
+    # per currency, per vintage (`year_id` in the uploaded file), applied
+    # to every historical observation regardless of the observation's
+    # own calendar year - never joined to the observation's date. A
+    # 2023 GBP amount and a 2025 GBP amount use the identical rate once
+    # a vintage is selected. `fx_vintage_year_id` selects which vintage;
+    # `None` means "use the latest available vintage in `fx_rate_
+    # records`" (the required default). `fx_rate_set`/`fx_rate_records`
+    # are the project's governed Finance constant-dollar upload.
+    spend_currency: Optional[str] = None
+    fx_rate_set: Optional[Mapping[str, Any]] = None
+    fx_rate_records: Sequence[Any] = ()
+    fx_vintage_year_id: Optional[str] = None
 
 
 @dataclass
@@ -248,10 +280,13 @@ class OutcomeValuationReportingService:
                 weeks=resolved_weeks,
                 channel=request.channel,
             )
+            spend_for_roi, currency_warnings = self._resolve_spend_for_roi(
+                request, spend, ordered_rates[0].currency, resolved_weeks[-1]
+            )
             attribution = summarize_posterior_economic_attribution(
                 incremental_outcome_draws,
                 ordered_rates,
-                spend=spend,
+                spend=spend_for_roi,
                 credible_mass=request.credible_mass,
             )
         except Exception as exc:
@@ -262,8 +297,94 @@ class OutcomeValuationReportingService:
             attribution=attribution,
             resolved_weeks=resolved_weeks,
             errors=[],
-            warnings=list(issues),
+            warnings=list(issues) + currency_warnings,
         )
+
+    @staticmethod
+    def _resolve_spend_for_roi(
+        request: "HistoricalOutcomeValuationRequest",
+        spend: float,
+        value_currency: str,
+        last_resolved_week: str,
+    ) -> "tuple[Optional[float], List[str]]":
+        """Finance constant-dollar correction (2026-09-10): resolve the
+        spend figure to pass into ROI, converting it into `value_currency`
+        via the selected Finance constant-dollar *vintage* -
+        `application.fx_service.resolve_constant_dollar_vintage_rate` -
+        when `request.spend_currency` differs from it. One vintage rate
+        applies to every historical observation of a currency regardless
+        of that observation's own calendar year - the FX rate is never
+        joined to `last_resolved_week`'s calendar year, only used as the
+        `week` label on the resulting `FinanceConstantDollarAnnualResult`.
+        Returns `(spend_for_roi, warnings)`. `spend_for_roi=None` means
+        "ROI not shown" (the existing zero/absent-spend contract) - a
+        currency block reuses that identical mechanism, never a new field.
+
+        Zero/negative spend never needs conversion (no ROI is computed for
+        it regardless), and `spend_currency=None` (not yet governed) leaves
+        existing single-currency behaviour byte-for-byte unchanged - this
+        function does exactly nothing unless a genuine, explicitly declared
+        currency mismatch exists.
+        """
+        if (
+            not request.spend_currency
+            or not value_currency
+            or request.spend_currency == value_currency
+            or spend is None
+            or spend <= 0
+        ):
+            return spend, []
+
+        if request.fx_rate_set is None:
+            return None, [
+                f"Attributable spend is in {request.spend_currency} but the "
+                f"governed valuation catalogue is in {value_currency}. ROI "
+                "is not shown: no Finance FX rate set has been supplied yet."
+            ]
+
+        try:
+            rate_set = FXRateSet.from_dict(dict(request.fx_rate_set))
+            fx_records = [
+                FXRateRecord.from_dict(item) if isinstance(item, Mapping) else item
+                for item in (request.fx_rate_records or ())
+            ]
+            vintage_year_id = request.fx_vintage_year_id or default_fx_vintage_year_id(
+                fx_records
+            )
+            if not vintage_year_id:
+                return None, [
+                    "ROI is not shown: the approved Finance FX rate set has "
+                    "no constant-dollar vintage available."
+                ]
+            resolved_rate = resolve_constant_dollar_vintage_rate(
+                rate_set,
+                fx_records,
+                source_currency=request.spend_currency,
+                target_currency=value_currency,
+                vintage_year_id=vintage_year_id,
+            )
+        except (ValueError, TypeError, FXUploadValidationError) as exc:
+            return None, [f"ROI is not shown: {exc}"]
+
+        if resolved_rate is None:
+            return None, [
+                "ROI is not shown: the approved Finance FX rate set has no "
+                f"applicable {request.spend_currency}->{value_currency} rate "
+                f"in the {vintage_year_id} vintage."
+            ]
+
+        converted = apply_finance_constant_dollar_annual(
+            financial_year=str(vintage_year_id),
+            week=last_resolved_week,
+            source_amount=Decimal(str(spend)),
+            annual_rate=resolved_rate,
+        )
+
+        return float(converted.converted_amount), [
+            f"Attributable spend converted from {request.spend_currency} to "
+            f"{value_currency} at the Finance {vintage_year_id} constant-dollar "
+            f"vintage rate ({resolved_rate})."
+        ]
 
     def compare_periods(
         self,

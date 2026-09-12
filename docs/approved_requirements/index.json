@@ -1279,7 +1279,8 @@
         "docs/approved_requirements/REQ-FX-002.md",
         "docs/approved_requirements/index.json",
         "ancestry_mmm/core/fx_rates.py",
-        "docs/governed_fx_contract_implementation_decision_record.md"
+        "docs/governed_fx_contract_implementation_decision_record.md",
+        "ancestry_mmm/application/fx_service.py"
       ],
       "required_tests": [
         "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_approved_requirements_readme_exists",
@@ -1294,7 +1295,11 @@
         "ancestry_mmm/tests/test_req_fx_decision_13.py::test_req_fx_002_and_003_indexed",
         "ancestry_mmm/tests/test_fx_rates.py::TestFXRateRecord::test_annual_frequency_with_financial_year_is_valid",
         "ancestry_mmm/tests/test_fx_rates.py::TestDeriveCrossRate::test_round_trip_identity",
-        "ancestry_mmm/tests/test_fx_rates.py::TestFXRateSet::test_new_version_increments_and_preserves_id"
+        "ancestry_mmm/tests/test_fx_rates.py::TestFXRateSet::test_new_version_increments_and_preserves_id",
+        "ancestry_mmm/tests/test_fx_rates.py::TestVintageHelpers::test_available_vintages_from_annual_records",
+        "ancestry_mmm/tests/test_fx_rates.py::TestVintageHelpers::test_latest_vintage_is_the_maximum",
+        "ancestry_mmm/tests/test_fx_service.py::TestFinanceConstantDollarIngestion::test_ingests_two_vintages",
+        "ancestry_mmm/tests/test_fx_service.py::TestFinanceConstantDollarIngestion::test_conversion_direction_is_usd_equals_local_times_rate"
       ]
     },
     {
@@ -1385,7 +1390,13 @@
         "docs/approved_requirements/REQ-FX-006.md",
         "docs/approved_requirements/index.json",
         "ancestry_mmm/core/fx_reporting.py",
-        "docs/governed_fx_contract_implementation_decision_record.md"
+        "docs/governed_fx_contract_implementation_decision_record.md",
+        "ancestry_mmm/application/fx_service.py",
+        "ancestry_mmm/application/outcome_valuation_reporting_service.py",
+        "ancestry_mmm/core/fx_rates.py",
+        "ancestry_mmm/core/persistence.py",
+        "ancestry_mmm/pages/07_Results_Curve_Bank.py",
+        "ancestry_mmm/pages/09_Project_Export.py"
       ],
       "required_tests": [
         "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_approved_requirements_readme_exists",
@@ -1398,6 +1409,27 @@
         "ancestry_mmm/tests/test_governed_fx_authority_reconciliation.py::TestGovernedFXOverlayReconciled::test_req_fx_006_indexed_and_classified_incomplete",
         "ancestry_mmm/tests/test_fx_reporting.py::TestLabelCurrencyFigure::test_rejects_currency_not_in_context",
         "ancestry_mmm/tests/test_fx_reporting.py::TestFxTranslationDecompositionComponent::test_computes_translation_effect",
+        "ancestry_mmm/tests/test_fx_rates.py::TestVintageHelpers::test_available_vintages_from_annual_records",
+        "ancestry_mmm/tests/test_fx_rates.py::TestVintageHelpers::test_latest_vintage_is_the_maximum",
+        "ancestry_mmm/tests/test_fx_service.py::TestFinanceConstantDollarIngestion::test_ingests_two_vintages",
+        "ancestry_mmm/tests/test_fx_service.py::TestFinanceConstantDollarIngestion::test_conversion_direction_is_usd_equals_local_times_rate",
+        "ancestry_mmm/tests/test_fx_service.py::TestConstantDollarVintageResolution::test_resolves_the_selected_vintage",
+        "ancestry_mmm/tests/test_fx_service.py::TestConstantDollarVintageResolution::test_never_falls_back_to_a_different_vintage",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_no_spend_currency_declared_is_unchanged",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_matching_spend_currency_is_unchanged",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_matching_usd_spend_currency_is_unchanged",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_mismatched_currency_without_fx_rate_set_blocks_roi_only",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_mismatched_currency_without_matching_fx_rate_blocks_roi_only",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_currency_present_in_a_different_vintage_still_blocks",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_mismatched_currency_with_approved_vintage_converts_and_computes_roi",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_omitted_vintage_defaults_to_latest_available",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_selecting_an_older_vintage_changes_economic_values",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_switching_vintage_never_changes_the_count_model_outcome",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestSpendCurrencyMismatch::test_vintage_rate_applies_regardless_of_the_observations_own_calendar_year",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage::test_mismatched_channel_currency_shows_warning_and_hides_roi",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage::test_matching_channel_currency_shows_no_currency_warning",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage::test_uk_channel_explicitly_marked_usd_is_not_converted",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_apptest.py::TestSpendCurrencyMismatchOnTheLivePage::test_vintage_selector_renders_and_selecting_older_vintage_changes_spend",
         "ancestry_mmm/tests/test_fx_reporting.py::TestAssessFxStalenessTriggers::test_reporting_currency_selection_alone_never_triggers_staleness"
       ]
     },
@@ -1411,7 +1443,9 @@
         "ancestry_mmm/core/persistence.py",
         "ancestry_mmm/core/fingerprint.py",
         "docs/wp1_search_seo_granularity_decision_package.md",
-        "ancestry_mmm/core/search_intent_taxonomy.py"
+        "ancestry_mmm/core/search_intent_taxonomy.py",
+        "ancestry_mmm/data/templates.py",
+        "scripts/build_data_upload_guide_assets.py"
       ],
       "required_tests": [
         "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_approved_requirements_readme_exists",
@@ -1423,6 +1457,13 @@
         "ancestry_mmm/tests/test_requirements_index_conformance.py::test_every_indexed_test_node_is_collectable",
         "ancestry_mmm/tests/test_search_seo_granularity_authority_reconciliation.py::TestSearchSeoGranularityOverlayReconciled::test_req_search_004_indexed_and_classified_partial",
         "ancestry_mmm/tests/test_search_seo_granularity_authority_reconciliation.py::TestSearchSeoGranularityOverlayReconciled::test_all_three_records_reference_the_decision_package",
+        "ancestry_mmm/tests/test_templates.py::test_activity_definitions_from_dictionary_maps_search_taxonomy_columns",
+        "ancestry_mmm/tests/test_templates.py::test_activity_definitions_from_dictionary_without_search_columns_is_unaffected",
+        "ancestry_mmm/tests/test_templates.py::test_activity_definitions_from_dictionary_rejects_invalid_search_platform",
+        "ancestry_mmm/tests/test_data_upload_guide_assets.py::test_activity_dictionary_builder_offers_governed_search_taxonomy_fields",
+        "ancestry_mmm/tests/test_data_upload_guide_assets.py::test_activity_dictionary_builder_search_taxonomy_round_trips_through_the_real_parser",
+        "ancestry_mmm/tests/test_data_upload_guide_assets.py::test_non_search_activity_is_not_forced_to_supply_search_taxonomy_fields",
+        "ancestry_mmm/tests/test_data_upload_guide_assets.py::test_invalid_search_taxonomy_combination_fails_clearly",
         "ancestry_mmm/tests/test_req_search_004_taxonomy_addendum.py::test_req_search_004_addendum_names_brand_non_brand_taxonomy",
         "ancestry_mmm/tests/test_req_search_004_taxonomy_addendum.py::test_req_search_004_addendum_treats_platform_as_orthogonal_axis",
         "ancestry_mmm/tests/test_req_search_004_taxonomy_addendum.py::test_req_search_004_addendum_excludes_pmax_demand_gen_youtube",
@@ -1540,6 +1581,8 @@
         "ancestry_mmm/core/outcome_valuation.py",
         "ancestry_mmm/core/coverage.py",
         "ancestry_mmm/core/outcomes.py",
+        "ancestry_mmm/core/persistence.py",
+        "ancestry_mmm/pages/09_Project_Export.py",
         "docs/wp2_outcome_valuation_decision_package.md"
       ],
       "required_tests": [
@@ -1552,10 +1595,23 @@
         "ancestry_mmm/tests/test_requirements_index_conformance.py::test_every_indexed_test_node_is_collectable",
         "ancestry_mmm/tests/test_outcome_valuation_roi_authority_reconciliation.py::TestOutcomeValuationAuthority::test_req_econ_002_indexed_and_classified_incomplete",
         "ancestry_mmm/tests/test_outcome_valuation_roi_authority_reconciliation.py::TestOutcomeValuationAuthority::test_req_econ_002_never_defaults_fh_denominator",
+        "ancestry_mmm/tests/test_persistence.py::test_resolve_imported_outcome_valuation_records_absent_resolves_empty",
+        "ancestry_mmm/tests/test_persistence.py::test_resolve_imported_outcome_valuation_records_valid_round_trips",
+        "ancestry_mmm/tests/test_persistence.py::test_resolve_imported_outcome_valuation_records_reports_malformed_records_by_index",
+        "ancestry_mmm/tests/test_persistence.py::test_resolve_imported_outcome_valuation_records_quarantines_non_mapping_entries",
+        "ancestry_mmm/tests/test_persistence.py::test_resolve_imported_fx_rate_records_absent_resolves_empty",
+        "ancestry_mmm/tests/test_persistence.py::test_resolve_imported_fx_rate_records_valid_round_trips",
+        "ancestry_mmm/tests/test_persistence.py::test_resolve_imported_fx_rate_records_reports_malformed_records_by_rate_id",
+        "ancestry_mmm/tests/test_persistence.py::test_resolve_imported_fx_rate_set_absent_resolves_none",
+        "ancestry_mmm/tests/test_persistence.py::test_resolve_imported_fx_rate_set_valid_round_trips",
+        "ancestry_mmm/tests/test_persistence.py::test_resolve_imported_fx_rate_set_reports_malformed_set_by_id",
         "ancestry_mmm/tests/test_outcome_valuation.py::TestRecordConstruction::test_blank_denominator_outcome_id_rejected",
         "ancestry_mmm/tests/test_outcome_valuation.py::TestCatalogueValidation::test_unknown_denominator_outcome_id_is_rejected",
         "ancestry_mmm/tests/test_outcome_valuation.py::TestCrossValidateAgainstObservedDenominator::test_zero_zero_pair_is_not_flagged",
-        "ancestry_mmm/tests/test_outcome_valuation.py::TestCrossValidateAgainstObservedDenominator::test_nonzero_value_with_zero_denominator_is_surfaced"
+        "ancestry_mmm/tests/test_outcome_valuation.py::TestCrossValidateAgainstObservedDenominator::test_nonzero_value_with_zero_denominator_is_surfaced",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestGenericDenominatorArchitectureWithGSA::test_gsa_denominator_end_to_end_reporting_matches_nbt_path_shape",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestGenericDenominatorArchitectureWithGSA::test_nbt_style_path_is_unaffected_by_the_generic_mechanism",
+        "ancestry_mmm/tests/test_outcome_valuation_reporting_service.py::TestGenericDenominatorArchitectureWithGSA::test_no_runtime_valuation_module_hardcodes_an_nbt_specific_string"
       ]
     },
     {
@@ -1769,6 +1825,101 @@
         "ancestry_mmm/tests/test_uk_production_decisions.py::test_current_uk_production_uses_supplied_nbt_ids",
         "ancestry_mmm/tests/test_uk_production_decisions.py::test_google_trends_expression_preserves_duplicate_term",
         "ancestry_mmm/tests/test_uk_production_decisions.py::test_search_taxonomy_requires_explicit_deeper_child_parent"
+      ]
+    },
+    {
+      "requirement_id": "REQ-NBT-005",
+      "status": "approved_for_implementation",
+      "record_path": "docs/approved_requirements/REQ-NBT-005.md",
+      "affected_modules": [
+        "ancestry_mmm/core/net_billthrough.py",
+        "ancestry_mmm/pages/03_Structure_Segments_Markets.py",
+        "docs/approved_requirements/REQ-NBT-005.md",
+        "docs/approved_requirements/index.json",
+        "docs/decision_log.md"
+      ],
+      "required_tests": [
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_approved_requirements_readme_exists",
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_index_json_exists",
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_index_json_is_valid",
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_indexed_records_exist",
+        "ancestry_mmm/tests/test_requirements_index_conformance.py::test_requirement_ids_are_unique",
+        "ancestry_mmm/tests/test_requirements_index_conformance.py::test_every_record_path_exists",
+        "ancestry_mmm/tests/test_requirements_index_conformance.py::test_every_indexed_test_node_is_collectable",
+        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_no_metadata_is_not_assessed",
+        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_unconfigured_window_is_not_assessed_not_false",
+        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_thirty_day_window_mature_when_elapsed",
+        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_thirty_day_window_not_mature_when_recent",
+        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_accepts_dict_metadata",
+        "ancestry_mmm/tests/test_net_billthrough.py::TestOfficialMaturityReadiness::test_maturity_window_days_changes_completeness_fingerprint",
+        "ancestry_mmm/tests/test_structure_net_billthrough_apptest.py::TestNBTMaturityWindowUI::test_nbt_section_renders_with_maturity_window_field",
+        "ancestry_mmm/tests/test_structure_net_billthrough_apptest.py::TestNBTMaturityWindowUI::test_setting_the_maturity_window_updates_the_live_readiness_readout",
+        "ancestry_mmm/tests/test_structure_net_billthrough_apptest.py::TestNBTMaturityWindowUI::test_configured_maturity_window_shows_readiness_readout"
+      ]
+    },
+    {
+      "requirement_id": "REQ-COVERAGE-002",
+      "status": "approved_for_implementation",
+      "record_path": "docs/approved_requirements/REQ-COVERAGE-002.md",
+      "affected_modules": [
+        "ancestry_mmm/core/missing_media_evidence.py",
+        "docs/missing_media_threshold_recommendation.md",
+        "docs/approved_requirements/REQ-COVERAGE-002.md",
+        "docs/approved_requirements/index.json",
+        "docs/decision_log.md",
+        "ancestry_mmm/core/market_data_capability.py",
+        "ancestry_mmm/core/official_preparation.py",
+        "ancestry_mmm/application/official_preparation_service.py",
+        "ancestry_mmm/pages/03_Structure_Segments_Markets.py"
+      ],
+      "required_tests": [
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_approved_requirements_readme_exists",
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_index_json_exists",
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_index_json_is_valid",
+        "ancestry_mmm/tests/test_outcome_approval.py::TestAuthorityConsistency::test_indexed_records_exist",
+        "ancestry_mmm/tests/test_requirements_index_conformance.py::test_requirement_ids_are_unique",
+        "ancestry_mmm/tests/test_requirements_index_conformance.py::test_every_record_path_exists",
+        "ancestry_mmm/tests/test_requirements_index_conformance.py::test_every_indexed_test_node_is_collectable",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_internal_gap_is_classified_correctly",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_edge_gap_at_start_is_classified_correctly",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_unknown_state_is_a_gap_by_default",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_observed_zero_segments_are_never_gaps",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_named_event_overlap_is_detected_only_within_market_scope",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_spend_companion_evidence_when_covering_and_when_absent",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestDiagnoseGaps::test_companion_with_no_overlapping_segment_is_none_not_false",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEvaluateCandidateReconstructionMethod::test_returns_one_result_per_valid_gap_length_and_position",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEvaluateCandidateReconstructionMethod::test_gap_length_that_does_not_fit_is_skipped_not_padded",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEvaluateCandidateReconstructionMethod::test_mae_is_computed_correctly",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEvaluateCandidateReconstructionMethod::test_mape_is_none_when_a_true_value_is_zero",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEvaluateCandidateReconstructionMethod::test_reconstruct_returning_wrong_length_raises",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEvaluateCandidateReconstructionMethod::test_mismatched_input_lengths_raise",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEstimationReadinessPolicy::test_recommendation_only_by_default",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEstimationReadinessPolicy::test_adopted_policy_requires_attribution",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEstimationReadinessPolicy::test_adopted_policy_with_attribution_succeeds",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestEstimationReadinessPolicy::test_negative_thresholds_rejected",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_no_policy_always_blocks",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_edge_gap_blocked_unless_policy_allows_it",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_exceeds_missing_week_count_blocks",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_exceeds_consecutive_run_blocks",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_within_missing_week_count_and_run_is_estimable",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_threshold_without_evidence_blocks",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_within_threshold_is_estimable",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_exceeding_threshold_blocks",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_no_policy_supplied_is_unchanged_from_today",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_supplied_but_gap_within_limits_still_supported",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_supplied_and_gap_exceeds_missing_week_count_blocks",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_requiring_evidence_with_none_supplied_blocks",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_requiring_evidence_with_matching_evidence_supplied_passes",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_edge_gap_blocked_by_an_adopted_policy",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_never_examines_non_estimated_states",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEstimationReadinessPolicyIntegration::test_policy_does_not_affect_fully_observed_records",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEvidenceIsScopedByMarket::test_each_market_uses_only_its_own_evidence",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestEvidenceIsScopedByMarket::test_evidence_supplied_only_for_one_market_never_covers_another",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestRecommendationOnlyPolicyNeverGatesOfficialReadiness::test_recommendation_only_policy_cannot_block_official_readiness",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestRecommendationOnlyPolicyNeverGatesOfficialReadiness::test_adopted_policy_can_block_readiness_when_thresholds_fail",
+        "ancestry_mmm/tests/test_market_data_capability.py::TestRecommendationOnlyPolicyNeverGatesOfficialReadiness::test_distinction_is_visible_in_to_dict",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_evidence_at_a_different_gap_length_is_never_borrowed",
+        "ancestry_mmm/tests/test_missing_media_evidence.py::TestAssessEstimationReadiness::test_mape_missing_for_the_relevant_gap_length_blocks_not_borrows"
       ]
     }
   ]

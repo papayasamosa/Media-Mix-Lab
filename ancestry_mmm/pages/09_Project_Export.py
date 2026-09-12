@@ -9,6 +9,7 @@ duplicated. WP2 also persists the official canonical preparation evidence
 and its durable native frame through the existing persistence boundary.
 """
 
+import io
 import json
 import sys
 import uuid
@@ -57,6 +58,9 @@ from ancestry_mmm.core.persistence import (
     resolve_imported_outcome_reconciliation_groups,
     resolve_imported_experiments,
     resolve_imported_named_events,
+    resolve_imported_outcome_valuation_records,
+    resolve_imported_fx_rate_set,
+    resolve_imported_fx_rate_records,
     verify_imported_approval,
     UnsafeZipEntryError,
     audit_project_resumability,
@@ -67,8 +71,10 @@ from ancestry_mmm.application.experiment_service import (
 )
 from ancestry_mmm.application.fx_service import (
     FXUploadValidationError,
+    build_finance_constant_dollar_rate_set,
     build_manual_fx_rate_set,
 )
+from ancestry_mmm.core.fx_rates import available_vintage_year_ids
 from ancestry_mmm.application.event_service import (
     registry_has_content as named_event_registry_has_content,
     registry_to_dict as named_event_registry_to_dict,
@@ -768,6 +774,79 @@ with SectionCard(
                 except (FXUploadValidationError, ValueError, TypeError) as exc:
                     st.error(f"FX rate-set validation failed: {exc}")
 
+    with st.expander("Upload Finance constant-dollar table", expanded=False):
+        st.caption(
+            "The actual Finance-published format: one row per (year_id, "
+            "currency_code) with local_to_usd_conversion_rate. `year_id` is "
+            "the Finance constant-dollar *vintage* - the table edition - "
+            "never the calendar year of a media, outcome, or valuation "
+            "observation: the selected vintage's rate for a currency "
+            "applies to every historical observation of that currency "
+            "alike. USD amount = local currency amount x "
+            "local_to_usd_conversion_rate."
+        )
+        _finance_upload = st.file_uploader(
+            "Finance table (CSV or XLSX)",
+            type=["csv", "xlsx"],
+            key="finance_fx_upload",
+        )
+        _finance_meta_cols = st.columns(2)
+        _finance_name = _finance_meta_cols[0].text_input(
+            "Rate-set name",
+            value="Finance constant-dollar table",
+            key="finance_fx_name",
+        )
+        _finance_provider = _finance_meta_cols[1].text_input(
+            "Provider identity", value="Finance", key="finance_fx_provider"
+        )
+        if st.button("Validate and load Finance table", key="load_finance_fx_rate_set"):
+            if _finance_upload is None:
+                st.error("Choose a Finance constant-dollar file before loading it.")
+            else:
+                try:
+                    _finance_bytes = _finance_upload.getvalue()
+                    if _finance_upload.name.lower().endswith(".xlsx"):
+                        _finance_frame = pd.read_excel(io.BytesIO(_finance_bytes))
+                    else:
+                        _finance_frame = pd.read_csv(io.BytesIO(_finance_bytes))
+                    _finance_version = (
+                        int((_fx_current or {}).get("rate_set_version", 0)) + 1
+                    )
+                    (
+                        _finance_set,
+                        _finance_records,
+                    ) = build_finance_constant_dollar_rate_set(
+                        _finance_frame,
+                        rate_set_id=(_fx_current or {}).get(
+                            "rate_set_id", "finance-constant-dollar-pending"
+                        ),
+                        rate_set_version=_finance_version,
+                        name=_finance_name,
+                        provider=_finance_provider,
+                    )
+                    set_state("fx_rate_set", _finance_set.to_dict())
+                    set_state(
+                        "fx_rate_records",
+                        [record.to_dict() for record in _finance_records],
+                    )
+                    # A newly loaded table may not carry forward the
+                    # previously selected vintage - reset to "use the
+                    # latest available vintage" (the required default)
+                    # rather than silently keep an analyst override that
+                    # may no longer exist in this table.
+                    set_state("fx_vintage_year_id", None)
+                    _finance_vintages = available_vintage_year_ids(_finance_records)
+                    st.success(
+                        f"Validated {len(_finance_records)} Finance "
+                        f"constant-dollar record(s) across "
+                        f"{len(_finance_vintages)} vintage(s): "
+                        f"{', '.join(_finance_vintages)}. The set is pending "
+                        "Finance approval and is now included in the next bundle."
+                    )
+                    st.rerun()
+                except (FXUploadValidationError, ValueError, TypeError) as exc:
+                    st.error(f"Finance constant-dollar upload failed: {exc}")
+
 st.markdown("---")
 st.markdown("### Build durable project bundle")
 st.caption(
@@ -901,6 +980,7 @@ if st.button("Build export bundle", type="primary"):
             currency_context=get_state("currency_context"),
             fx_rate_set=get_state("fx_rate_set"),
             fx_rate_records=get_state("fx_rate_records"),
+            fx_vintage_year_id=get_state("fx_vintage_year_id"),
             value_mapping=get_state("value_mapping"),
             outcome_valuation_records=get_state("outcome_valuation_records") or [],
             # REQ-GRAPH-001 work package (graph portability): every saved
@@ -1427,10 +1507,17 @@ if uploaded_zip is not None and st.button("Import bundle"):
             "future_assumption_bundles", imported.get("future_assumption_bundles")
         )
         set_state("candidate_a_fit_inputs", imported.get("candidate_a_fit_inputs"))
-        set_state(
-            "outcome_valuation_records",
-            imported.get("outcome_valuation_records") or [],
+        # REQ-ECON-002/UK FH MMM brief (2026-09-10) Workstream A: mirrors
+        # resolve_imported_outcome_approvals's never-trust-silently contract
+        # - a malformed valuation record is quarantined (dropped, named by
+        # index/identity) rather than crashing deep inside a later reporting
+        # call or being silently kept.
+        _resolved_valuation_records, _valuation_warnings = (
+            resolve_imported_outcome_valuation_records(imported)
         )
+        set_state("outcome_valuation_records", _resolved_valuation_records)
+        for _valuation_warning in _valuation_warnings:
+            st.warning(_valuation_warning)
         for _search_object_warning in _search_object_warnings:
             st.warning(_search_object_warning)
         # REQ-COVERAGE-001 S3: restore the quarantine-checked immutable
@@ -1543,8 +1630,26 @@ if uploaded_zip is not None and st.button("Import bundle"):
         # of this same session round-trips the identical policy/context.
         set_state("counterfactual_policy", imported.get("counterfactual_policy"))
         set_state("currency_context", imported.get("currency_context"))
-        set_state("fx_rate_set", imported.get("fx_rate_set"))
-        set_state("fx_rate_records", imported.get("fx_rate_records") or [])
+        # REQ-FX-001/002/UK FH MMM brief (2026-09-10) Workstream A: mirrors
+        # resolve_imported_outcome_approvals's never-trust-silently contract
+        # for the FX rate set and its underlying rate observations.
+        _resolved_fx_rate_set, _fx_rate_set_warnings = resolve_imported_fx_rate_set(
+            imported
+        )
+        set_state("fx_rate_set", _resolved_fx_rate_set)
+        for _fx_rate_set_warning in _fx_rate_set_warnings:
+            st.warning(_fx_rate_set_warning)
+        _resolved_fx_rate_records, _fx_rate_records_warnings = (
+            resolve_imported_fx_rate_records(imported)
+        )
+        set_state("fx_rate_records", _resolved_fx_rate_records)
+        for _fx_rate_records_warning in _fx_rate_records_warnings:
+            st.warning(_fx_rate_records_warning)
+        # Finance constant-dollar correction (2026-09-10): the selected
+        # vintage is restored verbatim - never re-defaulted to "latest" on
+        # import - so a re-opened project reproduces the exact economics it
+        # was saved with (REQ-FX-002 addendum).
+        set_state("fx_vintage_year_id", imported.get("fx_vintage_year_id"))
         set_state("value_mapping", imported.get("value_mapping"))
         # Fresh review finding: a cached constrained_result/unconstrained_
         # result left over from a DIFFERENT project earlier in this same

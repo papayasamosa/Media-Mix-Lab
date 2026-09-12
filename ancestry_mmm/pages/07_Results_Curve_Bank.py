@@ -70,6 +70,10 @@ from ancestry_mmm.core.curve_artifact import (
     load_curve_artifact_store,
 )
 from ancestry_mmm.core.outcome_approval import OutcomeApproval
+from ancestry_mmm.core.fx_rates import FXRateRecord
+from ancestry_mmm.application.fx_service import (
+    available_constant_dollar_vintage_year_ids,
+)
 from ancestry_mmm.application.curve_service import (
     CurveGovernanceError,
     CurveService,
@@ -396,6 +400,90 @@ def _render_period_selector(available_weeks, market, key_prefix, *, columns=None
     return grain, period_label, custom_start, custom_end
 
 
+def _fx_request_kwargs(market: str, channel: str | None = None) -> dict:
+    """Finance constant-dollar correction (2026-09-10): the governed
+    spend-currency and Finance FX inputs to merge into every
+    `HistoricalOutcomeValuationRequest` for `market` (and, for a
+    single-channel view, `channel`), so attributable spend is never
+    silently mislabelled with the value's currency when the two differ.
+
+    `spend_currency` is never inferred from the market - a UK channel's
+    spend may already be in USD, and another UK channel's spend may be
+    in GBP, so a blanket "market -> currency" mapping is never used.
+    Instead it comes from that specific channel's own governed
+    `ChannelMediaUnitConfig.currency`. For a "Total (all media)" view
+    (`channel=None`), spend_currency is left unset unless every
+    currency-declaring channel configured for `market` shares the
+    identical currency - a mixed-currency total cannot be safely
+    converted with a single rate, and leaving it `None` simply reuses
+    the existing "no conversion attempted" contract rather than
+    inventing a resolution.
+
+    `fx_vintage_year_id` selects the Finance constant-dollar vintage
+    (see `_render_fx_vintage_selector`); `None` defers to the service's
+    own "use latest available vintage" default."""
+    if channel is not None:
+        config = market_config.get_media_unit_config(market, channel)
+        spend_currency = (config.currency or None) if config else None
+    else:
+        channel_currencies = {
+            config.currency
+            for config in market_config.channel_media_units.values()
+            if config.market == market and config.currency
+        }
+        spend_currency = (
+            next(iter(channel_currencies)) if len(channel_currencies) == 1 else None
+        )
+    return dict(
+        spend_currency=spend_currency,
+        fx_rate_set=get_state("fx_rate_set"),
+        fx_rate_records=get_state("fx_rate_records") or [],
+        fx_vintage_year_id=get_state("fx_vintage_year_id"),
+    )
+
+
+def _render_fx_vintage_selector() -> None:
+    """Finance constant-dollar correction (2026-09-10): lets the analyst
+    pick which Finance constant-dollar vintage the entire historical
+    reporting period is converted at (default: the latest available
+    vintage in the uploaded Finance table). Persists the choice to
+    `fx_vintage_year_id` session state, which `_fx_request_kwargs` reads
+    for both the single-period view and the period comparison below -
+    one selection, one reporting basis, never two independently chosen
+    vintages on the same page. Changing this recalculates monetary/
+    economic outputs only - it never triggers (or requires) a count-model
+    refit. Renders nothing when no Finance FX rate set has been uploaded
+    yet (`docs/approved_requirements/REQ-FX-002.md` addendum)."""
+    fx_records_state = get_state("fx_rate_records") or []
+    if not fx_records_state:
+        return
+    fx_records = [FXRateRecord.from_dict(item) for item in fx_records_state]
+    available_vintages = available_constant_dollar_vintage_year_ids(fx_records)
+    if not available_vintages:
+        return
+    stored_vintage = get_state("fx_vintage_year_id")
+    default_vintage = (
+        stored_vintage
+        if stored_vintage in available_vintages
+        else available_vintages[-1]
+    )
+    selected_vintage = st.selectbox(
+        "Finance constant-dollar vintage",
+        available_vintages,
+        index=available_vintages.index(default_vintage),
+        help=(
+            "The selected vintage's rate for each currency applies to "
+            "every historical observation of that currency alike - e.g. "
+            "a 2023 GBP amount and a 2025 GBP amount both use the same "
+            "vintage's GBP rate. Changing vintage recalculates monetary/"
+            "economic outputs; it does not refit the count model."
+        ),
+        key="ev_fx_vintage_select",
+    )
+    set_state("fx_vintage_year_id", selected_vintage)
+    st.caption(f"USD constant-dollar basis: Finance {selected_vintage} vintage.")
+
+
 def _render_economic_valuation_reporting(meta, trace, frame, records):
     """Historical ROI/incremental-value reporting (WP2D-ui). Routes every
     calculation through `OutcomeValuationReportingService` - one join
@@ -478,6 +566,7 @@ def _render_economic_valuation_reporting(meta, trace, frame, records):
         period_label=period_label,
         custom_range_start=custom_start,
         custom_range_end=custom_end,
+        **_fx_request_kwargs(report_market, channel),
     )
     with st.spinner("Computing posterior incremental value..."):
         result = OutcomeValuationReportingService().evaluate_period(request)
@@ -497,6 +586,8 @@ def _render_valuation_result(result, *, heading=None, key_suffix=""):
         for error in result.errors:
             st.error(error)
         return
+    for warning in result.warnings:
+        st.warning(warning)
 
     attribution = result.attribution
     st.caption(
@@ -641,6 +732,7 @@ def _render_period_comparison(meta, trace, frame, records):
         valuation_kind=cmp_valuation_kind,
         weekly_valuation_records=records,
         channel=channel,
+        **_fx_request_kwargs(cmp_market, channel),
     )
     request_a = HistoricalOutcomeValuationRequest(
         grain=grain_a,
@@ -799,6 +891,7 @@ def _render_economic_valuation_section(meta, trace, frame, outcome_definitions):
         )
         return
 
+    _render_fx_vintage_selector()
     _render_economic_valuation_reporting(meta, trace, frame, records)
 
     st.markdown("#### Compare two periods")
