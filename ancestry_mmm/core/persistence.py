@@ -1674,7 +1674,17 @@ def resolve_imported_fx_rate_records(
     Absent `fx_rate_records` resolves to `([], [])` - "no FX rates supplied
     yet" is not an error; economics that need one still fail closed
     downstream (REQ-FX-003/006).
+
+    Automated review finding (2026-09-12, PR #363): a malformed `rate`
+    field (e.g. a non-numeric string) makes `Decimal(str(...))` raise
+    `decimal.InvalidOperation`, not `ValueError`/`TypeError` - previously
+    uncaught here, aborting the entire project import instead of
+    quarantining just that one record. Caught alongside the existing
+    exception types so it quarantines exactly like any other malformed
+    record.
     """
+    from decimal import InvalidOperation
+
     from .fx_rates import FXRateRecord
 
     raw_records = imported.get("fx_rate_records")
@@ -1692,7 +1702,13 @@ def resolve_imported_fx_rate_records(
             continue
         try:
             normalised.append(FXRateRecord.from_dict(item).to_dict())
-        except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        except (
+            TypeError,
+            ValueError,
+            KeyError,
+            AttributeError,
+            InvalidOperation,
+        ) as exc:
             rate_id = item.get("rate_id", "<unknown>")
             warnings.append(
                 f"FX rate record {index} (rate_id={rate_id!r}) was "

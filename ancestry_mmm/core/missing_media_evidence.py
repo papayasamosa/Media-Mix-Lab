@@ -36,6 +36,7 @@ Three pieces, matching the brief's "Implement now" list:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import date
 from typing import Callable, Optional, Sequence
@@ -351,6 +352,23 @@ def evaluate_candidate_reconstruction_method(
     return tuple(results)
 
 
+def _worst_of(values: Sequence[float]) -> Optional[float]:
+    """Automated review finding (2026-09-12, PR #363): a non-finite
+    (NaN/inf) reconstruction error must fail closed, never silently pass
+    readiness merely because `nan > threshold` evaluates to `False` in
+    Python. `max()` over a list containing NaN is itself unreliable
+    (order-dependent, per IEEE 754 comparison semantics), so NaN/inf is
+    never handed to `max()` - any non-finite value among `values` makes
+    the whole result `math.inf` (worse than every possible finite
+    threshold), rather than being silently dropped or compared
+    numerically. Returns `None` only when `values` is empty."""
+    if not values:
+        return None
+    if any(not math.isfinite(v) for v in values):
+        return math.inf
+    return max(values)
+
+
 @dataclass(frozen=True)
 class EstimationEvidenceSummary:
     """One activity/variable's collected holdout evidence across every
@@ -374,7 +392,7 @@ class EstimationEvidenceSummary:
             for r in self.results
             if r.holdout_gap_length_weeks == gap_length
         ]
-        return max(matching) if matching else None
+        return _worst_of(matching)
 
     def worst_mape_for_gap_length(self, gap_length: int) -> Optional[float]:
         """The same exact-gap-length matching as `worst_mae_for_gap_length`,
@@ -389,7 +407,7 @@ class EstimationEvidenceSummary:
             if r.holdout_gap_length_weeks == gap_length
             and r.reconstruction_error_mape is not None
         ]
-        return max(matching) if matching else None
+        return _worst_of(matching)
 
     def to_dict(self) -> dict:
         return {
@@ -530,6 +548,14 @@ def assess_estimation_readiness(
             ),
         )
 
+    # Open gap, deliberately not resolved here (docs/missing_media_
+    # threshold_recommendation.md §6): this compares max_missing_week_count
+    # against this one gap's own missing_week_count, identically to
+    # max_consecutive_missing_run below - a record with several disjoint
+    # short gaps is checked gap-by-gap, never against a summed total across
+    # the record. No approved requirement defines max_missing_week_count as
+    # per-gap vs. record-total, so that semantic is left exactly as-is
+    # pending a reviewer decision.
     if (
         policy.max_missing_week_count is not None
         and diagnostics.missing_week_count > policy.max_missing_week_count

@@ -130,7 +130,44 @@ one this harness can answer by itself.
   the synthetic series used is representative of any real Ancestry channel's actual
   noise/seasonality/promotional structure.
 
-## 6. Reproduction
+## 6. Open implementation gap (not yet resolved): `max_missing_week_count` scope
+
+Automated review finding (2026-09-12, PR #363) on `assess_estimation_readiness`:
+`max_missing_week_count` and `max_consecutive_missing_run` are currently checked against
+the *identical* value — `GapDiagnostics.missing_week_count`, one disjoint gap-state run at
+a time (`_estimation_policy_blocking_reason` in `core.market_data_capability` calls
+`assess_estimation_readiness` once per gap in `diagnose_gaps`'s result). A record with
+several separate short gaps (e.g. three disjoint 2-week runs) currently has each run
+checked independently against `max_missing_week_count`, so a limit of 4 weeks would pass
+every one of those runs individually even though the record is missing 6 weeks in total.
+
+Neither this document nor `REQ-COVERAGE-001` (whose "Out of scope" section explicitly
+withholds approval of "any specific validation threshold, coverage-percentage cutoff, or
+approval rule") defines whether `max_missing_week_count` is meant to be a **per-gap**
+limit (its current, actual behaviour, which makes it redundant with
+`max_consecutive_missing_run`) or a **total-across-the-record** limit. This is a genuine
+open policy question, not a coding defect with one obvious correct fix, so it is
+deliberately **not changed** in PR #363 - changing the semantics of an already-shipped
+policy field without an approved decision would be exactly the kind of invented threshold
+`REQ-COVERAGE-001` forbids this module from supplying on its own.
+
+**Recommended future interpretation, pending Product/Finance/reviewer approval** (would
+give the two fields genuinely distinct meanings, matching what their names already imply):
+
+- `max_missing_week_count` = total number of missing weeks across the complete
+  variable/market series (summed across every disjoint gap-state run for that
+  `(variable_id, market)`), not any single run.
+- `max_consecutive_missing_run` = length of the longest single contiguous missing gap
+  (`GapDiagnostics.missing_week_count` for the worst run) - unchanged from today's
+  behaviour.
+
+Implementing this would require `assess_estimation_readiness` (or its caller) to receive
+the record's full set of gaps, not one `GapDiagnostics` at a time, so it can sum missing
+weeks across runs before comparing to `max_missing_week_count` while still comparing the
+single worst run to `max_consecutive_missing_run`. Left exactly as-is until that decision
+is made.
+
+## 7. Reproduction
 
 ```python
 from ancestry_mmm.core.missing_media_evidence import evaluate_candidate_reconstruction_method

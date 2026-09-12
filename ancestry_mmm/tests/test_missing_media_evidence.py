@@ -5,6 +5,8 @@ and the fail-closed readiness gate.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from ancestry_mmm.core.coverage import (
@@ -26,6 +28,7 @@ from ancestry_mmm.core.missing_media_evidence import (
     EstimationEvidenceSummary,
     EstimationReadinessPolicy,
     GapDiagnostics,
+    HoldoutEvaluationResult,
     assess_estimation_readiness,
     diagnose_gaps,
     evaluate_candidate_reconstruction_method,
@@ -506,3 +509,171 @@ class TestAssessEstimationReadiness:
             self._internal_gap(), policy=policy, evidence=evidence
         )
         assert result.status == READINESS_BLOCKED_NO_EVIDENCE
+
+
+def _evidence_with_mape(mape: float, gap_length: int = 1) -> EstimationEvidenceSummary:
+    return EstimationEvidenceSummary(
+        variable_id="tv_uk",
+        market="UK",
+        evaluated_at="2026-09-10",
+        n_observed_weeks_used=8,
+        results=(
+            HoldoutEvaluationResult(
+                method_name="candidate",
+                method_description="test",
+                holdout_gap_length_weeks=gap_length,
+                holdout_position="end",
+                holdout_start_week="2025-02-03",
+                n_holdout_weeks=gap_length,
+                reconstruction_error_mae=5.0,
+                reconstruction_error_mape=mape,
+            ),
+        ),
+    )
+
+
+class TestNonFiniteReconstructionErrorsFailClosed:
+    """Regression (automated review finding, P1, 2026-09-12): a non-finite
+    (NaN/inf) reconstruction error must never silently pass readiness -
+    `max()` over a list containing NaN is itself unreliable
+    (order-dependent, per IEEE 754 comparison semantics), and
+    `nan > threshold` always evaluates to `False` in Python, so this must
+    be caught explicitly rather than relying on that comparison."""
+
+    def _gap(self, **overrides) -> GapDiagnostics:
+        defaults = dict(
+            variable_id="tv_uk",
+            market="UK",
+            gap_start="2025-02-03",
+            gap_end="2025-02-10",
+            state=STATE_MISSING_EXPECTED,
+            missing_week_count=1,
+            is_internal=True,
+            is_at_start_of_history=False,
+            is_at_end_of_history=False,
+        )
+        defaults.update(overrides)
+        return GapDiagnostics(**defaults)
+
+    def test_nan_mape_fails_closed(self):
+        policy = EstimationReadinessPolicy(
+            policy_id="p1", max_reconstruction_error_mape=1000.0
+        )
+        evidence = _evidence_with_mape(float("nan"))
+        result = assess_estimation_readiness(
+            self._gap(), policy=policy, evidence=evidence
+        )
+        assert result.status == READINESS_BLOCKED_EXCEEDS_RECONSTRUCTION_ERROR
+
+    def test_positive_infinity_mape_fails_closed(self):
+        policy = EstimationReadinessPolicy(
+            policy_id="p1", max_reconstruction_error_mape=1000.0
+        )
+        evidence = _evidence_with_mape(float("inf"))
+        result = assess_estimation_readiness(
+            self._gap(), policy=policy, evidence=evidence
+        )
+        assert result.status == READINESS_BLOCKED_EXCEEDS_RECONSTRUCTION_ERROR
+
+    def test_negative_infinity_mape_fails_closed(self):
+        """Not physically sensical for a MAPE (which is non-negative by
+        construction), but still representable as a float - must be
+        treated as non-finite, never as "very good" merely because it
+        numerically compares less than any positive threshold."""
+        policy = EstimationReadinessPolicy(
+            policy_id="p1", max_reconstruction_error_mape=1000.0
+        )
+        evidence = _evidence_with_mape(float("-inf"))
+        result = assess_estimation_readiness(
+            self._gap(), policy=policy, evidence=evidence
+        )
+        assert result.status == READINESS_BLOCKED_EXCEEDS_RECONSTRUCTION_ERROR
+
+    def test_ordinary_finite_mape_is_unaffected(self):
+        policy = EstimationReadinessPolicy(
+            policy_id="p1", max_reconstruction_error_mape=50.0
+        )
+        evidence = _evidence_with_mape(10.0)
+        result = assess_estimation_readiness(
+            self._gap(), policy=policy, evidence=evidence
+        )
+        assert result.status == READINESS_ESTIMABLE_WITH_EVIDENCE
+
+    def test_ordinary_finite_mape_still_blocks_when_it_exceeds_threshold(self):
+        policy = EstimationReadinessPolicy(
+            policy_id="p1", max_reconstruction_error_mape=5.0
+        )
+        evidence = _evidence_with_mape(10.0)
+        result = assess_estimation_readiness(
+            self._gap(), policy=policy, evidence=evidence
+        )
+        assert result.status == READINESS_BLOCKED_EXCEEDS_RECONSTRUCTION_ERROR
+
+    def test_worst_mape_for_gap_length_returns_inf_for_nan(self):
+        evidence = _evidence_with_mape(float("nan"))
+        assert evidence.worst_mape_for_gap_length(1) == math.inf
+
+    def test_worst_mape_for_gap_length_returns_finite_value_unchanged(self):
+        evidence = _evidence_with_mape(12.5)
+        assert evidence.worst_mape_for_gap_length(1) == 12.5
+
+    def test_worst_mae_for_gap_length_returns_inf_for_nan(self):
+        evidence = EstimationEvidenceSummary(
+            variable_id="tv_uk",
+            market="UK",
+            evaluated_at="2026-09-10",
+            n_observed_weeks_used=8,
+            results=(
+                HoldoutEvaluationResult(
+                    method_name="candidate",
+                    method_description="test",
+                    holdout_gap_length_weeks=1,
+                    holdout_position="end",
+                    holdout_start_week="2025-02-03",
+                    n_holdout_weeks=1,
+                    reconstruction_error_mae=float("nan"),
+                    reconstruction_error_mape=10.0,
+                ),
+            ),
+        )
+        assert evidence.worst_mae_for_gap_length(1) == math.inf
+
+    def test_one_non_finite_trial_among_others_still_fails_closed(self):
+        """A mix of one good and one broken (NaN) trial at the same gap
+        length must still block - the broken trial is never silently
+        outvoted by a good one at the same length."""
+        evidence = EstimationEvidenceSummary(
+            variable_id="tv_uk",
+            market="UK",
+            evaluated_at="2026-09-10",
+            n_observed_weeks_used=8,
+            results=(
+                HoldoutEvaluationResult(
+                    method_name="good",
+                    method_description="test",
+                    holdout_gap_length_weeks=1,
+                    holdout_position="start",
+                    holdout_start_week="2025-01-06",
+                    n_holdout_weeks=1,
+                    reconstruction_error_mae=1.0,
+                    reconstruction_error_mape=2.0,
+                ),
+                HoldoutEvaluationResult(
+                    method_name="broken",
+                    method_description="test",
+                    holdout_gap_length_weeks=1,
+                    holdout_position="end",
+                    holdout_start_week="2025-02-03",
+                    n_holdout_weeks=1,
+                    reconstruction_error_mae=float("nan"),
+                    reconstruction_error_mape=float("nan"),
+                ),
+            ),
+        )
+        policy = EstimationReadinessPolicy(
+            policy_id="p1", max_reconstruction_error_mape=1000.0
+        )
+        result = assess_estimation_readiness(
+            self._gap(), policy=policy, evidence=evidence
+        )
+        assert result.status == READINESS_BLOCKED_EXCEEDS_RECONSTRUCTION_ERROR

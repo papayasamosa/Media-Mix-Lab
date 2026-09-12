@@ -1703,6 +1703,38 @@ def test_resolve_imported_fx_rate_records_reports_malformed_records_by_rate_id()
     assert "r1" in warnings[0]
 
 
+def test_resolve_imported_fx_rate_records_quarantines_a_malformed_decimal_rate():
+    """Regression (automated review finding, P2, 2026-09-12): a non-numeric
+    rate string makes Decimal(str(...)) raise decimal.InvalidOperation, not
+    ValueError/TypeError - this must be quarantined like any other
+    malformed record, never crash the whole import."""
+    imported = {
+        "fx_rate_records": [_valid_fx_rate_record_dict(rate="not-a-rate")],
+    }
+    records, warnings = resolve_imported_fx_rate_records(imported)
+    assert records == []
+    assert len(warnings) == 1
+    assert "r1" in warnings[0]
+    assert "malformed" in warnings[0]
+
+
+def test_resolve_imported_fx_rate_records_quarantines_malformed_but_keeps_valid_ones():
+    """A malformed decimal rate in one record must not take down the
+    other, genuinely valid records in the same import - each record is
+    independently quarantined or kept."""
+    imported = {
+        "fx_rate_records": [
+            _valid_fx_rate_record_dict(rate_id="r1", rate="not-a-rate"),
+            _valid_fx_rate_record_dict(rate_id="r2", rate="1.30"),
+        ],
+    }
+    records, warnings = resolve_imported_fx_rate_records(imported)
+    assert len(records) == 1
+    assert records[0]["rate_id"] == "r2"
+    assert len(warnings) == 1
+    assert "r1" in warnings[0]
+
+
 def _valid_fx_rate_set_dict(**overrides) -> dict:
     import hashlib
 
