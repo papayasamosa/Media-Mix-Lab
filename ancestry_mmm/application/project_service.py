@@ -288,8 +288,7 @@ class ProjectService:
         from ancestry_mmm.core.persistence import (
             import_project,
             reconstruct_model_state,
-            resolve_imported_population_reference_records,
-            resolve_imported_population_reference_set,
+            resolve_imported_population_reference_artifacts,
             resolve_imported_population_treatment_specification,
         )
 
@@ -304,28 +303,35 @@ class ProjectService:
             errors.append(f"Project import failed: {exc}")
             return ProjectServiceResult(success=False, errors=errors)
 
-        # REQ-POPULATION-001 (2026-09-13 review follow-up): restore the
-        # three governed population artefacts through their quarantine
-        # resolvers before they become part of the project state this
-        # method returns - `import_project()` above only reads the raw,
-        # unvalidated bundle JSON; a malformed/quarantined record must
-        # never silently reappear as valid state merely because it was
-        # present in the file. Restoring an active treatment specification
-        # here does not run or activate anything by itself - it is still
-        # blocked at fit time by `core.population_preparation`'s
-        # unresolved-policy guard (DD-020/MD-025) the first time it is
-        # actually passed to `build_model_for_spec`.
-        population_reference_records, pop_records_warnings = (
-            resolve_imported_population_reference_records(project_state)
-        )
-        population_reference_set, pop_set_warnings = (
-            resolve_imported_population_reference_set(project_state)
-        )
+        # REQ-POPULATION-001 (2026-09-13 review follow-up, extended
+        # 2026-09-13 second pass): restore the three governed population
+        # artefacts through their quarantine resolvers before they become
+        # part of the project state this method returns - `import_
+        # project()` above only reads the raw, unvalidated bundle JSON; a
+        # malformed/quarantined record must never silently reappear as
+        # valid state merely because it was present in the file.
+        # `resolve_imported_population_reference_artifacts` resolves the
+        # set and records *together* and cross-checks the set's
+        # `records_fingerprint` against the records that actually survive
+        # quarantine - calling the set/records resolvers independently
+        # here would reopen exactly the fingerprint-reconciliation gap
+        # that function exists to close, and every application import
+        # path must go through it rather than each doing its own,
+        # potentially divergent, reconciliation. Restoring an active
+        # treatment specification here does not run or activate anything
+        # by itself - it is still blocked at fit time by `core.
+        # population_preparation`'s unresolved-policy guard (DD-020/
+        # MD-025) the first time it is actually passed to `build_model_
+        # for_spec`.
+        (
+            population_reference_set,
+            population_reference_records,
+            pop_artifact_warnings,
+        ) = resolve_imported_population_reference_artifacts(project_state)
         population_treatment_specification, pop_spec_warnings = (
             resolve_imported_population_treatment_specification(project_state)
         )
-        warnings.extend(pop_records_warnings)
-        warnings.extend(pop_set_warnings)
+        warnings.extend(pop_artifact_warnings)
         warnings.extend(pop_spec_warnings)
         project_state["population_reference_records"] = population_reference_records
         project_state["population_reference_set"] = population_reference_set

@@ -82,6 +82,7 @@ from ancestry_mmm.core.persistence import (
     resolve_imported_outcome_valuation_records,
     resolve_imported_fx_rate_set,
     resolve_imported_fx_rate_records,
+    resolve_imported_population_reference_artifacts,
     resolve_imported_population_reference_records,
     resolve_imported_population_reference_set,
     resolve_imported_population_treatment_specification,
@@ -1913,6 +1914,156 @@ def test_resolve_imported_population_reference_set_quarantines_unsupported_schem
     assert resolved is None
     assert len(warnings) == 1
     assert "pop-set-2026" in warnings[0]
+
+
+def _matching_population_reference_set_and_records(**record_overrides):
+    """A `(set_dict, [record_dict])` pair whose `records_fingerprint`
+    genuinely describes the accompanying record(s) - built the same way
+    `resolve_imported_population_reference_artifacts` itself recomputes
+    it, so a mismatch in these tests always signals a deliberately
+    introduced discrepancy, never a fixture bug."""
+    from ancestry_mmm.core.population_reference import (
+        PopulationReferenceRecord,
+        compute_population_records_fingerprint,
+    )
+
+    record_dict = _valid_population_reference_record_dict(**record_overrides)
+    fingerprint = compute_population_records_fingerprint(
+        [PopulationReferenceRecord.from_dict(record_dict)]
+    )
+    set_dict = _valid_population_reference_set_dict(records_fingerprint=fingerprint)
+    return set_dict, [record_dict]
+
+
+class TestResolveImportedPopulationReferenceArtifacts:
+    """Codex P2 (2026-09-13, second review pass): resolving
+    `population_reference_set` and `population_reference_records`
+    independently is not enough - the set's `records_fingerprint` can
+    describe different contents than what actually survives import."""
+
+    def test_valid_set_and_matching_records_survives(self):
+        set_dict, records = _matching_population_reference_set_and_records()
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": records,
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_set is not None
+        assert resolved_set["reference_set_id"] == "pop-set-2026"
+        assert len(resolved_records) == 1
+        assert warnings == []
+
+    def test_corrupted_record_causes_mismatch_and_fail_closed_quarantine(self):
+        """The record itself is well-formed (survives its own quarantine
+        check) but its content genuinely differs from what the set's
+        fingerprint describes - e.g. the set was computed over one
+        population value and the bundle's record has another."""
+        set_dict, records = _matching_population_reference_set_and_records(
+            population=1_000_000.0
+        )
+        records[0] = dict(records[0], population=2_000_000.0)
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": records,
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_set is None
+        assert len(resolved_records) == 1  # the record itself is still valid
+        assert any(
+            "does not match the fingerprint recomputed" in warning
+            for warning in warnings
+        )
+        assert any("pop-set-2026" in warning for warning in warnings)
+
+    def test_a_quarantined_record_breaks_a_formerly_matching_set_fingerprint(self):
+        """Two records genuinely match the set's fingerprint as uploaded,
+        but one of them is itself malformed (non-positive population) and
+        gets quarantined by the records resolver - the set's fingerprint
+        now describes a record set that no longer matches what survived,
+        so the set must not be restored as valid either."""
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        good_record = _valid_population_reference_record_dict(
+            population_reference_id="pop-good"
+        )
+        bad_record = _valid_population_reference_record_dict(
+            population_reference_id="pop-bad", population=0.0
+        )
+        # The set's fingerprint is computed over both records as uploaded -
+        # genuinely matching at upload time.
+        fingerprint_over_both = compute_population_records_fingerprint(
+            [PopulationReferenceRecord.from_dict(good_record)]
+            + [PopulationReferenceRecord(**{**bad_record, "population": 1.0})]
+        )
+        set_dict = _valid_population_reference_set_dict(
+            records_fingerprint=fingerprint_over_both
+        )
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": [good_record, bad_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        # bad_record is quarantined by the records resolver first...
+        assert len(resolved_records) == 1
+        assert resolved_records[0]["population_reference_id"] == "pop-good"
+        # ...which leaves the set's own fingerprint no longer reconciling.
+        assert resolved_set is None
+        assert any(
+            "does not match the fingerprint recomputed" in warning
+            for warning in warnings
+        )
+
+    def test_no_automatic_fingerprint_repair_occurs(self):
+        """A mismatch must quarantine the set (to None), never silently
+        rewrite its records_fingerprint to match what actually survived."""
+        set_dict, records = _matching_population_reference_set_and_records()
+        original_fingerprint = set_dict["records_fingerprint"]
+        records[0] = dict(records[0], population=2_000_000.0)
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": records,
+        }
+        resolved_set, _, _ = resolve_imported_population_reference_artifacts(imported)
+        assert resolved_set is None
+        # The input dict itself (and the original fingerprint value) must
+        # never have been mutated in place either.
+        assert set_dict["records_fingerprint"] == original_fingerprint
+
+    def test_absent_set_is_not_affected_by_reconciliation(self):
+        record_dict = _valid_population_reference_record_dict()
+        imported = {"population_reference_records": [record_dict]}
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_set is None
+        assert len(resolved_records) == 1
+        assert warnings == []
+
+    def test_absent_records_with_a_present_set_quarantines_the_set(self):
+        """An empty records list has its own (empty-list) fingerprint,
+        which a non-empty set's records_fingerprint will not match -
+        correctly quarantining a set that claims contents nothing in the
+        bundle actually backs up."""
+        set_dict, _ = _matching_population_reference_set_and_records()
+        imported = {"population_reference_set": set_dict}
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_set is None
+        assert resolved_records == []
+        assert any(
+            "does not match the fingerprint recomputed" in warning
+            for warning in warnings
+        )
 
 
 def _valid_population_treatment_specification_dict(**overrides) -> dict:

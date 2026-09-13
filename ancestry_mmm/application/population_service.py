@@ -28,6 +28,7 @@ import pandas as pd
 from ancestry_mmm.core.population_reference import (
     PopulationReferenceRecord,
     PopulationReferenceSet,
+    PopulationValidationIssue,
     compute_population_records_fingerprint,
     validate_population_records,
 )
@@ -97,6 +98,12 @@ def build_population_reference_set(
     built with ``approval_status="pending"`` by default - saving them does
     not approve them, and building a set never activates population
     treatment (see `core.population_treatment`).
+
+    When ``approval_status="approved"`` is passed directly (there is no
+    separate, later approval stage in this call), duplicate approved
+    references for the same ``(market_id, reference_year)`` also block
+    creation - this repository has no subsequent step that would otherwise
+    catch them. A ``"pending"`` upload (the default) is unaffected.
     """
     if not reference_set_id or not name or not source_name or not owner:
         raise PopulationUploadValidationError(
@@ -158,21 +165,41 @@ def build_population_reference_set(
                 f"Population upload row {index + 1} is invalid: {exc}"
             ) from exc
 
+    # Codex P2 (2026-09-13, second pass): `validate_population_records`
+    # always runs now, not only when `known_market_ids` is supplied -
+    # duplicate-approved-year detection does not use `known_market_ids` at
+    # all (it only groups approved records by (market_id, reference_year)),
+    # so gating the whole call behind it wrongly skipped duplicate
+    # detection whenever a caller omitted `known_market_ids`. Passing `()`
+    # when it is `None` is safe: it makes every record "unresolved market"
+    # by construction, but those issues are only ever escalated below when
+    # `known_market_ids is not None` - the previous behaviour there is
+    # unchanged.
+    issues = validate_population_records(records, known_market_ids or ())
+    blocking_issues: List[PopulationValidationIssue] = []
     if known_market_ids is not None:
-        issues = validate_population_records(records, known_market_ids)
-        # Only the "unresolved market" class of issue is upload-blocking here;
-        # duplicate-approved-year issues are re-checked at approval time, since
-        # a fresh upload defaults every record to "pending".
-        unresolved_market_issues = [
+        blocking_issues.extend(
             issue
             for issue in issues
             if "does not resolve to a governed market" in issue.reason
-        ]
-        if unresolved_market_issues:
-            raise PopulationUploadValidationError(
-                "Population upload validation failed: "
-                + "; ".join(issue.reason for issue in unresolved_market_issues)
-            )
+        )
+    if approval_status == "approved":
+        # There is no later approval stage in this path - a directly
+        # approved upload's own duplicate-approved-year rows must block
+        # here, never be waved through on the assumption a subsequent
+        # review will catch them. A "pending" upload (the default) is
+        # unaffected - its records are not yet approved, so this branch
+        # never fires for it, preserving today's pending-upload behaviour.
+        blocking_issues.extend(
+            issue
+            for issue in issues
+            if "duplicate approved population reference" in issue.reason
+        )
+    if blocking_issues:
+        raise PopulationUploadValidationError(
+            "Population upload validation failed: "
+            + "; ".join(issue.reason for issue in blocking_issues)
+        )
 
     records_fingerprint = compute_population_records_fingerprint(records)
     reference_set = PopulationReferenceSet(

@@ -510,15 +510,31 @@ class TestProjectExportInputPopulationArtefacts:
     enough, so every test here goes through the application-service layer."""
 
     @staticmethod
-    def _population_reference_set_dict() -> dict:
-        return dict(
+    def _population_reference_set_dict(records: list, **overrides) -> dict:
+        """`records_fingerprint` must genuinely describe `records` -
+        Codex P2 (2026-09-13, second pass) added cross-artifact
+        reconciliation at import time, so a placeholder/mismatched
+        fingerprint here would now correctly get the set quarantined on
+        import rather than restored, in every test that isn't explicitly
+        testing that quarantine behaviour."""
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        fingerprint = compute_population_records_fingerprint(
+            [PopulationReferenceRecord.from_dict(record) for record in records]
+        )
+        payload = dict(
             reference_set_id="set-1",
             reference_set_version=1,
             name="Synthetic set",
             source_name="synthetic_source",
             retrieved_at="2026-09-13T00:00:00Z",
-            records_fingerprint="a" * 64,
+            records_fingerprint=fingerprint,
         )
+        payload.update(overrides)
+        return payload
 
     @staticmethod
     def _population_reference_record_dict(**overrides) -> dict:
@@ -549,12 +565,11 @@ class TestProjectExportInputPopulationArtefacts:
         self, tmp_path, governed_project
     ):
         governed_project = dict(governed_project)
+        records = [self._population_reference_record_dict()]
+        governed_project["population_reference_records"] = records
         governed_project["population_reference_set"] = (
-            self._population_reference_set_dict()
+            self._population_reference_set_dict(records)
         )
-        governed_project["population_reference_records"] = [
-            self._population_reference_record_dict()
-        ]
         governed_project["population_treatment_specification"] = (
             self._population_treatment_specification_dict()
         )
@@ -594,12 +609,11 @@ class TestProjectExportInputPopulationArtefacts:
         self, tmp_path, governed_project
     ):
         governed_project = dict(governed_project)
+        records = [self._population_reference_record_dict()]
+        governed_project["population_reference_records"] = records
         governed_project["population_reference_set"] = (
-            self._population_reference_set_dict()
+            self._population_reference_set_dict(records)
         )
-        governed_project["population_reference_records"] = [
-            self._population_reference_record_dict()
-        ]
         governed_project["population_treatment_specification"] = (
             self._population_treatment_specification_dict()
         )
@@ -657,12 +671,11 @@ class TestProjectExportInputPopulationArtefacts:
         unchanged - the full application-layer round trip the review asked
         for, not merely a core-only export_project() round trip."""
         governed_project = dict(governed_project)
+        records = [self._population_reference_record_dict()]
+        governed_project["population_reference_records"] = records
         governed_project["population_reference_set"] = (
-            self._population_reference_set_dict()
+            self._population_reference_set_dict(records)
         )
-        governed_project["population_reference_records"] = [
-            self._population_reference_record_dict()
-        ]
         governed_project["population_treatment_specification"] = (
             self._population_treatment_specification_dict()
         )

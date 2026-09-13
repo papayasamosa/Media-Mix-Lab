@@ -125,6 +125,17 @@ _PROTECTED_UNIT_ALIASES = {
 
 APPROVAL_STATUSES = ("pending", "approved", "rejected")
 
+# Codex P2 (2026-09-13, second pass): the repository already defines a
+# governed index unit with a numeric range suffix -
+# `core.seo_visibility.SEO_POSITIONAL_VISIBILITY_METRIC.unit ==
+# "index_0_to_1"` - which the exact-alias table above does not cover. That
+# module's own naming convention is `index_<lower>_to_<upper>` (a governed
+# "index family", not a free-form suffix), so this narrow, explicit regex
+# recognises exactly that shape - never a bare substring search. A unit
+# such as "conversion_rate_index" does not start with "index_" and is
+# still correctly left unprotected.
+_INDEX_RANGE_FAMILY_PATTERN = re.compile(r"^index_\d+_to_\d+$")
+
 
 def _canonicalise_unit_label(unit: str) -> str:
     """Lowercase, trim, normalise the "%" symbol to the word "percent",
@@ -142,15 +153,21 @@ def is_predictor_unit_protected(unit: str) -> bool:
     """`True` when `unit` is an already-normalised/audience-relative
     measure that must never be automatically population-divided (Part 3
     v1.13: GRPs, TVRs, reach percentages, rates, percentages, indices,
-    and their ordinary governed aliases - `%`, `pct`, plural forms such
-    as `indices`/`rates`, and `reach %`). Matching is unit-semantic (a
-    governed unit label), never inferred from a column name alone -
-    callers must pass the variable's governed unit, not its raw source
-    header. Exact canonical-identity lookup only, never a substring
-    match - an unrelated unit that merely contains "rate" or "index" as a
-    fragment is never caught by this check."""
-    canonical = _PROTECTED_UNIT_ALIASES.get(_canonicalise_unit_label(unit))
-    return canonical is not None and canonical in PROTECTED_UNIT_CANONICAL_FORMS
+    their ordinary governed aliases - `%`, `pct`, plural forms such as
+    `indices`/`rates`, and `reach %` - and the repository's own governed
+    `index_<lower>_to_<upper>` range family, e.g. `index_0_to_1`
+    (`core.seo_visibility`'s `SEO_POSITIONAL_VISIBILITY_METRIC`). Matching
+    is unit-semantic (a governed unit label), never inferred from a
+    column name alone - callers must pass the variable's governed unit,
+    not its raw source header. Exact canonical-identity lookup, plus the
+    one narrow numeric-range-family regex above - never a general
+    substring match. An unrelated unit that merely contains "rate" or
+    "index" as a fragment (e.g. "conversion_rate_index") is never caught."""
+    canonical_label = _canonicalise_unit_label(unit)
+    canonical = _PROTECTED_UNIT_ALIASES.get(canonical_label)
+    if canonical is not None and canonical in PROTECTED_UNIT_CANONICAL_FORMS:
+        return True
+    return bool(_INDEX_RANGE_FAMILY_PATTERN.match(canonical_label))
 
 
 @dataclass(frozen=True)

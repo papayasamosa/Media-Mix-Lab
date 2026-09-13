@@ -1872,6 +1872,68 @@ def resolve_imported_population_reference_set(
         ]
 
 
+def resolve_imported_population_reference_artifacts(
+    imported: Dict[str, Any],
+) -> Tuple[Optional[dict], List[dict], List[str]]:
+    """REQ-POPULATION-001 (Codex P2, 2026-09-13 second review pass): the
+    narrow governed boundary every application import path must go
+    through for `population_reference_set` + `population_reference_
+    records` together - resolving them independently (as `resolve_
+    imported_population_reference_records`/`_set` each do on their own)
+    is not enough, because the set's `records_fingerprint` can describe
+    different contents than the records that actually survive import.
+
+    Resolves records first (quarantining malformed ones exactly as
+    `resolve_imported_population_reference_records` does), then the set
+    (quarantining a structurally malformed set exactly as `resolve_
+    imported_population_reference_set` does), then - only when a set
+    survived that step - recomputes the records fingerprint from the
+    *retained* (post-quarantine) records via `core.population_reference.
+    compute_population_records_fingerprint` (the single sanctioned way -
+    never reimplemented here) and compares it against the set's own
+    `records_fingerprint`.
+
+    A mismatch quarantines the *set* (returned as `None`, with an
+    explanatory warning) - never the records, and never by silently
+    rewriting the set's fingerprint to match or by dropping the
+    reconciliation and continuing to treat the original set as valid. A
+    set that no longer reconciles with what actually survived import must
+    not become valid project state, whether the mismatch came from a
+    corrupted set or from a record that was itself quarantined a moment
+    earlier for an unrelated reason.
+
+    Every application import path (currently `application.project_
+    service.ProjectService.import_bundle`) must call this instead of
+    calling `resolve_imported_population_reference_records`/`_set`
+    separately, so the two paths cannot accidentally diverge.
+    """
+    from .population_reference import (
+        PopulationReferenceRecord,
+        compute_population_records_fingerprint,
+    )
+
+    records, record_warnings = resolve_imported_population_reference_records(imported)
+    reference_set, set_warnings = resolve_imported_population_reference_set(imported)
+    warnings = list(record_warnings) + list(set_warnings)
+
+    if reference_set is not None:
+        retained = [PopulationReferenceRecord.from_dict(record) for record in records]
+        recomputed_fingerprint = compute_population_records_fingerprint(retained)
+        if recomputed_fingerprint != reference_set["records_fingerprint"]:
+            warnings.append(
+                "Population reference set "
+                f"(reference_set_id={reference_set['reference_set_id']!r}) was "
+                "quarantined (dropped, not silently kept): its "
+                f"records_fingerprint {reference_set['records_fingerprint']!r} "
+                "does not match the fingerprint recomputed from the retained "
+                f"(post-quarantine) records {recomputed_fingerprint!r} - the set "
+                "no longer reconciles with what actually survived import."
+            )
+            reference_set = None
+
+    return reference_set, records, warnings
+
+
 def resolve_imported_population_treatment_specification(
     imported: Dict[str, Any],
 ) -> Tuple[Optional[dict], List[str]]:

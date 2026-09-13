@@ -96,6 +96,7 @@ class TestPopulationTreatmentSpecificationValidation:
             "reach %",
             "rates",
             "indices",
+            "index_0_to_1",
         ],
     )
     def test_protected_units_cannot_be_declared_eligible(self, protected_unit):
@@ -181,6 +182,29 @@ class TestProtectedUnits:
         "percentage" as part of an unrelated word must not be caught."""
         assert is_predictor_unit_protected(unit) is False
 
+    @pytest.mark.parametrize(
+        "unit",
+        ["index_0_to_1", "Index_0_To_1", "index_0_to_100", "index-0-to-1"],
+    )
+    def test_governed_index_range_family_is_protected(self, unit):
+        """Codex P2 (2026-09-13, second pass): the repository's existing
+        governed SEO unit `core.seo_visibility.
+        SEO_POSITIONAL_VISIBILITY_METRIC.unit == "index_0_to_1"` must be
+        classified as an index, not left unprotected because it isn't the
+        bare word "index"."""
+        assert is_predictor_unit_protected(unit) is True
+
+    @pytest.mark.parametrize(
+        "unit",
+        [
+            "index_abc",  # not a numeric range - not the governed family
+            "index_0",  # missing the "_to_<upper>" half
+            "rate_0_to_1",  # a different word entirely, not the index family
+        ],
+    )
+    def test_non_range_shaped_units_are_not_swept_in_by_the_family_rule(self, unit):
+        assert is_predictor_unit_protected(unit) is False
+
 
 class TestEligibilityHelper:
     def test_ineligible_when_predictor_treatment_disabled(self):
@@ -207,7 +231,8 @@ class TestEligibilityHelper:
         )
 
     @pytest.mark.parametrize(
-        "protected_unit", ["GRP", "%", "pct", "reach %", "rates", "indices"]
+        "protected_unit",
+        ["GRP", "%", "pct", "reach %", "rates", "indices", "index_0_to_1"],
     )
     def test_protected_unit_never_eligible_even_if_declared_elsewhere(
         self, protected_unit

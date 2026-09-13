@@ -156,3 +156,107 @@ class TestBuildPopulationReferenceSet:
     def test_missing_metadata_rejected(self):
         with pytest.raises(PopulationUploadValidationError):
             _build(_valid_frame(), name="")
+
+
+class TestDirectlyApprovedDuplicateRejection:
+    """Codex P2 (2026-09-13, second pass): `approval_status="approved"`
+    has no later approval stage in this path, so duplicate approved rows
+    for the same (market, reference_year) must block creation here."""
+
+    @staticmethod
+    def _duplicate_same_year_frame() -> pd.DataFrame:
+        return _valid_frame(
+            rows=[
+                {
+                    "market": "UK",
+                    "population": 1_000_000,
+                    "population_basis": "total_resident_population",
+                    "reference_year": 2024,
+                    "source": "synthetic_source",
+                },
+                {
+                    "market": "UK",
+                    "population": 1_100_000,
+                    "population_basis": "total_resident_population",
+                    "reference_year": 2024,
+                    "source": "synthetic_source",
+                },
+            ]
+        )
+
+    @staticmethod
+    def _different_years_frame() -> pd.DataFrame:
+        return _valid_frame(
+            rows=[
+                {
+                    "market": "UK",
+                    "population": 1_000_000,
+                    "population_basis": "total_resident_population",
+                    "reference_year": 2023,
+                    "source": "synthetic_source",
+                },
+                {
+                    "market": "UK",
+                    "population": 1_100_000,
+                    "population_basis": "total_resident_population",
+                    "reference_year": 2024,
+                    "source": "synthetic_source",
+                },
+            ]
+        )
+
+    def test_two_directly_approved_rows_same_market_and_year_rejected(self):
+        with pytest.raises(PopulationUploadValidationError, match="duplicate approved"):
+            _build(
+                self._duplicate_same_year_frame(),
+                approval_status="approved",
+                approved_by="reviewer",
+                approved_at="2026-09-13",
+            )
+
+    def test_two_directly_approved_rows_different_years_allowed(self):
+        _, records = _build(
+            self._different_years_frame(),
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        assert len(records) == 2
+        assert {r.reference_year for r in records} == {2023, 2024}
+
+    def test_pending_upload_with_duplicate_year_is_unaffected(self):
+        # Default approval_status="pending" - unchanged behaviour: no
+        # later approval stage assumption applies here, so this must not
+        # start blocking pending uploads that worked before this fix.
+        _, records = _build(self._duplicate_same_year_frame())
+        assert len(records) == 2
+
+    def test_duplicate_check_does_not_require_known_market_ids(self):
+        with pytest.raises(PopulationUploadValidationError, match="duplicate approved"):
+            _build(
+                self._duplicate_same_year_frame(),
+                approval_status="approved",
+                approved_by="reviewer",
+                approved_at="2026-09-13",
+                known_market_ids=None,
+            )
+
+    def test_unresolved_market_validation_still_works_when_supplied(self):
+        # Regression check: the pre-existing known_market_ids behaviour
+        # must survive this change unchanged.
+        with pytest.raises(PopulationUploadValidationError):
+            _build(_valid_frame(), known_market_ids=["UK"])  # AU is not configured
+
+    def test_unresolved_market_and_duplicate_can_both_be_reported_together(self):
+        frame = self._duplicate_same_year_frame()
+        with pytest.raises(PopulationUploadValidationError) as exc_info:
+            _build(
+                frame,
+                approval_status="approved",
+                approved_by="reviewer",
+                approved_at="2026-09-13",
+                known_market_ids=["AU"],  # UK is not configured either
+            )
+        message = str(exc_info.value)
+        assert "duplicate approved" in message
+        assert "does not resolve to a governed market" in message
