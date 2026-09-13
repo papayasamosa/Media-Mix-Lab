@@ -1839,6 +1839,65 @@ def test_resolve_imported_population_reference_records_quarantines_non_mapping_e
     assert len(warnings) == 1
 
 
+@pytest.mark.parametrize("bad_shape", [7, True, "a string", {"a": 1}, 3.14], ids=repr)
+def test_resolve_imported_population_reference_records_quarantines_non_list_container(
+    bad_shape,
+):
+    """Codex P2 (2026-09-13, fifth pass): population_reference_records
+    must be list-or-absent. A truthy non-list top-level shape (a scalar
+    number, string, bool, or mapping/object) previously reached
+    enumerate() directly - crashing with an uncaught TypeError for
+    non-iterable types (int, bool) or silently exploding into nonsense
+    per-character/per-key warnings for iterable-but-wrong types (str,
+    dict). Every one of these shapes must now quarantine the whole
+    artefact cleanly instead."""
+    records, warnings = resolve_imported_population_reference_records(
+        {"population_reference_records": bad_shape}
+    )
+    assert records == []
+    assert len(warnings) == 1
+    assert "is not a list" in warnings[0]
+
+
+def test_resolve_imported_population_reference_records_false_is_treated_as_absent():
+    # `False` is falsy, so it takes the same pre-existing "absent" branch
+    # as None/0/""/{}/[] always have - documented explicitly here so the
+    # shape check above is understood to apply only to *truthy* non-list
+    # values, not a behaviour change for already-falsy ones.
+    records, warnings = resolve_imported_population_reference_records(
+        {"population_reference_records": False}
+    )
+    assert records == []
+    assert warnings == []
+
+
+def test_resolve_imported_population_reference_records_empty_list_is_valid():
+    records, warnings = resolve_imported_population_reference_records(
+        {"population_reference_records": []}
+    )
+    assert records == []
+    assert warnings == []
+
+
+def test_resolve_imported_population_reference_records_absent_is_still_not_an_error():
+    records, warnings = resolve_imported_population_reference_records(
+        {"population_reference_records": None}
+    )
+    assert records == []
+    assert warnings == []
+
+
+def test_resolve_imported_population_reference_records_valid_list_still_works():
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(population_reference_id="pop-1")
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert warnings == []
+
+
 @pytest.mark.parametrize("bad_id", [[1, 2, 3], {"a": 1}, 42, 3.14, None], ids=repr)
 def test_resolve_imported_population_reference_records_quarantines_non_string_id(
     bad_id,
@@ -1852,6 +1911,28 @@ def test_resolve_imported_population_reference_records_quarantines_non_string_id
         "population_reference_records": [
             _valid_population_reference_record_dict(population_reference_id=bad_id),
             _valid_population_reference_record_dict(population_reference_id="pop-good"),
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-good"
+    assert len(warnings) == 1
+    assert "malformed" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_market_id", [["UK"], {"a": 1}, 42, 3.14, None], ids=repr)
+def test_resolve_imported_population_reference_records_quarantines_non_string_market_id(
+    bad_market_id,
+):
+    """Codex P2 (2026-09-13, fifth pass): mirrors the non-string-id test
+    above for market_id - fresh malformed-field evidence found during the
+    bounded same-class audit."""
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(market_id=bad_market_id),
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-good", market_id="UK"
+            ),
         ]
     }
     records, warnings = resolve_imported_population_reference_records(imported)
@@ -2142,6 +2223,23 @@ class TestResolveImportedPopulationReferenceArtifacts:
         # The input dict itself (and the original fingerprint value) must
         # never have been mutated in place either.
         assert set_dict["records_fingerprint"] == original_fingerprint
+
+    def test_non_list_records_container_does_not_crash_the_combined_resolver(self):
+        """Codex P2 (2026-09-13, fifth pass): the combined artefacts
+        resolver must not crash either, and a set present alongside a
+        malformed (non-list) records container correctly fails to
+        reconcile against the now-empty retained records."""
+        set_dict, _ = _matching_population_reference_set_and_records()
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": 7,
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_records == []
+        assert resolved_set is None
+        assert any("is not a list" in warning for warning in warnings)
 
     def test_absent_set_is_not_affected_by_reconciliation(self):
         record_dict = _valid_population_reference_record_dict()

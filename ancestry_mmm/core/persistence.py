@@ -1807,12 +1807,32 @@ def resolve_imported_population_reference_records(
     Absent `population_reference_records` resolves to `([], [])` - "no
     population reference supplied yet" is not an error; population
     treatment stays inactive regardless (see `core.population_treatment`).
+
+    Codex P2 (2026-09-13, fifth pass): a truthy non-list top-level value
+    (e.g. the bare JSON scalar `7` or `true`) previously reached
+    `enumerate()` directly and raised an uncaught `TypeError` - outside
+    every per-record quarantine mechanism below, so it crashed the whole
+    bundle import instead of being quarantined. `population_reference_
+    records` must be list-or-absent, per the governed contract; any other
+    present shape (a scalar, string, bool, or mapping/object) quarantines
+    the *whole* records artefact (never partially - there is no
+    meaningful way to iterate "some records" out of a non-list shape) via
+    the same `warnings`-returning mechanism, never a coercion (a string
+    is not exploded into one record per character, a mapping is not
+    iterated as if its keys were records).
     """
     from .population_reference import PopulationReferenceRecord
 
     raw_records = imported.get("population_reference_records")
     warnings: List[str] = []
     if not raw_records:
+        return [], warnings
+    if not isinstance(raw_records, list):
+        warnings.append(
+            "population_reference_records is not a list "
+            f"(type={type(raw_records).__name__!r}) and the whole artefact "
+            "was quarantined (dropped, not silently kept)."
+        )
         return [], warnings
     normalised: List[dict] = []
     for index, item in enumerate(raw_records):

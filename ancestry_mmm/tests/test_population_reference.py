@@ -57,6 +57,24 @@ class TestPopulationReferenceRecord:
         record = _record(population_reference_id="pop-valid-1")
         assert record.population_reference_id == "pop-valid-1"
 
+    @pytest.mark.parametrize(
+        "bad_market_id", [["UK"], {"a": 1}, 42, 3.14, None, True], ids=repr
+    )
+    def test_non_string_market_id_rejected(self, bad_market_id):
+        """Codex P2 (2026-09-13, fifth pass): same principle as the
+        population_reference_id fix above - a non-string market_id (e.g.
+        a malformed imported JSON array) must fail at construction, not
+        construct successfully and crash later inside
+        validate_population_records's set-membership test or
+        (market_id, reference_year) dict key, both of which require
+        market_id to be hashable."""
+        with pytest.raises(ValueError):
+            _record(market_id=bad_market_id)
+
+    def test_valid_string_market_id_still_accepted(self):
+        record = _record(market_id="AU")
+        assert record.market_id == "AU"
+
     def test_non_finite_population_rejected(self):
         with pytest.raises(ValueError):
             _record(population=float("nan"))

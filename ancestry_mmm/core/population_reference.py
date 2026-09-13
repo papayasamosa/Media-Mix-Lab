@@ -102,8 +102,21 @@ class PopulationReferenceRecord:
                 f"population_reference_id, got {self.population_reference_id!r} "
                 f"({type(self.population_reference_id).__name__})."
             )
-        if not self.market_id:
-            raise ValueError("PopulationReferenceRecord requires a market_id.")
+        if not isinstance(self.market_id, str) or not self.market_id:
+            # Codex P2 (2026-09-13, fifth pass): same principle as
+            # population_reference_id above - a truthiness-only check let
+            # a non-string market_id (e.g. a JSON array `["UK"]`) through
+            # construction. It then crashed later, uncaught, in
+            # validate_population_records's set-membership test
+            # (`record.market_id not in known`) and its `(market_id,
+            # reference_year)` dict key, both of which require market_id
+            # to be hashable. Fail here, at construction, so the record is
+            # quarantined by the existing import-quarantine mechanism
+            # instead of crashing validation.
+            raise ValueError(
+                "PopulationReferenceRecord requires a non-empty string market_id, "
+                f"got {self.market_id!r} ({type(self.market_id).__name__})."
+            )
         if not self.source_name:
             raise ValueError("PopulationReferenceRecord requires a source_name.")
         if not self.owner:
