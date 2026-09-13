@@ -165,6 +165,19 @@ def build_population_reference_set(
                 f"Population upload row {index + 1} is invalid: {exc}"
             ) from exc
 
+    # Codex P2 (2026-09-13, third pass): a directly approved upload must
+    # not be able to skip governed market resolution merely by omitting
+    # known_market_ids - fail closed up front rather than silently
+    # treating the omission as "no market check requested". Pending
+    # uploads may still be collected before a governed market universe is
+    # known (the existing, unchanged pre-approval workflow).
+    if approval_status == "approved" and known_market_ids is None:
+        raise PopulationUploadValidationError(
+            "Population upload validation failed: approval_status='approved' "
+            "requires known_market_ids to be supplied - a directly approved "
+            "upload cannot skip governed market resolution."
+        )
+
     # Codex P2 (2026-09-13, second pass): `validate_population_records`
     # always runs now, not only when `known_market_ids` is supplied -
     # duplicate-approved-year detection does not use `known_market_ids` at
@@ -190,6 +203,7 @@ def build_population_reference_set(
         # review will catch them. A "pending" upload (the default) is
         # unaffected - its records are not yet approved, so this branch
         # never fires for it, preserving today's pending-upload behaviour.
+        # (known_market_ids is guaranteed not None here - checked above.)
         blocking_issues.extend(
             issue
             for issue in issues

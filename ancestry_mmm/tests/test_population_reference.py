@@ -77,6 +77,24 @@ class TestPopulationReferenceRecord:
             approval_status="approved", approved_by="reviewer", approved_at="2026-09-12"
         )
 
+    @pytest.mark.parametrize("status", ["pending", "rejected"])
+    def test_non_approved_rejects_stale_approver_metadata(self, status):
+        """Codex P2 (2026-09-13, third pass): the symmetric case of
+        test_approved_requires_approver - a pending/rejected record must
+        not carry approver metadata that contradicts its own status."""
+        with pytest.raises(ValueError):
+            _record(approval_status=status, approved_by="reviewer")
+        with pytest.raises(ValueError):
+            _record(approval_status=status, approved_at="2026-09-12")
+        with pytest.raises(ValueError):
+            _record(
+                approval_status=status,
+                approved_by="reviewer",
+                approved_at="2026-09-12",
+            )
+        # Neither set - the ordinary case - succeeds.
+        _record(approval_status=status)
+
     def test_unknown_approval_status_rejected(self):
         with pytest.raises(ValueError):
             _record(approval_status="maybe")
@@ -156,6 +174,20 @@ class TestPopulationReferenceSet:
                 approval_status="approved",
             )
 
+    @pytest.mark.parametrize("status", ["pending", "rejected"])
+    def test_non_approved_rejects_stale_approver_metadata(self, status):
+        with pytest.raises(ValueError):
+            PopulationReferenceSet(
+                reference_set_id="set-1",
+                reference_set_version=1,
+                name="Synthetic set",
+                source_name="synthetic_source",
+                retrieved_at="2026-09-12T00:00:00Z",
+                records_fingerprint=self._fingerprint([_record()]),
+                approval_status=status,
+                approved_by="reviewer",
+            )
+
     def test_new_version_bumps_version_and_blocks_identity_edits(self):
         record = _record()
         reference_set = PopulationReferenceSet(
@@ -171,6 +203,88 @@ class TestPopulationReferenceSet:
         assert bumped.reference_set_id == reference_set.reference_set_id
         with pytest.raises(ValueError):
             new_reference_set_version(reference_set, reference_set_version=99)
+
+
+class TestNewReferenceSetVersionApprovalReset:
+    """Codex P2 (2026-09-13, third pass): approval belongs to the exact
+    governed version/content that was reviewed - it must never carry
+    forward automatically onto a new version. No equivalent existing
+    versioning helper resets approval either, so this module adopts the
+    simpler invariant: every new version defaults to pending unless the
+    caller explicitly supplies a fresh, complete approval in the same
+    call (an explicit, separate reapproval action)."""
+
+    def _fingerprint(self, records):
+        return compute_population_records_fingerprint(records)
+
+    def _approved_v1(self) -> PopulationReferenceSet:
+        return PopulationReferenceSet(
+            reference_set_id="set-1",
+            reference_set_version=1,
+            name="Synthetic set",
+            source_name="synthetic_source",
+            retrieved_at="2026-09-12T00:00:00Z",
+            records_fingerprint=self._fingerprint([_record()]),
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-12",
+        )
+
+    def test_approved_v1_remains_approved_and_unchanged(self):
+        v1 = self._approved_v1()
+        new_reference_set_version(v1, name="Revised synthetic set")
+        assert v1.approval_status == "approved"
+        assert v1.approved_by == "reviewer"
+        assert v1.approved_at == "2026-09-12"
+        assert v1.reference_set_version == 1
+
+    def test_materially_changed_v2_is_pending_with_no_approval_metadata(self):
+        v1 = self._approved_v1()
+        v2 = new_reference_set_version(v1, name="Revised synthetic set")
+        assert v2.approval_status == "pending"
+        assert v2.approved_by is None
+        assert v2.approved_at is None
+        assert v2.reference_set_version == 2
+
+    def test_corrected_records_fingerprint_cannot_inherit_approval(self):
+        v1 = self._approved_v1()
+        corrected_fingerprint = self._fingerprint(
+            [_record(population_reference_id="pop-2")]
+        )
+        v2 = new_reference_set_version(v1, records_fingerprint=corrected_fingerprint)
+        assert v2.records_fingerprint == corrected_fingerprint
+        assert v2.approval_status == "pending"
+        assert v2.approved_by is None
+        assert v2.approved_at is None
+
+    def test_new_version_function_does_not_mutate_v1(self):
+        v1 = self._approved_v1()
+        original_status = v1.approval_status
+        original_by = v1.approved_by
+        original_at = v1.approved_at
+        new_reference_set_version(
+            v1, records_fingerprint=self._fingerprint([_record()])
+        )
+        assert v1.approval_status == original_status
+        assert v1.approved_by == original_by
+        assert v1.approved_at == original_at
+
+    def test_explicit_reapproval_remains_a_separate_supported_action(self):
+        v1 = self._approved_v1()
+        v2 = new_reference_set_version(
+            v1,
+            records_fingerprint=self._fingerprint(
+                [_record(population_reference_id="pop-2")]
+            ),
+            approval_status="approved",
+            approved_by="second_reviewer",
+            approved_at="2026-09-13",
+        )
+        assert v2.approval_status == "approved"
+        assert v2.approved_by == "second_reviewer"
+        assert v2.approved_at == "2026-09-13"
+        # v1's own approval is still untouched by this explicit v2 reapproval.
+        assert v1.approved_by == "reviewer"
 
 
 class TestValidatePopulationRecords:

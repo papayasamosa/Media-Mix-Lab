@@ -139,6 +139,19 @@ class PopulationReferenceRecord:
                 "PopulationReferenceRecord: approval_status='approved' requires "
                 "approved_by and approved_at."
             )
+        if self.approval_status != "approved" and (
+            self.approved_by or self.approved_at
+        ):
+            # Codex P2 (2026-09-13, third pass): the reverse of the check
+            # above - a pending/rejected record must not carry stale
+            # approver metadata that contradicts its own status. Exported
+            # audit metadata must never claim an approval its status
+            # doesn't hold.
+            raise ValueError(
+                "PopulationReferenceRecord: approved_by/approved_at must not be "
+                f"set when approval_status={self.approval_status!r} (only "
+                "'approved' records may carry approver metadata)."
+            )
         if self.schema_version != POPULATION_REFERENCE_SCHEMA_VERSION:
             raise ValueError(
                 "PopulationReferenceRecord: unsupported schema_version "
@@ -220,6 +233,14 @@ class PopulationReferenceSet:
                 "PopulationReferenceSet: approval_status='approved' requires "
                 "approved_by and approved_at."
             )
+        if self.approval_status != "approved" and (
+            self.approved_by or self.approved_at
+        ):
+            raise ValueError(
+                "PopulationReferenceSet: approved_by/approved_at must not be set "
+                f"when approval_status={self.approval_status!r} (only 'approved' "
+                "sets may carry approver metadata)."
+            )
         if self.schema_version != POPULATION_REFERENCE_SCHEMA_VERSION:
             raise ValueError(
                 "PopulationReferenceSet: unsupported schema_version "
@@ -240,7 +261,23 @@ def new_reference_set_version(
     reference_set: PopulationReferenceSet, **changes: Any
 ) -> PopulationReferenceSet:
     """Apply an edit to a reference set as a new version - never an
-    in-place mutation of a set that may already be in use."""
+    in-place mutation of a set that may already be in use (`reference_
+    set` itself is returned unchanged; only a new object is built).
+
+    Codex P2 (2026-09-13, third pass): approval belongs to the exact
+    governed version/content that was reviewed - it must never carry
+    forward automatically onto a new version. No equivalent existing
+    versioning helper in this repository (e.g. `core.fx_rates.new_rate_
+    set_version`) resets approval either, so this is a deliberate,
+    stricter invariant for population data rather than a mirrored
+    pattern: every call defaults the new version to `approval_status=
+    "pending"` with `approved_by`/`approved_at` cleared, *unless the
+    caller explicitly supplies all three of those fields together in
+    this exact call* - there is no route by which the previous version's
+    approver metadata is silently reused. A genuine reapproval of new
+    content remains possible, but only as that explicit action, never as
+    a side effect of omitting approval fields while changing something
+    else (such as `records_fingerprint`)."""
     from dataclasses import replace
 
     for locked_field in ("reference_set_id", "reference_set_version"):
@@ -249,6 +286,9 @@ def new_reference_set_version(
                 f"{locked_field!r} is lineage/version identity and cannot "
                 "be set via new_reference_set_version."
             )
+    changes.setdefault("approval_status", "pending")
+    changes.setdefault("approved_by", None)
+    changes.setdefault("approved_at", None)
     return replace(
         reference_set,
         reference_set_version=reference_set.reference_set_version + 1,

@@ -112,6 +112,17 @@ class TestPopulationTreatmentSpecificationValidation:
         with pytest.raises(ValueError):
             _spec(approval_status="approved")
 
+    @pytest.mark.parametrize("status", ["pending", "rejected"])
+    def test_non_approved_rejects_stale_approver_metadata(self, status):
+        """Codex P2 (2026-09-13, third pass): the symmetric case - a
+        pending/rejected specification must not carry approver metadata
+        that contradicts its own status."""
+        with pytest.raises(ValueError):
+            _spec(approval_status=status, approved_by="reviewer")
+        with pytest.raises(ValueError):
+            _spec(approval_status=status, approved_at="2026-09-12")
+        _spec(approval_status=status)  # neither set - succeeds
+
     def test_omitted_schema_version_defaults_to_current(self):
         assert _spec().schema_version == 1
 

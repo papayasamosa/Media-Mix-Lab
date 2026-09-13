@@ -253,6 +253,14 @@ class PopulationTreatmentSpecification:
                 "PopulationTreatmentSpecification: approval_status='approved' requires "
                 "approved_by and approved_at."
             )
+        if self.approval_status != "approved" and (
+            self.approved_by or self.approved_at
+        ):
+            raise ValueError(
+                "PopulationTreatmentSpecification: approved_by/approved_at must not "
+                f"be set when approval_status={self.approval_status!r} (only "
+                "'approved' specifications may carry approver metadata)."
+            )
         if self.schema_version != POPULATION_TREATMENT_SCHEMA_VERSION:
             raise ValueError(
                 "PopulationTreatmentSpecification: unsupported schema_version "

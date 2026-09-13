@@ -1872,35 +1872,65 @@ def resolve_imported_population_reference_set(
         ]
 
 
+def _resolve_imported_project_market_ids(imported: Dict[str, Any]) -> Tuple[str, ...]:
+    """The authoritative governed market universe for an imported project
+    - `ModelSpec.markets`, read from `imported["model_spec"]` exactly the
+    way `reconstruct_model_state` already does (`ModelSpec.from_dict
+    (model_spec_dict)`). Never inferred from the population records
+    themselves, and never a global repository market list. Returns `()`
+    (never a guessed default) when no usable model_spec is present."""
+    model_spec_dict = imported.get("model_spec")
+    if not model_spec_dict:
+        return ()
+    try:
+        return tuple(ModelSpec.from_dict(model_spec_dict).markets)
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return ()
+
+
 def resolve_imported_population_reference_artifacts(
     imported: Dict[str, Any],
 ) -> Tuple[Optional[dict], List[dict], List[str]]:
-    """REQ-POPULATION-001 (Codex P2, 2026-09-13 second review pass): the
-    narrow governed boundary every application import path must go
-    through for `population_reference_set` + `population_reference_
-    records` together - resolving them independently (as `resolve_
-    imported_population_reference_records`/`_set` each do on their own)
-    is not enough, because the set's `records_fingerprint` can describe
-    different contents than the records that actually survive import.
+    """REQ-POPULATION-001 (Codex P2, 2026-09-13 second and third review
+    passes): the narrow governed boundary every application import path
+    must go through for `population_reference_set` + `population_
+    reference_records` together - resolving them independently (as
+    `resolve_imported_population_reference_records`/`_set` each do on
+    their own) is not enough.
 
-    Resolves records first (quarantining malformed ones exactly as
-    `resolve_imported_population_reference_records` does), then the set
-    (quarantining a structurally malformed set exactly as `resolve_
-    imported_population_reference_set` does), then - only when a set
-    survived that step - recomputes the records fingerprint from the
-    *retained* (post-quarantine) records via `core.population_reference.
-    compute_population_records_fingerprint` (the single sanctioned way -
-    never reimplemented here) and compares it against the set's own
-    `records_fingerprint`.
+    Three checks, in order:
 
-    A mismatch quarantines the *set* (returned as `None`, with an
-    explanatory warning) - never the records, and never by silently
+    1. Resolve records (quarantining malformed ones exactly as `resolve_
+       imported_population_reference_records` does), then the set
+       (quarantining a structurally malformed one exactly as `resolve_
+       imported_population_reference_set` does).
+    2. Validate every retained record against the *imported project's own*
+       governed market universe (`_resolve_imported_project_market_ids` -
+       never inferred from the population records themselves, never a
+       global repository market list, never `MarketDescriptors.
+       population`). A record whose market does not resolve, or that is
+       part of a duplicate-approved-(market, reference_year) group, is
+       quarantined individually. If no governed market configuration can
+       be resolved at all, every *approved* record is quarantined outright
+       (an unauthenticated market universe must not silently validate an
+       approved population reference) - pending records are unaffected by
+       this specific branch, since pending review has its own, separate
+       workflow (see `application.population_service.
+       build_population_reference_set`).
+    3. Only when a set survived steps 1-2, recompute the records
+       fingerprint from the *retained* (post-quarantine) records via
+       `core.population_reference.compute_population_records_fingerprint`
+       (the single sanctioned way - never reimplemented here) and compare
+       it against the set's own `records_fingerprint`.
+
+    A mismatch at step 3 quarantines the *set* (returned as `None`, with
+    an explanatory warning) - never the records, and never by silently
     rewriting the set's fingerprint to match or by dropping the
     reconciliation and continuing to treat the original set as valid. A
     set that no longer reconciles with what actually survived import must
     not become valid project state, whether the mismatch came from a
-    corrupted set or from a record that was itself quarantined a moment
-    earlier for an unrelated reason.
+    corrupted set, an unconfigured-market record, a duplicate-approved
+    record, or an unresolvable market universe.
 
     Every application import path (currently `application.project_
     service.ProjectService.import_bundle`) must call this instead of
@@ -1910,11 +1940,61 @@ def resolve_imported_population_reference_artifacts(
     from .population_reference import (
         PopulationReferenceRecord,
         compute_population_records_fingerprint,
+        validate_population_records,
     )
 
     records, record_warnings = resolve_imported_population_reference_records(imported)
     reference_set, set_warnings = resolve_imported_population_reference_set(imported)
     warnings = list(record_warnings) + list(set_warnings)
+
+    known_market_ids = _resolve_imported_project_market_ids(imported)
+
+    if not known_market_ids:
+        # No authoritative governed market configuration could be
+        # resolved for this project - an approved population artefact
+        # must fail closed rather than be treated as valid on the
+        # strength of an unauthenticated market universe. Pending
+        # records are left to their own, separate review workflow.
+        approved_ids = {
+            record["population_reference_id"]
+            for record in records
+            if record.get("approval_status") == "approved"
+        }
+        if approved_ids:
+            for population_reference_id in sorted(approved_ids):
+                warnings.append(
+                    f"Population reference record {population_reference_id!r} "
+                    "was quarantined (dropped, not silently kept): it is "
+                    "approved, but no governed project market configuration "
+                    "could be resolved to validate it against."
+                )
+            records = [
+                record
+                for record in records
+                if record["population_reference_id"] not in approved_ids
+            ]
+    else:
+        record_objects = [PopulationReferenceRecord.from_dict(r) for r in records]
+        issues = validate_population_records(record_objects, known_market_ids)
+        quarantined_ids = {
+            issue.population_reference_id
+            for issue in issues
+            if "does not resolve to a governed market" in issue.reason
+            or "duplicate approved population reference" in issue.reason
+        }
+        if quarantined_ids:
+            for issue in issues:
+                if issue.population_reference_id in quarantined_ids:
+                    warnings.append(
+                        "Population reference record "
+                        f"{issue.population_reference_id!r} was quarantined "
+                        f"(dropped, not silently kept): {issue.reason}"
+                    )
+            records = [
+                record
+                for record in records
+                if record["population_reference_id"] not in quarantined_ids
+            ]
 
     if reference_set is not None:
         retained = [PopulationReferenceRecord.from_dict(record) for record in records]

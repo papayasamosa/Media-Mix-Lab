@@ -774,6 +774,201 @@ class TestProjectExportInputPopulationArtefacts:
             )
 
 
+class TestProjectImportMarketValidation:
+    """Codex P2 (2026-09-13, third review pass), application-level:
+    `ProjectService.import_bundle` must validate retained population
+    records against the *imported project's own* governed markets
+    (`governed_project`'s `model_spec` already declares `markets=
+    ["UK"]"`) - not merely reconcile the set's fingerprint. "A core-only
+    export_project() round trip is not enough" applies here too, so every
+    test goes through ProjectService."""
+
+    def test_configured_market_and_matching_record_survives_import(
+        self, tmp_path, governed_project
+    ):
+        governed_project = dict(governed_project)
+        records = [
+            TestProjectExportInputPopulationArtefacts._population_reference_record_dict(
+                market_id="UK"
+            )
+        ]
+        governed_project["population_reference_records"] = records
+        governed_project["population_reference_set"] = (
+            TestProjectExportInputPopulationArtefacts._population_reference_set_dict(
+                records
+            )
+        )
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        assert len(import_result.project_state["population_reference_records"]) == 1
+        assert import_result.project_state["population_reference_set"] is not None
+
+    def test_unconfigured_population_market_is_quarantined_on_import(
+        self, tmp_path, governed_project
+    ):
+        # governed_project's model_spec only configures "UK".
+        governed_project = dict(governed_project)
+        governed_project["population_reference_records"] = [
+            TestProjectExportInputPopulationArtefacts._population_reference_record_dict(
+                market_id="NOT_A_CONFIGURED_MARKET"
+            )
+        ]
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        assert import_result.project_state["population_reference_records"] == []
+        assert any(
+            "does not resolve to a governed market" in warning
+            for warning in import_result.warnings
+        )
+
+    def test_duplicate_approved_population_records_rejected_on_import(
+        self, tmp_path, governed_project
+    ):
+        governed_project = dict(governed_project)
+        governed_project["population_reference_records"] = [
+            TestProjectExportInputPopulationArtefacts._population_reference_record_dict(
+                population_reference_id="pop-1",
+                market_id="UK",
+                approval_status="approved",
+                approved_by="reviewer",
+                approved_at="2026-09-13",
+            ),
+            TestProjectExportInputPopulationArtefacts._population_reference_record_dict(
+                population_reference_id="pop-2",
+                market_id="UK",
+                approval_status="approved",
+                approved_by="reviewer",
+                approved_at="2026-09-13",
+            ),
+        ]
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        assert import_result.project_state["population_reference_records"] == []
+        assert any(
+            "duplicate approved" in warning for warning in import_result.warnings
+        )
+
+    def test_missing_governed_market_configuration_cannot_validate_an_approved_set(
+        self, tmp_path, governed_project
+    ):
+        governed_project = dict(governed_project)
+        governed_project["model_spec"] = None  # no governed market universe at all
+        records = [
+            TestProjectExportInputPopulationArtefacts._population_reference_record_dict(
+                approval_status="approved",
+                approved_by="reviewer",
+                approved_at="2026-09-13",
+            )
+        ]
+        governed_project["population_reference_records"] = records
+        governed_project["population_reference_set"] = (
+            TestProjectExportInputPopulationArtefacts._population_reference_set_dict(
+                records,
+                approval_status="approved",
+                approved_by="reviewer",
+                approved_at="2026-09-13",
+            )
+        )
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        assert import_result.project_state["population_reference_records"] == []
+        assert import_result.project_state["population_reference_set"] is None
+        assert any(
+            "no governed project market configuration could be resolved" in warning
+            for warning in import_result.warnings
+        )
+
+    def test_valid_export_import_reexport_remains_intact_with_market_validation(
+        self, tmp_path, governed_project
+    ):
+        """The full application-layer round trip still works end to end
+        once market validation is added - mirrors
+        TestProjectExportInputPopulationArtefacts::
+        test_reexporting_an_imported_project_preserves_the_same_artefacts
+        but asserted directly here alongside the new market-validation
+        coverage."""
+        governed_project = dict(governed_project)
+        records = [
+            TestProjectExportInputPopulationArtefacts._population_reference_record_dict(
+                market_id="UK"
+            )
+        ]
+        governed_project["population_reference_records"] = records
+        governed_project["population_reference_set"] = (
+            TestProjectExportInputPopulationArtefacts._population_reference_set_dict(
+                records
+            )
+        )
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle_1.zip"), **governed_project
+        )
+        first_export = ProjectService().export(exp_input)
+        assert first_export.success, first_export.errors
+
+        imported = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=first_export.actual_export_path)
+        )
+        assert imported.success, imported.errors
+        assert len(imported.project_state["population_reference_records"]) == 1
+        assert imported.project_state["population_reference_set"] is not None
+
+        reexport_kwargs = dict(governed_project)
+        reexport_kwargs["output_path"] = str(tmp_path / "bundle_2.zip")
+        reexport_kwargs["population_reference_records"] = imported.project_state[
+            "population_reference_records"
+        ]
+        reexport_kwargs["population_reference_set"] = imported.project_state[
+            "population_reference_set"
+        ]
+        second_export = ProjectService().export(ProjectExportInput(**reexport_kwargs))
+        assert second_export.success, second_export.errors
+
+        reimported = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=second_export.actual_export_path)
+        )
+        assert reimported.success, reimported.errors
+        assert (
+            reimported.project_state["population_reference_records"]
+            == imported.project_state["population_reference_records"]
+        )
+        assert (
+            reimported.project_state["population_reference_set"]
+            == imported.project_state["population_reference_set"]
+        )
+
+
 class TestProjectExportInputCausalGraphs:
     """REQ-GRAPH-001 work package (graph portability): causal_graphs - the
     new ProjectExportInput field mirroring counterfactual_policy/

@@ -137,6 +137,7 @@ class TestBuildPopulationReferenceSet:
             approval_status="approved",
             approved_by="reviewer",
             approved_at="2026-09-12",
+            known_market_ids=["UK", "AU"],
         )
         assert reference_set.approval_status == "approved"
         assert all(r.approval_status == "approved" for r in records)
@@ -212,6 +213,7 @@ class TestDirectlyApprovedDuplicateRejection:
                 approval_status="approved",
                 approved_by="reviewer",
                 approved_at="2026-09-13",
+                known_market_ids=["UK"],
             )
 
     def test_two_directly_approved_rows_different_years_allowed(self):
@@ -220,6 +222,7 @@ class TestDirectlyApprovedDuplicateRejection:
             approval_status="approved",
             approved_by="reviewer",
             approved_at="2026-09-13",
+            known_market_ids=["UK"],
         )
         assert len(records) == 2
         assert {r.reference_year for r in records} == {2023, 2024}
@@ -227,19 +230,10 @@ class TestDirectlyApprovedDuplicateRejection:
     def test_pending_upload_with_duplicate_year_is_unaffected(self):
         # Default approval_status="pending" - unchanged behaviour: no
         # later approval stage assumption applies here, so this must not
-        # start blocking pending uploads that worked before this fix.
+        # start blocking pending uploads that worked before this fix, and
+        # a pending upload still needs no known_market_ids at all.
         _, records = _build(self._duplicate_same_year_frame())
         assert len(records) == 2
-
-    def test_duplicate_check_does_not_require_known_market_ids(self):
-        with pytest.raises(PopulationUploadValidationError, match="duplicate approved"):
-            _build(
-                self._duplicate_same_year_frame(),
-                approval_status="approved",
-                approved_by="reviewer",
-                approved_at="2026-09-13",
-                known_market_ids=None,
-            )
 
     def test_unresolved_market_validation_still_works_when_supplied(self):
         # Regression check: the pre-existing known_market_ids behaviour
@@ -260,3 +254,58 @@ class TestDirectlyApprovedDuplicateRejection:
         message = str(exc_info.value)
         assert "duplicate approved" in message
         assert "does not resolve to a governed market" in message
+
+
+class TestApprovedUploadsRequireGovernedMarkets:
+    """Codex P2 (2026-09-13, third pass): approval_status="approved"
+    while known_market_ids=None let market-resolution validation be
+    skipped entirely - fixed to fail closed up front."""
+
+    def test_approved_with_no_governed_market_list_fails(self):
+        with pytest.raises(
+            PopulationUploadValidationError, match="requires known_market_ids"
+        ):
+            _build(
+                _valid_frame(),
+                approval_status="approved",
+                approved_by="reviewer",
+                approved_at="2026-09-13",
+            )
+
+    def test_approved_with_valid_governed_markets_succeeds(self):
+        reference_set, records = _build(
+            _valid_frame(),
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+            known_market_ids=["UK", "AU"],
+        )
+        assert reference_set.approval_status == "approved"
+        assert len(records) == 2
+
+    def test_approved_with_typo_market_fails(self):
+        with pytest.raises(PopulationUploadValidationError, match="governed market"):
+            _build(
+                _valid_frame(),
+                approval_status="approved",
+                approved_by="reviewer",
+                approved_at="2026-09-13",
+                known_market_ids=["UK"],  # AU is not configured
+            )
+
+    def test_pending_upload_still_needs_no_governed_market_list(self):
+        # Default approval_status="pending" - unaffected by this fix; the
+        # existing pre-approval collection workflow is unchanged.
+        _, records = _build(_valid_frame())
+        assert len(records) == 2
+
+    def test_approved_upload_is_never_silently_downgraded_to_pending(self):
+        # A rejected approved-upload attempt must raise, not quietly
+        # return a pending set instead.
+        with pytest.raises(PopulationUploadValidationError):
+            _build(
+                _valid_frame(),
+                approval_status="approved",
+                approved_by="reviewer",
+                approved_at="2026-09-13",
+            )
