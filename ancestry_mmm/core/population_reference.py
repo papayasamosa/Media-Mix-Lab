@@ -139,6 +139,17 @@ class PopulationReferenceRecord:
                 "PopulationReferenceRecord: approval_status='approved' requires "
                 "approved_by and approved_at."
             )
+        if self.schema_version != POPULATION_REFERENCE_SCHEMA_VERSION:
+            raise ValueError(
+                "PopulationReferenceRecord: unsupported schema_version "
+                f"{self.schema_version!r}; this build only understands "
+                f"{POPULATION_REFERENCE_SCHEMA_VERSION} (mirrors `core.curve_"
+                "artifact`/`core.prefit_run`'s exact-match schema-version "
+                "convention - an omitted value defaults to the current "
+                "version via the dataclass field default, but an explicitly "
+                "supplied future, zero, or malformed version must fail "
+                "closed here rather than being silently accepted)."
+            )
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -208,6 +219,12 @@ class PopulationReferenceSet:
             raise ValueError(
                 "PopulationReferenceSet: approval_status='approved' requires "
                 "approved_by and approved_at."
+            )
+        if self.schema_version != POPULATION_REFERENCE_SCHEMA_VERSION:
+            raise ValueError(
+                "PopulationReferenceSet: unsupported schema_version "
+                f"{self.schema_version!r}; this build only understands "
+                f"{POPULATION_REFERENCE_SCHEMA_VERSION}."
             )
 
     def to_dict(self) -> dict:

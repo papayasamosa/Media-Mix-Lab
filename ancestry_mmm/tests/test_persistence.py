@@ -1838,6 +1838,29 @@ def test_resolve_imported_population_reference_records_quarantines_non_mapping_e
     assert len(warnings) == 1
 
 
+def test_resolve_imported_population_reference_records_quarantines_unsupported_schema_version():
+    """Codex P2 (2026-09-13): an explicitly incompatible schema_version
+    (future, zero, or malformed) must flow into the existing quarantine
+    mechanism rather than being silently accepted and re-exported in a
+    lossy current shape."""
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-future", schema_version=999
+            ),
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-good", schema_version=1
+            ),
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-good"
+    assert len(warnings) == 1
+    assert "pop-future" in warnings[0]
+    assert "malformed" in warnings[0]
+
+
 def _valid_population_reference_set_dict(**overrides) -> dict:
     import hashlib
 
@@ -1870,6 +1893,20 @@ def test_resolve_imported_population_reference_set_reports_malformed_set_by_id()
     imported = {
         "population_reference_set": _valid_population_reference_set_dict(
             records_fingerprint="too-short"
+        )
+    }
+    resolved, warnings = resolve_imported_population_reference_set(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "pop-set-2026" in warnings[0]
+
+
+def test_resolve_imported_population_reference_set_quarantines_unsupported_schema_version():
+    """Codex P2 (2026-09-13): mirrors the record-level test above for the
+    set object."""
+    imported = {
+        "population_reference_set": _valid_population_reference_set_dict(
+            schema_version=999
         )
     }
     resolved, warnings = resolve_imported_population_reference_set(imported)
@@ -1912,6 +1949,20 @@ def test_resolve_imported_population_treatment_specification_reports_malformed_b
     imported = {
         "population_treatment_specification": _valid_population_treatment_specification_dict(
             outcome_population_treatment="not_a_real_treatment"
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "spec-1" in warnings[0]
+
+
+def test_resolve_imported_population_treatment_specification_quarantines_unsupported_schema_version():
+    """Codex P2 (2026-09-13): mirrors the record/set-level tests above for
+    the treatment-specification object."""
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            schema_version=999
         )
     }
     resolved, warnings = resolve_imported_population_treatment_specification(imported)

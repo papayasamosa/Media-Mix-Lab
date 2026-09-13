@@ -81,6 +81,15 @@ class TestPopulationReferenceRecord:
         with pytest.raises(ValueError):
             _record(approval_status="maybe")
 
+    def test_omitted_schema_version_defaults_to_current(self):
+        record = _record()
+        assert record.schema_version == 1
+
+    @pytest.mark.parametrize("bad_version", [999, 0, "1", "abc", None, 1.5])
+    def test_unsupported_schema_version_rejected(self, bad_version):
+        with pytest.raises(ValueError):
+            _record(schema_version=bad_version)
+
 
 class TestPopulationReferenceSet:
     def _fingerprint(self, records):
@@ -109,6 +118,30 @@ class TestPopulationReferenceSet:
                 source_name="synthetic_source",
                 retrieved_at="2026-09-12T00:00:00Z",
                 records_fingerprint="not-a-real-hash",
+            )
+
+    def test_omitted_schema_version_defaults_to_current(self):
+        reference_set = PopulationReferenceSet(
+            reference_set_id="set-1",
+            reference_set_version=1,
+            name="Synthetic set",
+            source_name="synthetic_source",
+            retrieved_at="2026-09-12T00:00:00Z",
+            records_fingerprint=self._fingerprint([_record()]),
+        )
+        assert reference_set.schema_version == 1
+
+    @pytest.mark.parametrize("bad_version", [999, 0, "1", "abc", None, 1.5])
+    def test_unsupported_schema_version_rejected(self, bad_version):
+        with pytest.raises(ValueError):
+            PopulationReferenceSet(
+                reference_set_id="set-1",
+                reference_set_version=1,
+                name="Synthetic set",
+                source_name="synthetic_source",
+                retrieved_at="2026-09-12T00:00:00Z",
+                records_fingerprint=self._fingerprint([_record()]),
+                schema_version=bad_version,
             )
 
     def test_approved_requires_approver(self):

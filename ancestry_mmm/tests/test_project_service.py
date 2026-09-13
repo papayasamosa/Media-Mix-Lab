@@ -17,6 +17,7 @@ import pytest
 from ancestry_mmm.application.diagnostics_service import DiagnosticsArtefact
 from ancestry_mmm.application.project_service import (
     ProjectExportInput,
+    ProjectImportInput,
     ProjectService,
     verify_imported_readiness,
 )
@@ -498,6 +499,266 @@ class TestProjectExportInputCounterfactualAndCurrencyContext:
         imported = import_project(result.actual_export_path)
         assert imported["counterfactual_policy"] is None
         assert imported["currency_context"] is None
+
+
+class TestProjectExportInputPopulationArtefacts:
+    """REQ-POPULATION-001, 2026-09-13 review follow-up (Codex P1): the three
+    governed population artefacts threaded end-to-end through
+    ProjectExportInput -> ProjectService.export() -> core.persistence.
+    export_project(), and restored through ProjectService.import_bundle()'s
+    quarantine resolvers - a core-only export_project() round trip is not
+    enough, so every test here goes through the application-service layer."""
+
+    @staticmethod
+    def _population_reference_set_dict() -> dict:
+        return dict(
+            reference_set_id="set-1",
+            reference_set_version=1,
+            name="Synthetic set",
+            source_name="synthetic_source",
+            retrieved_at="2026-09-13T00:00:00Z",
+            records_fingerprint="a" * 64,
+        )
+
+    @staticmethod
+    def _population_reference_record_dict(**overrides) -> dict:
+        payload = dict(
+            population_reference_id="pop-1",
+            market_id="UK",
+            population=1_000_000.0,
+            population_basis="total_resident_population",
+            source_name="synthetic_source",
+            owner="test_owner",
+            reference_year=2024,
+        )
+        payload.update(overrides)
+        return payload
+
+    @staticmethod
+    def _population_treatment_specification_dict(**overrides) -> dict:
+        payload = dict(
+            population_treatment_spec_id="spec-1",
+            project_id="proj-1",
+            market_scope=["UK"],
+            owner="test_owner",
+        )
+        payload.update(overrides)
+        return payload
+
+    def test_export_passes_artefacts_through_to_the_bundle(
+        self, tmp_path, governed_project
+    ):
+        governed_project = dict(governed_project)
+        governed_project["population_reference_set"] = (
+            self._population_reference_set_dict()
+        )
+        governed_project["population_reference_records"] = [
+            self._population_reference_record_dict()
+        ]
+        governed_project["population_treatment_specification"] = (
+            self._population_treatment_specification_dict()
+        )
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        result = ProjectService().export(exp_input)
+
+        assert result.success, result.errors
+        imported = import_project(result.actual_export_path)
+        assert (
+            imported["population_reference_set"]
+            == governed_project["population_reference_set"]
+        )
+        assert (
+            imported["population_reference_records"]
+            == governed_project["population_reference_records"]
+        )
+        assert (
+            imported["population_treatment_specification"]
+            == governed_project["population_treatment_specification"]
+        )
+
+    def test_export_omits_artefacts_when_none(self, tmp_path, governed_project):
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        result = ProjectService().export(exp_input)
+
+        assert result.success, result.errors
+        imported = import_project(result.actual_export_path)
+        assert imported["population_reference_set"] is None
+        assert imported["population_reference_records"] is None
+        assert imported["population_treatment_specification"] is None
+
+    def test_import_bundle_restores_valid_artefacts_into_project_state(
+        self, tmp_path, governed_project
+    ):
+        governed_project = dict(governed_project)
+        governed_project["population_reference_set"] = (
+            self._population_reference_set_dict()
+        )
+        governed_project["population_reference_records"] = [
+            self._population_reference_record_dict()
+        ]
+        governed_project["population_treatment_specification"] = (
+            self._population_treatment_specification_dict()
+        )
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        assert (
+            import_result.project_state["population_reference_set"]["reference_set_id"]
+            == "set-1"
+        )
+        assert len(import_result.project_state["population_reference_records"]) == 1
+        assert (
+            import_result.project_state["population_treatment_specification"][
+                "population_treatment_spec_id"
+            ]
+            == "spec-1"
+        )
+
+    def test_import_bundle_quarantines_malformed_artefacts_not_silently_valid(
+        self, tmp_path, governed_project
+    ):
+        governed_project = dict(governed_project)
+        # non-positive population -> quarantined at import; must not
+        # silently reappear as valid project state.
+        governed_project["population_reference_records"] = [
+            self._population_reference_record_dict(
+                population_reference_id="pop-bad", population=0.0
+            )
+        ]
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        assert import_result.project_state["population_reference_records"] == []
+        assert any("pop-bad" in warning for warning in import_result.warnings)
+
+    def test_reexporting_an_imported_project_preserves_the_same_artefacts(
+        self, tmp_path, governed_project
+    ):
+        """Import -> restore -> re-export through a fresh ProjectExportInput
+        built from the restored project_state -> the artefacts survive
+        unchanged - the full application-layer round trip the review asked
+        for, not merely a core-only export_project() round trip."""
+        governed_project = dict(governed_project)
+        governed_project["population_reference_set"] = (
+            self._population_reference_set_dict()
+        )
+        governed_project["population_reference_records"] = [
+            self._population_reference_record_dict()
+        ]
+        governed_project["population_treatment_specification"] = (
+            self._population_treatment_specification_dict()
+        )
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle_1.zip"), **governed_project
+        )
+        first_export = ProjectService().export(exp_input)
+        assert first_export.success, first_export.errors
+
+        imported = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=first_export.actual_export_path)
+        )
+        assert imported.success, imported.errors
+
+        reexport_kwargs = dict(governed_project)
+        reexport_kwargs["output_path"] = str(tmp_path / "bundle_2.zip")
+        reexport_kwargs["population_reference_set"] = imported.project_state[
+            "population_reference_set"
+        ]
+        reexport_kwargs["population_reference_records"] = imported.project_state[
+            "population_reference_records"
+        ]
+        reexport_kwargs["population_treatment_specification"] = imported.project_state[
+            "population_treatment_specification"
+        ]
+        second_export = ProjectService().export(ProjectExportInput(**reexport_kwargs))
+        assert second_export.success, second_export.errors
+
+        # Compare against what the *first* import already canonicalised
+        # (round-tripped through each dataclass's own from_dict/to_dict,
+        # which fills in defaults such as approval_status/schema_version
+        # the minimal test dict above omitted) - not the raw minimal input,
+        # since canonicalisation on the first import is itself correct,
+        # expected behaviour. Use ProjectService().import_bundle() again
+        # (not core.persistence.import_project() directly) so both sides
+        # go through the identical resolver/canonicalisation path - the
+        # invariant this test actually proves is that a *second* round
+        # trip through the application layer introduces no further drift.
+        reimported = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=second_export.actual_export_path)
+        )
+        assert reimported.success, reimported.errors
+        assert (
+            reimported.project_state["population_reference_set"]
+            == imported.project_state["population_reference_set"]
+        )
+        assert (
+            reimported.project_state["population_reference_records"]
+            == imported.project_state["population_reference_records"]
+        )
+        assert (
+            reimported.project_state["population_treatment_specification"]
+            == imported.project_state["population_treatment_specification"]
+        )
+
+    def test_restoring_an_active_specification_does_not_activate_modelling(
+        self, tmp_path, governed_project
+    ):
+        """Merely restoring an active treatment specification must never
+        activate modelling - it must still be blocked at fit time by the
+        unresolved-policy guard the moment it is actually used."""
+        governed_project = dict(governed_project)
+        governed_project["population_treatment_specification"] = (
+            self._population_treatment_specification_dict(
+                outcome_population_treatment="exposure_or_offset"
+            )
+        )
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        restored_spec_dict = import_result.project_state[
+            "population_treatment_specification"
+        ]
+        # Restoration itself succeeds and does not activate anything by itself.
+        assert restored_spec_dict is not None
+
+        from ancestry_mmm.core.population_preparation import (
+            PopulationTreatmentUnresolvedError,
+            prepare_population_aware_observed_target,
+        )
+        from ancestry_mmm.core.population_treatment import (
+            PopulationTreatmentSpecification,
+        )
+
+        restored_spec = PopulationTreatmentSpecification.from_dict(restored_spec_dict)
+        with pytest.raises(PopulationTreatmentUnresolvedError):
+            prepare_population_aware_observed_target(
+                [1.0, 2.0], treatment_spec=restored_spec
+            )
 
 
 class TestProjectExportInputCausalGraphs:

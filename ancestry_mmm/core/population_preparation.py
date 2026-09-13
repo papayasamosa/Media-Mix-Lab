@@ -76,9 +76,9 @@ class PopulationPreparationResult:
 
 
 def prepare_population_aware_observed_target(
-    observed_counts: Sequence[Any],
+    observed_counts: Optional[Sequence[Any]],
     treatment_spec: Optional[PopulationTreatmentSpecification] = None,
-) -> Tuple[Sequence[Any], PopulationPreparationResult]:
+) -> Tuple[Optional[Sequence[Any]], PopulationPreparationResult]:
     """The count-preservation boundary (Part 3 v1.13 / Part 6 v1.11
     section 6.7 / Part 7 v1.10 section 3.15): proves
     `governed observed count == prepared observed count`.

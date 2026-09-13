@@ -84,7 +84,19 @@ class TestPopulationTreatmentSpecificationValidation:
             )
 
     @pytest.mark.parametrize(
-        "protected_unit", ["GRP", "tvr", "Reach_Percentage", "Index"]
+        "protected_unit",
+        [
+            "GRP",
+            "tvr",
+            "Reach_Percentage",
+            "Index",
+            "%",
+            "pct",
+            "percent",
+            "reach %",
+            "rates",
+            "indices",
+        ],
     )
     def test_protected_units_cannot_be_declared_eligible(self, protected_unit):
         with pytest.raises(ValueError):
@@ -99,17 +111,74 @@ class TestPopulationTreatmentSpecificationValidation:
         with pytest.raises(ValueError):
             _spec(approval_status="approved")
 
+    def test_omitted_schema_version_defaults_to_current(self):
+        assert _spec().schema_version == 1
+
+    @pytest.mark.parametrize("bad_version", [999, 0, "1", "abc", None, 1.5])
+    def test_unsupported_schema_version_rejected(self, bad_version):
+        with pytest.raises(ValueError):
+            _spec(schema_version=bad_version)
+
 
 class TestProtectedUnits:
     @pytest.mark.parametrize(
         "unit",
-        ["GRP", "GRPs", "TVR", "reach percentage", "rate", "Percentage", "index"],
+        [
+            "GRP",
+            "GRPs",
+            "TVR",
+            "TVRs",
+            "reach percentage",
+            "rate",
+            "Percentage",
+            "index",
+        ],
     )
     def test_known_protected_units_are_protected(self, unit):
         assert is_predictor_unit_protected(unit) is True
 
+    @pytest.mark.parametrize(
+        "unit",
+        [
+            "%",
+            "Pct",
+            "PCT",
+            "percent",
+            "percents",
+            "reach %",
+            "Reach%",
+            "reach_pct",
+            "reach percent",
+            "rates",
+            "Rates",
+            "indices",
+            "Indices",
+            "indexes",
+        ],
+    )
+    def test_governed_aliases_are_also_protected(self, unit):
+        """Codex P2 (2026-09-13): the original exact-string check was too
+        narrow to catch these ordinary governed aliases."""
+        assert is_predictor_unit_protected(unit) is True
+
     @pytest.mark.parametrize("unit", ["impressions", "clicks", "spend", "sends"])
     def test_extensive_units_are_not_protected(self, unit):
+        assert is_predictor_unit_protected(unit) is False
+
+    @pytest.mark.parametrize(
+        "unit",
+        [
+            "conversion_rate_index",  # contains "rate" and "index" as fragments
+            "aggregate",  # contains "gr" fragments, unrelated to GRP
+            "percentagewise_delivery",  # contains "percentage" as a fragment
+        ],
+    )
+    def test_unrelated_units_containing_protected_fragments_are_not_protected(
+        self, unit
+    ):
+        """The canonicalisation is an exact-identity match, never a
+        substring search - a unit that merely contains "rate", "index" or
+        "percentage" as part of an unrelated word must not be caught."""
         assert is_predictor_unit_protected(unit) is False
 
 
@@ -137,9 +206,16 @@ class TestEligibilityHelper:
             is False
         )
 
-    def test_protected_unit_never_eligible_even_if_declared_elsewhere(self):
+    @pytest.mark.parametrize(
+        "protected_unit", ["GRP", "%", "pct", "reach %", "rates", "indices"]
+    )
+    def test_protected_unit_never_eligible_even_if_declared_elsewhere(
+        self, protected_unit
+    ):
         # A protected unit can never even be constructed into eligible_measure_units
-        # (TestProtectedUnits above), so this asserts the helper's own defence in depth.
+        # (TestProtectedUnits above), so this asserts the helper's own defence in
+        # depth - a specification must not be able to list a protected unit as
+        # eligible and then have this helper return True for it.
         spec = _spec(
             predictor_population_treatment=(
                 PREDICTOR_POPULATION_TREATMENT_SELECTED_ELIGIBLE_PREDICTORS
@@ -147,7 +223,9 @@ class TestEligibilityHelper:
             eligible_measure_units=("impressions",),
         )
         assert (
-            is_predictor_unit_eligible_for_population_normalisation("GRP", spec)
+            is_predictor_unit_eligible_for_population_normalisation(
+                protected_unit, spec
+            )
             is False
         )
 

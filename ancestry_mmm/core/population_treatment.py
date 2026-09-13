@@ -38,6 +38,7 @@ therefore left as a target platform capability, not implemented here.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping, Optional, Sequence, Tuple, cast
 
@@ -66,31 +67,90 @@ PREDICTOR_POPULATION_TREATMENTS = (
 
 # Part 3 v1.13 / Part 6 v1.11 / Part 10 v1.8: already audience-relative or
 # normalised measures are ineligible for automatic population division by
-# default. Unit strings are matched case-insensitively.
-PROTECTED_PREDICTOR_UNITS = (
-    "grp",
-    "grps",
-    "tvr",
-    "tvrs",
-    "reach_percentage",
-    "reach_pct",
-    "rate",
-    "percentage",
-    "percent",
-    "index",
+# default (GRPs, TVRs, reach percentages, rates, percentages, indices).
+#
+# 2026-09-13 review follow-up (Codex P2): the original exact-string list
+# below was too narrow - it caught neither the bare "%" symbol nor plural
+# forms such as "indices". Matching is now done through an explicit
+# canonicalisation step (`_canonicalise_unit_label`) plus a closed alias
+# table, rather than a substring search - a substring check could reject
+# an unrelated unit that merely happens to contain "rate" or "index" as a
+# fragment (e.g. a hypothetical "conversion_rate_index" spend metric),
+# which this repository's governed-unit-vocabulary convention (see
+# `core.search_objects.SEARCH_UNITS`'s closed-list pattern) treats as a
+# defect, not acceptable caution.
+
+# Canonical protected-measure identities.
+_PROTECTED_GRP = "grp"
+_PROTECTED_TVR = "tvr"
+_PROTECTED_PERCENTAGE = "percentage"
+_PROTECTED_REACH_PERCENTAGE = "reach_percentage"
+_PROTECTED_RATE = "rate"
+_PROTECTED_INDEX = "index"
+
+PROTECTED_UNIT_CANONICAL_FORMS = frozenset(
+    {
+        _PROTECTED_GRP,
+        _PROTECTED_TVR,
+        _PROTECTED_PERCENTAGE,
+        _PROTECTED_REACH_PERCENTAGE,
+        _PROTECTED_RATE,
+        _PROTECTED_INDEX,
+    }
 )
 
+# Every governed alias a canonicalised unit label may take, mapped to its
+# canonical identity above. Closed and explicit - never extended by a
+# substring/fuzzy match at lookup time.
+_PROTECTED_UNIT_ALIASES = {
+    "grp": _PROTECTED_GRP,
+    "grps": _PROTECTED_GRP,
+    "tvr": _PROTECTED_TVR,
+    "tvrs": _PROTECTED_TVR,
+    "percent": _PROTECTED_PERCENTAGE,
+    "percents": _PROTECTED_PERCENTAGE,
+    "pct": _PROTECTED_PERCENTAGE,
+    "percentage": _PROTECTED_PERCENTAGE,
+    "percentages": _PROTECTED_PERCENTAGE,
+    "reach_percent": _PROTECTED_REACH_PERCENTAGE,
+    "reach_pct": _PROTECTED_REACH_PERCENTAGE,
+    "reach_percentage": _PROTECTED_REACH_PERCENTAGE,
+    "reach_percentages": _PROTECTED_REACH_PERCENTAGE,
+    "rate": _PROTECTED_RATE,
+    "rates": _PROTECTED_RATE,
+    "index": _PROTECTED_INDEX,
+    "indices": _PROTECTED_INDEX,
+    "indexes": _PROTECTED_INDEX,
+}
+
 APPROVAL_STATUSES = ("pending", "approved", "rejected")
+
+
+def _canonicalise_unit_label(unit: str) -> str:
+    """Lowercase, trim, normalise the "%" symbol to the word "percent",
+    and collapse whitespace/hyphens to a single underscore - e.g.
+    `"Reach %"`, `"reach_pct"` and `"reach percentage"` all canonicalise
+    to `"reach_percent"`/`"reach_percentage"`-shaped keys that
+    `_PROTECTED_UNIT_ALIASES` resolves identically. Purely mechanical
+    normalisation - never a fuzzy or substring match."""
+    normalised = unit.strip().lower().replace("%", " percent ")
+    normalised = re.sub(r"[\s\-]+", "_", normalised)
+    return normalised.strip("_")
 
 
 def is_predictor_unit_protected(unit: str) -> bool:
     """`True` when `unit` is an already-normalised/audience-relative
     measure that must never be automatically population-divided (Part 3
-    v1.13: GRPs, TVRs, reach percentages, rates, percentages, indices).
-    Matching is unit-semantic (a governed unit label), never inferred from
-    a column name alone - callers must pass the variable's governed unit,
-    not its raw source header."""
-    return unit.strip().lower().replace(" ", "_") in PROTECTED_PREDICTOR_UNITS
+    v1.13: GRPs, TVRs, reach percentages, rates, percentages, indices,
+    and their ordinary governed aliases - `%`, `pct`, plural forms such
+    as `indices`/`rates`, and `reach %`). Matching is unit-semantic (a
+    governed unit label), never inferred from a column name alone -
+    callers must pass the variable's governed unit, not its raw source
+    header. Exact canonical-identity lookup only, never a substring
+    match - an unrelated unit that merely contains "rate" or "index" as a
+    fragment is never caught by this check."""
+    canonical = _PROTECTED_UNIT_ALIASES.get(_canonicalise_unit_label(unit))
+    return canonical is not None and canonical in PROTECTED_UNIT_CANONICAL_FORMS
 
 
 @dataclass(frozen=True)
@@ -175,6 +235,12 @@ class PopulationTreatmentSpecification:
             raise ValueError(
                 "PopulationTreatmentSpecification: approval_status='approved' requires "
                 "approved_by and approved_at."
+            )
+        if self.schema_version != POPULATION_TREATMENT_SCHEMA_VERSION:
+            raise ValueError(
+                "PopulationTreatmentSpecification: unsupported schema_version "
+                f"{self.schema_version!r}; this build only understands "
+                f"{POPULATION_TREATMENT_SCHEMA_VERSION}."
             )
 
     @property
