@@ -85,9 +85,22 @@ class PopulationReferenceRecord:
     schema_version: int = POPULATION_REFERENCE_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        if not self.population_reference_id:
+        if (
+            not isinstance(self.population_reference_id, str)
+            or not self.population_reference_id
+        ):
+            # Codex P2 (2026-09-13, fourth pass): a truthiness-only check
+            # let a non-string id (list/dict/int from a malformed imported
+            # JSON record) through construction; it then crashed later,
+            # uncaught, inside compute_population_records_fingerprint's
+            # sorted() - which mixes str/non-str keys - rather than being
+            # quarantined here at the domain boundary where the import
+            # resolver's existing except (..., ValueError, ...) already
+            # catches it. Fail here, at construction, not at the sort site.
             raise ValueError(
-                "PopulationReferenceRecord requires a population_reference_id."
+                "PopulationReferenceRecord requires a non-empty string "
+                f"population_reference_id, got {self.population_reference_id!r} "
+                f"({type(self.population_reference_id).__name__})."
             )
         if not self.market_id:
             raise ValueError("PopulationReferenceRecord requires a market_id.")

@@ -40,6 +40,23 @@ class TestPopulationReferenceRecord:
         with pytest.raises(ValueError):
             _record(population_reference_id="")
 
+    @pytest.mark.parametrize(
+        "bad_id", [[1, 2, 3], {"a": 1}, 42, 3.14, None, True], ids=repr
+    )
+    def test_non_string_id_rejected(self, bad_id):
+        """Codex P2 (2026-09-13, fourth pass): a non-string
+        population_reference_id (e.g. from a malformed imported JSON
+        record) must fail at construction, not construct successfully
+        and crash later inside compute_population_records_fingerprint's
+        sorted() call, which cannot compare a non-string key against a
+        string one."""
+        with pytest.raises(ValueError):
+            _record(population_reference_id=bad_id)
+
+    def test_valid_string_id_still_accepted(self):
+        record = _record(population_reference_id="pop-valid-1")
+        assert record.population_reference_id == "pop-valid-1"
+
     def test_non_finite_population_rejected(self):
         with pytest.raises(ValueError):
             _record(population=float("nan"))

@@ -115,6 +115,23 @@ class TestBuildPopulationReferenceSet:
         with pytest.raises(PopulationUploadValidationError, match="row 1"):
             _build(frame)
 
+    @pytest.mark.parametrize("bad_year", [float("inf"), float("-inf")])
+    def test_non_finite_reference_year_rejected_as_validation_error(self, bad_year):
+        """Codex P2 (2026-09-13, fourth pass): int(round(float(inf)))
+        raises OverflowError, which must surface as the documented,
+        row-indexed PopulationUploadValidationError - never a raw
+        OverflowError leaking out of the upload path."""
+        frame = _valid_frame()
+        frame.loc[0, "reference_year"] = bad_year
+        with pytest.raises(PopulationUploadValidationError, match="row 1"):
+            _build(frame)
+
+    def test_ordinary_integral_year_still_works(self):
+        frame = _valid_frame()
+        frame.loc[0, "reference_year"] = 2024
+        _, records = _build(frame)
+        assert records[0].reference_year == 2024
+
     def test_missing_reference_year_is_allowed(self):
         frame = _valid_frame()
         frame.loc[0, "reference_year"] = None

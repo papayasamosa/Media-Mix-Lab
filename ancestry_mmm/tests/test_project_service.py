@@ -663,6 +663,38 @@ class TestProjectExportInputPopulationArtefacts:
         assert import_result.project_state["population_reference_records"] == []
         assert any("pop-bad" in warning for warning in import_result.warnings)
 
+    def test_import_bundle_quarantines_non_string_id_instead_of_crashing(
+        self, tmp_path, governed_project
+    ):
+        """Codex P2 (2026-09-13, fourth pass): a bundle containing a
+        record with a non-string population_reference_id (JSON-array-
+        valued, in this case) must make ProjectService.import_bundle
+        return a normal ProjectServiceResult - never propagate an
+        uncaught TypeError out of the real application import path."""
+        governed_project = dict(governed_project)
+        governed_project["population_reference_records"] = [
+            self._population_reference_record_dict(population_reference_id=[1, 2, 3]),
+            self._population_reference_record_dict(population_reference_id="pop-good"),
+        ]
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        assert len(import_result.project_state["population_reference_records"]) == 1
+        assert (
+            import_result.project_state["population_reference_records"][0][
+                "population_reference_id"
+            ]
+            == "pop-good"
+        )
+        assert any("malformed" in warning for warning in import_result.warnings)
+
     def test_reexporting_an_imported_project_preserves_the_same_artefacts(
         self, tmp_path, governed_project
     ):

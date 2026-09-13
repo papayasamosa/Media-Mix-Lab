@@ -17,6 +17,7 @@ columns: ``market``, ``population``, ``population_basis``,
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -134,8 +135,19 @@ def build_population_reference_set(
             reference_year_raw = values.get("reference_year")
             reference_year = None
             if not pd.isna(reference_year_raw):
-                reference_year = int(round(float(reference_year_raw)))
-                if reference_year != float(reference_year_raw):
+                reference_year_float = float(reference_year_raw)
+                # Codex P2 (2026-09-13, fourth pass): check finiteness
+                # deliberately, before rounding - round(inf) raises the
+                # unrelated exception type OverflowError, which the
+                # surrounding except (KeyError, TypeError, ValueError)
+                # below did not catch, leaking a raw crash instead of the
+                # documented, row-indexed PopulationUploadValidationError.
+                if not math.isfinite(reference_year_float):
+                    raise ValueError(
+                        f"reference_year must be finite, got {reference_year_raw!r}"
+                    )
+                reference_year = int(round(reference_year_float))
+                if reference_year != reference_year_float:
                     raise ValueError(
                         f"reference_year must be an integral year, got {reference_year_raw!r}"
                     )
@@ -160,7 +172,11 @@ def build_population_reference_set(
                     created_at=retrieved_at or datetime.now(timezone.utc).isoformat(),
                 )
             )
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            # OverflowError is caught defensively alongside the explicit
+            # math.isfinite() check above - the deliberate check is what
+            # identifies a non-finite reference_year, this is only a
+            # backstop for any other row-processing overflow.
             raise PopulationUploadValidationError(
                 f"Population upload row {index + 1} is invalid: {exc}"
             ) from exc

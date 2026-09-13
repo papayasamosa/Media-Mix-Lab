@@ -1839,6 +1839,28 @@ def test_resolve_imported_population_reference_records_quarantines_non_mapping_e
     assert len(warnings) == 1
 
 
+@pytest.mark.parametrize("bad_id", [[1, 2, 3], {"a": 1}, 42, 3.14, None], ids=repr)
+def test_resolve_imported_population_reference_records_quarantines_non_string_id(
+    bad_id,
+):
+    """Codex P2 (2026-09-13, fourth pass): a malformed
+    population_reference_id (list/dict/int/float/None - anything the
+    real persisted JSON path can represent) must be quarantined here,
+    while a genuinely valid sibling record in the same import survives -
+    never crashing the whole import."""
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(population_reference_id=bad_id),
+            _valid_population_reference_record_dict(population_reference_id="pop-good"),
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-good"
+    assert len(warnings) == 1
+    assert "malformed" in warnings[0]
+
+
 def test_resolve_imported_population_reference_records_quarantines_contradictory_approval_metadata():
     """Codex P2 (2026-09-13, third pass): a 'pending' record carrying
     stale approved_by/approved_at must flow through the existing
@@ -2053,6 +2075,52 @@ class TestResolveImportedPopulationReferenceArtifacts:
         assert len(resolved_records) == 1
         assert resolved_records[0]["population_reference_id"] == "pop-good"
         # ...which leaves the set's own fingerprint no longer reconciling.
+        assert resolved_set is None
+        assert any(
+            "does not match the fingerprint recomputed" in warning
+            for warning in warnings
+        )
+
+    def test_a_non_string_id_record_breaks_a_formerly_matching_set_fingerprint(self):
+        """Codex P2 (2026-09-13, fourth pass): mirrors the test above, but
+        the record is quarantined for having a malformed
+        population_reference_id (rather than a non-positive population) -
+        fingerprint reconciliation must behave identically either way, and
+        the combined resolver must not crash while getting there."""
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        good_record = _valid_population_reference_record_dict(
+            population_reference_id="pop-good"
+        )
+        bad_record_id = [1, 2, 3]
+        bad_record = _valid_population_reference_record_dict(
+            population_reference_id=bad_record_id
+        )
+        # The set's fingerprint is computed over both records as if the
+        # bad one had a valid id at upload time.
+        fingerprint_over_both = compute_population_records_fingerprint(
+            [
+                PopulationReferenceRecord.from_dict(good_record),
+                PopulationReferenceRecord.from_dict(
+                    {**bad_record, "population_reference_id": "pop-was-valid"}
+                ),
+            ]
+        )
+        set_dict = _valid_population_reference_set_dict(
+            records_fingerprint=fingerprint_over_both
+        )
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": [good_record, bad_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert len(resolved_records) == 1
+        assert resolved_records[0]["population_reference_id"] == "pop-good"
         assert resolved_set is None
         assert any(
             "does not match the fingerprint recomputed" in warning
