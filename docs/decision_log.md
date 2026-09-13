@@ -9275,3 +9275,183 @@ pass.
 
 Status: Implemented, tests passing, not yet pushed or opened as a PR
 (explicit instruction: prepare only).
+
+## 2026-09-12 governed country-level population reference (REQ-POPULATION-001)
+
+Implemented the governed-reference and treatment-specification objects
+from `UK_MMM_Governed_Population_By_Year_Implementation_Instructions.md`:
+`core.population_reference.PopulationReferenceRecord`/
+`PopulationReferenceSet` (mirrors `core.fx_rates.FXRateRecord`/
+`FXRateSet` exactly - frozen dataclasses, `__post_init__` validation, a
+`compute_population_records_fingerprint` helper, immutable "new version
+on change"), `resolve_single_population_reference` (the only resolution
+rule currently approved: exactly one applicable approved reference per
+market; more than one raises rather than guesses),
+`core.population_treatment.PopulationTreatmentSpecification` (always
+defaults to fully inactive; blocks declaring a protected unit - GRP, TVR,
+reach percentage, rate, percentage, index - as eligible for population
+normalisation), and three pure, tested statistical utilities
+(`population_exposure_log_term`, `population_normalised_predictor_value`,
+`geometric_mean_population`) implementing Part 6 v1.11 section 7.2.1's
+math exactly. `application.population_service.build_population_
+reference_set` ingests the approved five-column format (`market`/
+`population`/`population_basis`/`reference_year`/`source`), strictly at
+upload time, mirroring `fx_service.build_manual_fx_rate_set`.
+`core.persistence` gained three new optional bundle fields (`population_
+reference_set`, `population_reference_records`, `population_treatment_
+specification`) with `resolve_imported_*` quarantine-by-id functions
+mirroring the FX pair exactly.
+
+Critical finding during requirement reconciliation (brief section 2/28's
+mandated check, before any coding): the implementation brief assumed a
+prior chat had already updated the PRD to resolve whether population
+should map by year to model periods. Reading the actual latest PRD
+documents (all dated 2026-09-12, the same revision batch supplied)
+showed this is false - Part 5 v1.6's `DD-020` and Part 6 v1.11's `MD-025`
+both still list the population reference-period policy (one annual /
+midpoint / model-period-average / other) as an open decision, not a
+resolved one. Followed the brief's own built-in fallback for exactly this
+scenario (section 28): implemented governed ingestion/storage of the
+annual source (unambiguous), kept population treatment inactive by
+construction, and wrote up the open decision (`docs/population_
+reference_period_policy_decision.md`) rather than inventing a resolution.
+Consequently, no exposure/offset term is wired into `core.
+hierarchical_model`'s PyMC count likelihood in this pass - the current
+UK-only production model needs no such wiring (Part 6 v1.11 section 5.8/
+Part 10 v1.8's `UX-028`: a population term constant within one market
+gives no cross-market identification benefit, and the first UK release
+is explicitly allowed to leave population treatment `not_applicable`),
+and wiring it in prematurely would both invent `DD-020`'s answer and add
+population as a new fit-relevant `core.fingerprint` input for no current
+approved use.
+
+Also found during real-file verification (`.local-data/Population by
+Market.xlsx`, inspected for schema only - never committed, never used in
+tests): the file's physical columns match the approved minimal contract
+(`market`/`population`/`population_basis`/`reference_year`/`source`)
+exactly, but its `population_basis` values use a non-canonical label
+(`total_residents`, not the approved `total_resident_population`) and at
+least one row has a non-integral/implausible `reference_year` (a
+population-sized number, not a year). Ingestion correctly rejects both as
+malformed rather than silently coercing them - reconciling the basis
+label is an analyst/governance action, not something this pass invents
+an alias for. Regression tests reproduce both anomaly shapes with
+synthetic values (`test_population_service.py::test_unknown_basis_
+rejected`, `::test_implausible_reference_year_rejected`).
+
+Existing `core.market_config.MarketDescriptors.population` (a single,
+purely-informational per-market scalar the module already documents as
+unread downstream) is a distinct, pre-existing concept and was not
+touched - the new governed reference is deliberately separate, per the
+brief's explicit instruction not to confuse a governed reference with an
+ordinary Context-like descriptor.
+
+New/updated: `test_population_reference.py`, `test_population_
+treatment.py`, `test_population_service.py` (new files, 87 tests total),
+`test_persistence.py` (+18 tests: absent/valid-round-trip/quarantine for
+all three new bundle fields). `REQ-POPULATION-001.md` added; `docs/
+approved_requirements/index.json` and `README.md` updated to match.
+
+Not implemented (deferred, not a defect): wiring the exposure/predictor-
+normalisation math into `core.hierarchical_model`; a Streamlit page for
+uploading/reviewing population references and configuring treatment
+(Part 10 v1.8's intended UX journey); `core.fingerprint` staleness wiring
+(nothing yet reads population for fitting, so nothing needs to stale).
+All three depend on the `DD-020`/`MD-025` decision above and, for the
+model/fingerprint wiring, an approved multi-market model specification
+that does not yet exist for this UK-only delivery.
+
+Owner: Mohammed Khaled (product/analyst direction), implemented this
+pass.
+
+Status: Core/application/persistence layer implemented, tests passing,
+not yet pushed or opened as a PR (explicit instruction: do not push or
+open a PR without explicit approval).
+
+## 2026-09-13 narrow follow-up: inactive population support added to the modelling contract
+
+User feedback on the pass above: deferring *all* model/fingerprint
+wiring went slightly further than the PRD permits. Part 6 v1.11 section
+36.1 and its acceptance criterion 26 require the population-treatment
+schema, reference resolution, and count-preservation contract to be
+*available to the modelling path* even while the first UK-only model
+leaves treatment inactive - not merely present as disconnected utility
+functions nothing calls. Implemented the narrowest integration that
+satisfies this without resolving `DD-020`/`MD-025` or building annual
+mapping/active exposure/predictor normalisation:
+
+1. **`core.population_preparation`** (new) - `prepare_population_aware_
+   observed_target(observed_counts, treatment_spec=None)` is the count-
+   preservation boundary (Part 3 v1.13 / Part 6 v1.11 section 6.7 / Part 7
+   v1.10 section 3.15): for every existing UK model (`treatment_spec=
+   None`, the default, or any inactive specification) it returns the
+   observed counts unchanged with `count_preservation_verified=True` -
+   requiring no population reference, resolving no `reference_year`,
+   building no weekly series. This *is* Part 4 v1.8 section 15.6's object
+   4 ("prepared population-aware model frame"), for the inactive case
+   only.
+2. **Fail-closed activation guard** - the same function raises
+   `PopulationTreatmentUnresolvedError` the instant a specification's
+   `is_active` is `True`, naming `DD-020`/`MD-025` explicitly in the
+   message. `PopulationTreatmentSpecification` may still *represent*
+   `exposure_or_offset`/`selected_eligible_predictors` as a schema value -
+   only *using* one for real preparation is blocked, and never silently
+   downgraded to `none`.
+3. **Conditional fingerprint semantics (`AD-019`)** - `core.fingerprint.
+   fingerprint_model_spec` gained an opt-in `population_fit_fingerprint`
+   parameter, following the exact same pattern as the existing
+   `named_event_fit_fingerprint`/`calibration_fit_fingerprint` (omitted
+   from the hashed payload entirely when falsy - every existing UK fit's
+   fingerprint is byte-for-byte unaffected). `core.population_
+   preparation.population_dependency_fingerprint(treatment_spec,
+   reference_records)` returns `None` whenever treatment is inactive (so
+   a population file/reference change can never stale an unrelated fit)
+   and a real, deterministic hash only when active - reachable only as a
+   dependency contract/test today, since the guard in (2) blocks every
+   production path to the active branch.
+4. **`geometric_mean_population`/`population_exposure_log_term` made
+   unmistakably policy-neutral** - docstrings rewritten to state plainly
+   that `MD-025`'s centring-rule decision remains open, that neither
+   function is called automatically by anything in this codebase, and
+   that `population_exposure_log_term` requires its `reference_scale`
+   argument explicitly (no default a caller could rely on).
+   `REQ-POPULATION-001.md` reworded to match - it previously implied
+   these implemented "the" math from Part 6 v1.11 section 7.2.1 in a way
+   that read as more authoritative than `MD-025`'s actual open status.
+5. **No `MarketDescriptors.population` fallback** - confirmed and
+   regression-tested (`test_population_preparation.py::
+   TestNoMarketDescriptorsFallback`) that neither the resolver nor the
+   preparation boundary accepts a `MarketDescriptors` object as input at
+   all, so there is no code path by which the pre-existing informational
+   scalar could be consulted.
+6. **Deliberately did not touch `ModelSpec` (`core.schema`).** Adding a
+   `population_treatment_spec_id` field there would have made every
+   existing model's fingerprint change once, for a field that is always
+   `None` on a UK-only project - a real, if one-time, invalidation with
+   no benefit today. Population is threaded through as a sibling
+   parameter at the point of use instead, mirroring how `causal_graph_
+   structural_fingerprint`/`search_object_fit_fingerprint` already work
+   (separate governed objects, not fields nested inside `ModelSpec`).
+7. **Still deliberately not built**: any wiring into `core.
+   hierarchical_model`'s actual PyMC `eta`/`mu` construction (blocked by
+   the guard in (2) regardless), the Streamlit workflow page, and its
+   upload-guide section - unchanged from the prior pass, per explicit
+   instruction not to build UI or active likelihood behaviour this pass.
+
+New: `test_population_preparation.py` (26 tests: inactive-path zero-
+effect, no-reference-required, no-annual-mapping-parameter-exists,
+active-treatment-raises, error names DD-020/MD-025, observed-count-
+unchanged, dependency-fingerprint None-when-inactive/real-when-active,
+geometric-mean never auto-called via `monkeypatch` guard, no-
+MarketDescriptors-fallback). `test_fingerprint.py` gained `TestFingerprint
+ModelSpecPopulationFitFingerprint` (4 tests, mirroring the named-event/
+calibration opt-in tests already established for that function).
+`REQ-POPULATION-001.md`, `index.json` updated to match.
+
+Owner: Mohammed Khaled (product/analyst direction), implemented this
+pass.
+
+Status: Implemented, tests passing, not yet pushed or opened as a PR
+(explicit instruction: do not push or open a PR without explicit
+approval - stop for design review before committing, per this pass's
+explicit instruction).

@@ -1199,3 +1199,38 @@ class TestFingerprintPosterior:
         fp2 = fingerprint_posterior(params)
         assert fp1 == fp2
         assert isinstance(fp1, str) and len(fp1) == 64  # sha256 hexdigest
+
+
+# ---------------------------------------------------------------------------
+# Model-specification fingerprint: population_fit_fingerprint
+# (REQ-POPULATION-001, Part 4 v1.8 AD-019 - opt-in exactly like
+# named_event_fit_fingerprint/calibration_fit_fingerprint above)
+# ---------------------------------------------------------------------------
+
+
+class TestFingerprintModelSpecPopulationFitFingerprint:
+    def test_omitted_is_backward_compatible_with_no_population_fingerprint(self):
+        spec = {"markets": ["UK"]}
+        assert fingerprint_model_spec(spec, {}, 4) == fingerprint_model_spec(
+            spec, {}, 4, population_fit_fingerprint=None
+        )
+
+    def test_empty_string_is_also_treated_as_absent(self):
+        spec = {"markets": ["UK"]}
+        assert fingerprint_model_spec(spec, {}, 4) == fingerprint_model_spec(
+            spec, {}, 4, population_fit_fingerprint=""
+        )
+
+    def test_present_value_changes_the_fingerprint(self):
+        spec = {"markets": ["UK"]}
+        without = fingerprint_model_spec(spec, {}, 4)
+        with_population = fingerprint_model_spec(
+            spec, {}, 4, population_fit_fingerprint="a" * 64
+        )
+        assert without != with_population
+
+    def test_changing_the_value_changes_the_fingerprint(self):
+        spec = {"markets": ["UK"]}
+        fp_a = fingerprint_model_spec(spec, {}, 4, population_fit_fingerprint="a" * 64)
+        fp_b = fingerprint_model_spec(spec, {}, 4, population_fit_fingerprint="b" * 64)
+        assert fp_a != fp_b

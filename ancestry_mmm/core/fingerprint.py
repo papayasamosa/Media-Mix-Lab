@@ -132,6 +132,7 @@ def fingerprint_model_spec(
     calibration_fit_fingerprint: Optional[str] = None,
     seo_fit_fingerprint: Optional[str] = None,
     search_intent_taxonomy_fit_fingerprint: Optional[str] = None,
+    population_fit_fingerprint: Optional[str] = None,
 ) -> str:
     """
     Fingerprint the full set of inputs that determine how the model is
@@ -303,6 +304,18 @@ def fingerprint_model_spec(
     was never actually binding on them, so forcing re-review is the honest
     behaviour, not a regression.
 
+    `population_fit_fingerprint` (REQ-POPULATION-001, Part 4 v1.8 `AD-019` -
+    pass `core.population_preparation.population_dependency_fingerprint`)
+    is opt-in exactly like `named_event_fit_fingerprint`/`calibration_fit_
+    fingerprint` above: omitted from the payload entirely (not even an
+    empty-string placeholder) whenever population treatment is inactive,
+    which is every existing UK-only fit. A population reference or
+    treatment-specification change can therefore never stale a fit that
+    doesn't consume it. It becomes fit-relevant only once an approved
+    model specification actually activates population treatment - which
+    no current production path can do (see `core.population_preparation.
+    PopulationTreatmentUnresolvedError`).
+
     Canonical JSON with sorted dict keys, so insertion order never matters;
     list order is preserved (json.dumps does not reorder lists), since list
     order is meaningful (e.g. `channels`, `pipeline_steps`) - except
@@ -380,6 +393,15 @@ def fingerprint_model_spec(
         payload["search_intent_taxonomy_fit_fingerprint"] = (
             search_intent_taxonomy_fit_fingerprint
         )
+    # REQ-POPULATION-001 / Part 4 v1.8 AD-019: population is fit-relevant
+    # only when treatment is active. Every existing/UK-only caller passes
+    # nothing (or `core.population_preparation.population_dependency_
+    # fingerprint`'s `None` for an inactive/absent specification), so this
+    # key is omitted entirely and no population file/reference change can
+    # stale a fit that doesn't use it - mirrors the named-event/calibration
+    # opt-in pattern above exactly.
+    if population_fit_fingerprint:
+        payload["population_fit_fingerprint"] = population_fit_fingerprint
     blob = _canonical_json(payload)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 

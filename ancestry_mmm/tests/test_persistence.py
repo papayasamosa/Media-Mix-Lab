@@ -82,6 +82,9 @@ from ancestry_mmm.core.persistence import (
     resolve_imported_outcome_valuation_records,
     resolve_imported_fx_rate_set,
     resolve_imported_fx_rate_records,
+    resolve_imported_population_reference_records,
+    resolve_imported_population_reference_set,
+    resolve_imported_population_treatment_specification,
     resolve_imported_prefit_runs,
     resolve_imported_search_objects,
     resolve_imported_source_definitions,
@@ -1773,6 +1776,148 @@ def test_resolve_imported_fx_rate_set_reports_malformed_set_by_id():
     assert resolved is None
     assert len(warnings) == 1
     assert "fx-2026" in warnings[0]
+
+
+def _valid_population_reference_record_dict(**overrides) -> dict:
+    payload = dict(
+        population_reference_id="pop-1",
+        market_id="UK",
+        population=1_000_000.0,
+        population_basis="total_resident_population",
+        source_name="synthetic_source",
+        owner="test_owner",
+        reference_year=2024,
+    )
+    payload.update(overrides)
+    return payload
+
+
+def test_resolve_imported_population_reference_records_absent_resolves_empty():
+    records, warnings = resolve_imported_population_reference_records({})
+    assert records == []
+    assert warnings == []
+
+
+def test_resolve_imported_population_reference_records_valid_round_trips():
+    imported = {
+        "population_reference_records": [_valid_population_reference_record_dict()]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert warnings == []
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-1"
+
+
+def test_resolve_imported_population_reference_records_quarantines_malformed_but_keeps_valid_ones():
+    """A malformed record (non-positive population) in one row must not
+    take down the other, genuinely valid records in the same import -
+    each record is independently quarantined or kept, mirroring
+    `resolve_imported_fx_rate_records`."""
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-bad", population=0.0
+            ),
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-good", population=2_000_000.0
+            ),
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-good"
+    assert len(warnings) == 1
+    assert "pop-bad" in warnings[0]
+    assert "malformed" in warnings[0]
+
+
+def test_resolve_imported_population_reference_records_quarantines_non_mapping_entries():
+    imported = {"population_reference_records": ["not-a-mapping"]}
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert records == []
+    assert len(warnings) == 1
+
+
+def _valid_population_reference_set_dict(**overrides) -> dict:
+    import hashlib
+
+    payload = dict(
+        reference_set_id="pop-set-2026",
+        reference_set_version=1,
+        name="UK population reference",
+        source_name="synthetic_source",
+        retrieved_at="2026-01-01T00:00:00Z",
+        records_fingerprint=hashlib.sha256(b"test").hexdigest(),
+    )
+    payload.update(overrides)
+    return payload
+
+
+def test_resolve_imported_population_reference_set_absent_resolves_none():
+    resolved, warnings = resolve_imported_population_reference_set({})
+    assert resolved is None
+    assert warnings == []
+
+
+def test_resolve_imported_population_reference_set_valid_round_trips():
+    imported = {"population_reference_set": _valid_population_reference_set_dict()}
+    resolved, warnings = resolve_imported_population_reference_set(imported)
+    assert warnings == []
+    assert resolved["reference_set_id"] == "pop-set-2026"
+
+
+def test_resolve_imported_population_reference_set_reports_malformed_set_by_id():
+    imported = {
+        "population_reference_set": _valid_population_reference_set_dict(
+            records_fingerprint="too-short"
+        )
+    }
+    resolved, warnings = resolve_imported_population_reference_set(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "pop-set-2026" in warnings[0]
+
+
+def _valid_population_treatment_specification_dict(**overrides) -> dict:
+    payload = dict(
+        population_treatment_spec_id="spec-1",
+        project_id="proj-1",
+        market_scope=["UK"],
+        owner="test_owner",
+    )
+    payload.update(overrides)
+    return payload
+
+
+def test_resolve_imported_population_treatment_specification_absent_resolves_none():
+    resolved, warnings = resolve_imported_population_treatment_specification({})
+    assert resolved is None
+    assert warnings == []
+
+
+def test_resolve_imported_population_treatment_specification_valid_round_trips():
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict()
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert warnings == []
+    assert resolved["population_treatment_spec_id"] == "spec-1"
+    # Round-tripping an absent-outcome specification must still resolve to
+    # fully inactive, never an implicit default.
+    assert resolved["outcome_population_treatment"] == "none"
+    assert resolved["predictor_population_treatment"] == "none"
+
+
+def test_resolve_imported_population_treatment_specification_reports_malformed_by_id():
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            outcome_population_treatment="not_a_real_treatment"
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "spec-1" in warnings[0]
 
 
 def test_export_then_import_causal_graphs_round_trip(tmp_path, sample_project):

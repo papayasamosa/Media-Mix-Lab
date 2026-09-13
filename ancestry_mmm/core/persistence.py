@@ -329,6 +329,9 @@ def export_project(
     fx_rate_set: Optional[dict] = None,
     fx_rate_records: Optional[List[dict]] = None,
     fx_vintage_year_id: Optional[str] = None,
+    population_reference_set: Optional[dict] = None,
+    population_reference_records: Optional[List[dict]] = None,
+    population_treatment_specification: Optional[dict] = None,
     value_mapping: Optional[dict] = None,
     outcome_valuation_records: Optional[List[dict]] = None,
     causal_graphs: Optional[List[dict]] = None,
@@ -567,6 +570,22 @@ def export_project(
             (tmp / "config" / "fx_vintage_year_id.json").write_text(
                 json.dumps(fx_vintage_year_id, indent=2, default=str)
             )
+        # REQ-POPULATION-001: governed population reference and treatment
+        # specification - see the module docstring's FX precedent, which
+        # this mirrors exactly. Population treatment defaults to inactive;
+        # persisting a reference set never activates it.
+        if population_reference_set is not None:
+            (tmp / "config" / "population_reference_set.json").write_text(
+                json.dumps(population_reference_set, indent=2, default=str)
+            )
+        if population_reference_records is not None:
+            (tmp / "config" / "population_reference_records.json").write_text(
+                json.dumps(population_reference_records, indent=2, default=str)
+            )
+        if population_treatment_specification is not None:
+            (tmp / "config" / "population_treatment_specification.json").write_text(
+                json.dumps(population_treatment_specification, indent=2, default=str)
+            )
         if value_mapping is not None:
             (tmp / "config" / "value_mapping.json").write_text(
                 json.dumps(value_mapping, indent=2, default=str)
@@ -801,6 +820,11 @@ def export_project(
                 "fx_rate_records": fx_rate_records is not None
                 and bool(fx_rate_records),
                 "fx_vintage_year_id": fx_vintage_year_id is not None,
+                "population_reference_set": population_reference_set is not None,
+                "population_reference_records": population_reference_records is not None
+                and bool(population_reference_records),
+                "population_treatment_specification": population_treatment_specification
+                is not None,
                 "value_mapping": value_mapping is not None,
                 "outcome_valuation_records": outcome_valuation_records is not None
                 and bool(outcome_valuation_records),
@@ -944,6 +968,9 @@ def import_project(zip_path: Path) -> Dict[str, Any]:
         "fx_rate_set": None,
         "fx_rate_records": None,
         "fx_vintage_year_id": None,
+        "population_reference_set": None,
+        "population_reference_records": None,
+        "population_treatment_specification": None,
         "value_mapping": None,
         "outcome_valuation_records": [],
         # REQ-GRAPH-001: None for bundles exported before this capability
@@ -1200,6 +1227,18 @@ def import_project(zip_path: Path) -> Dict[str, Any]:
         if (config_dir / "fx_vintage_year_id.json").exists():
             result["fx_vintage_year_id"] = json.loads(
                 (config_dir / "fx_vintage_year_id.json").read_text()
+            )
+        if (config_dir / "population_reference_set.json").exists():
+            result["population_reference_set"] = json.loads(
+                (config_dir / "population_reference_set.json").read_text()
+            )
+        if (config_dir / "population_reference_records.json").exists():
+            result["population_reference_records"] = json.loads(
+                (config_dir / "population_reference_records.json").read_text()
+            )
+        if (config_dir / "population_treatment_specification.json").exists():
+            result["population_treatment_specification"] = json.loads(
+                (config_dir / "population_treatment_specification.json").read_text()
             )
         if (config_dir / "value_mapping.json").exists():
             result["value_mapping"] = json.loads(
@@ -1748,6 +1787,124 @@ def resolve_imported_fx_rate_set(
         rate_set_id = raw_set.get("rate_set_id", "<unknown>")
         return None, [
             f"FX rate set (rate_set_id={rate_set_id!r}) was malformed and "
+            f"was quarantined (dropped, not silently kept): {exc}"
+        ]
+
+
+def resolve_imported_population_reference_records(
+    imported: Dict[str, Any],
+) -> Tuple[List[dict], List[str]]:
+    """REQ-POPULATION-001: resolve the governed population-reference
+    observations an imported bundle should use, mirroring
+    `resolve_imported_fx_rate_records`'s never-trust-silently contract
+    exactly. Each record is round-tripped through
+    `PopulationReferenceRecord.from_dict`/`to_dict`; a malformed record
+    (non-finite/non-positive population, unknown basis, an 'approved'
+    status missing its approver, an out-of-range reference_year, etc.) is
+    quarantined (dropped), named by index and population_reference_id in
+    `warnings`.
+
+    Absent `population_reference_records` resolves to `([], [])` - "no
+    population reference supplied yet" is not an error; population
+    treatment stays inactive regardless (see `core.population_treatment`).
+    """
+    from .population_reference import PopulationReferenceRecord
+
+    raw_records = imported.get("population_reference_records")
+    warnings: List[str] = []
+    if not raw_records:
+        return [], warnings
+    normalised: List[dict] = []
+    for index, item in enumerate(raw_records):
+        if not isinstance(item, Mapping):
+            warnings.append(
+                f"Population reference record {index} is not a mapping "
+                f"(type={type(item).__name__!r}) and was quarantined "
+                "(dropped, not silently kept)."
+            )
+            continue
+        try:
+            normalised.append(PopulationReferenceRecord.from_dict(item).to_dict())
+        except (TypeError, ValueError, KeyError, AttributeError) as exc:
+            population_reference_id = item.get("population_reference_id", "<unknown>")
+            warnings.append(
+                f"Population reference record {index} "
+                f"(population_reference_id={population_reference_id!r}) was "
+                f"malformed and was quarantined (dropped, not silently "
+                f"kept): {exc}"
+            )
+    return normalised, warnings
+
+
+def resolve_imported_population_reference_set(
+    imported: Dict[str, Any],
+) -> Tuple[Optional[dict], List[str]]:
+    """REQ-POPULATION-001: resolve the governed `PopulationReferenceSet`
+    an imported bundle should use, mirroring
+    `resolve_imported_fx_rate_set`'s never-trust-silently contract.
+    Round-tripped through `PopulationReferenceSet.from_dict`/`to_dict`; a
+    malformed set (wrongly-shaped `records_fingerprint`, an 'approved'
+    status missing its approver, etc.) is quarantined (dropped to
+    `None`), named in `warnings`.
+
+    Absent `population_reference_set` resolves to `(None, [])` - "no
+    population reference set supplied yet" is not an error.
+    """
+    from .population_reference import PopulationReferenceSet
+
+    raw_set = imported.get("population_reference_set")
+    if raw_set is None:
+        return None, []
+    if not isinstance(raw_set, Mapping):
+        return None, [
+            f"Population reference set is not a mapping "
+            f"(type={type(raw_set).__name__!r}) and was quarantined "
+            "(dropped, not silently kept)."
+        ]
+    try:
+        return PopulationReferenceSet.from_dict(raw_set).to_dict(), []
+    except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        reference_set_id = raw_set.get("reference_set_id", "<unknown>")
+        return None, [
+            f"Population reference set (reference_set_id={reference_set_id!r}) "
+            f"was malformed and was quarantined (dropped, not silently "
+            f"kept): {exc}"
+        ]
+
+
+def resolve_imported_population_treatment_specification(
+    imported: Dict[str, Any],
+) -> Tuple[Optional[dict], List[str]]:
+    """REQ-POPULATION-001: resolve the governed
+    `PopulationTreatmentSpecification` an imported bundle should use,
+    mirroring `resolve_imported_fx_rate_set`'s never-trust-silently
+    contract. Round-tripped through
+    `PopulationTreatmentSpecification.from_dict`/`to_dict`; a malformed
+    specification is quarantined (dropped to `None`, which resolves to
+    fully inactive - never resolved to some other implicit default).
+
+    Absent `population_treatment_specification` resolves to `(None, [])`
+    - "no specification supplied yet" is not an error, and it means
+    population treatment is inactive for this project.
+    """
+    from .population_treatment import PopulationTreatmentSpecification
+
+    raw_spec = imported.get("population_treatment_specification")
+    if raw_spec is None:
+        return None, []
+    if not isinstance(raw_spec, Mapping):
+        return None, [
+            f"Population treatment specification is not a mapping "
+            f"(type={type(raw_spec).__name__!r}) and was quarantined "
+            "(dropped, not silently kept)."
+        ]
+    try:
+        return PopulationTreatmentSpecification.from_dict(raw_spec).to_dict(), []
+    except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        spec_id = raw_spec.get("population_treatment_spec_id", "<unknown>")
+        return None, [
+            f"Population treatment specification "
+            f"(population_treatment_spec_id={spec_id!r}) was malformed and "
             f"was quarantined (dropped, not silently kept): {exc}"
         ]
 
