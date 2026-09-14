@@ -2028,6 +2028,22 @@ def test_resolve_imported_population_reference_set_reports_malformed_set_by_id()
     assert "pop-set-2026" in warnings[0]
 
 
+@pytest.mark.parametrize("bad_id", [["s1"], {"a": 1}, 42, None], ids=repr)
+def test_resolve_imported_population_reference_set_quarantines_non_string_id(bad_id):
+    """2026-09-14: reference_set_id is declared `str` - a non-string
+    imported value must quarantine through the existing mechanism
+    (dropped to None), never enter valid project state, and never crash
+    the import."""
+    imported = {
+        "population_reference_set": _valid_population_reference_set_dict(
+            reference_set_id=bad_id
+        )
+    }
+    resolved, warnings = resolve_imported_population_reference_set(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+
+
 def test_resolve_imported_population_reference_set_quarantines_contradictory_approval_metadata():
     """Codex P2 (2026-09-13, third pass): mirrors the record-level test
     for the set object."""
@@ -2453,6 +2469,23 @@ def test_resolve_imported_population_treatment_specification_reports_malformed_b
     assert resolved is None
     assert len(warnings) == 1
     assert "spec-1" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_id", [["spec-1"], {"a": 1}, 42, None], ids=repr)
+def test_resolve_imported_population_treatment_specification_quarantines_non_string_id(
+    bad_id,
+):
+    """2026-09-14: population_treatment_spec_id is declared `str` - a
+    non-string imported value must quarantine through the existing
+    mechanism, never enter valid project state, and never crash import."""
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            population_treatment_spec_id=bad_id
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
 
 
 def test_resolve_imported_population_treatment_specification_quarantines_contradictory_approval_metadata():

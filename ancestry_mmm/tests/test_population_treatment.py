@@ -66,6 +66,18 @@ class TestPopulationTreatmentSpecificationDefaults:
 
 
 class TestPopulationTreatmentSpecificationValidation:
+    @pytest.mark.parametrize("bad_id", [["spec-1"], {"a": 1}, 42, 3.14, None], ids=repr)
+    def test_non_string_spec_id_rejected(self, bad_id):
+        """2026-09-14: population_treatment_spec_id is declared `str` -
+        same defect class already fixed for PopulationReferenceRecord's
+        identity fields and PopulationReferenceSet.reference_set_id."""
+        with pytest.raises(ValueError):
+            _spec(population_treatment_spec_id=bad_id)
+
+    def test_valid_string_spec_id_still_accepted(self):
+        spec = _spec(population_treatment_spec_id="spec-valid-1")
+        assert spec.population_treatment_spec_id == "spec-valid-1"
+
     def test_unknown_outcome_treatment_rejected(self):
         with pytest.raises(ValueError):
             _spec(outcome_population_treatment="rescale_the_count")

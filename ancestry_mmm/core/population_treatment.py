@@ -197,9 +197,18 @@ class PopulationTreatmentSpecification:
     schema_version: int = POPULATION_TREATMENT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        if not self.population_treatment_spec_id:
+        if not isinstance(self.population_treatment_spec_id, str) or not (
+            self.population_treatment_spec_id
+        ):
+            # 2026-09-14: same principle as PopulationReferenceRecord's
+            # population_reference_id/market_id and PopulationReferenceSet's
+            # reference_set_id - this is the object's own governed identity
+            # field (declared `population_treatment_spec_id: str` above),
+            # not ordinary descriptive metadata.
             raise ValueError(
-                "PopulationTreatmentSpecification requires a population_treatment_spec_id."
+                "PopulationTreatmentSpecification requires a non-empty string "
+                f"population_treatment_spec_id, got {self.population_treatment_spec_id!r} "
+                f"({type(self.population_treatment_spec_id).__name__})."
             )
         if not self.project_id:
             raise ValueError("PopulationTreatmentSpecification requires a project_id.")

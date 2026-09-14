@@ -753,6 +753,33 @@ class TestProjectExportInputPopulationArtefacts:
         )
         assert any("malformed" in warning for warning in import_result.warnings)
 
+    def test_import_bundle_quarantines_non_string_reference_set_id_instead_of_crashing(
+        self, tmp_path, governed_project
+    ):
+        """2026-09-14: a bundle whose population_reference_set has a
+        non-string reference_set_id (JSON-array-valued) must make
+        ProjectService.import_bundle return normally - the set is
+        quarantined (dropped to None), not crashed on."""
+        governed_project = dict(governed_project)
+        records = [self._population_reference_record_dict()]
+        governed_project["population_reference_records"] = records
+        set_dict = self._population_reference_set_dict(records)
+        set_dict["reference_set_id"] = ["set-1"]  # malformed on purpose
+        governed_project["population_reference_set"] = set_dict
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        assert import_result.project_state["population_reference_set"] is None
+        # The records themselves are still fine independently of the set.
+        assert len(import_result.project_state["population_reference_records"]) == 1
+
     def test_reexporting_an_imported_project_preserves_the_same_artefacts(
         self, tmp_path, governed_project
     ):

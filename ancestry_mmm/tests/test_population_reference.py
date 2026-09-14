@@ -162,6 +162,33 @@ class TestPopulationReferenceSet:
             PopulationReferenceSet.from_dict(reference_set.to_dict()) == reference_set
         )
 
+    @pytest.mark.parametrize("bad_id", [["s1"], {"a": 1}, 42, 3.14, None], ids=repr)
+    def test_non_string_reference_set_id_rejected(self, bad_id):
+        """2026-09-14: reference_set_id is declared `str` above - a
+        truthiness-only check let a non-string value (e.g. a JSON array)
+        through silently, the same defect class already fixed for
+        PopulationReferenceRecord's population_reference_id/market_id."""
+        with pytest.raises(ValueError):
+            PopulationReferenceSet(
+                reference_set_id=bad_id,
+                reference_set_version=1,
+                name="Synthetic set",
+                source_name="synthetic_source",
+                retrieved_at="2026-09-12T00:00:00Z",
+                records_fingerprint=self._fingerprint([_record()]),
+            )
+
+    def test_valid_string_reference_set_id_still_accepted(self):
+        reference_set = PopulationReferenceSet(
+            reference_set_id="set-valid-1",
+            reference_set_version=1,
+            name="Synthetic set",
+            source_name="synthetic_source",
+            retrieved_at="2026-09-12T00:00:00Z",
+            records_fingerprint=self._fingerprint([_record()]),
+        )
+        assert reference_set.reference_set_id == "set-valid-1"
+
     def test_short_fingerprint_rejected(self):
         with pytest.raises(ValueError):
             PopulationReferenceSet(

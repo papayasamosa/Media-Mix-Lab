@@ -237,8 +237,18 @@ class PopulationReferenceSet:
     schema_version: int = POPULATION_REFERENCE_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        if not self.reference_set_id:
-            raise ValueError("PopulationReferenceSet requires a reference_set_id.")
+        if not isinstance(self.reference_set_id, str) or not self.reference_set_id:
+            # 2026-09-14: same principle as PopulationReferenceRecord's
+            # population_reference_id/market_id fixes - the field is
+            # declared `reference_set_id: str` above, but a truthiness-
+            # only check let a non-string value (e.g. a JSON array) through
+            # silently. This is the object's own governed identity field,
+            # not ordinary descriptive metadata.
+            raise ValueError(
+                "PopulationReferenceSet requires a non-empty string "
+                f"reference_set_id, got {self.reference_set_id!r} "
+                f"({type(self.reference_set_id).__name__})."
+            )
         if self.reference_set_version < 1:
             raise ValueError(
                 "PopulationReferenceSet.reference_set_version must be >= 1."
