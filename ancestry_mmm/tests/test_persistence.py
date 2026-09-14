@@ -1832,6 +1832,30 @@ def test_resolve_imported_population_reference_records_quarantines_malformed_but
     assert "malformed" in warnings[0]
 
 
+def test_resolve_imported_population_reference_records_quarantines_oversized_integer_population():
+    """Codex P2 (2026-09-14, eighth review pass): an arbitrary-precision
+    Python int too large to represent as a float (e.g. 10**400) must be
+    quarantined via the normal ValueError-based path - not propagate the
+    OverflowError math.isfinite() raises for such a value - and must not
+    take down a genuinely valid sibling record in the same import."""
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-oversized", population=10**400
+            ),
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-good", population=2_000_000.0
+            ),
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-good"
+    assert len(warnings) == 1
+    assert "pop-oversized" in warnings[0]
+    assert "malformed" in warnings[0]
+
+
 def test_resolve_imported_population_reference_records_quarantines_non_mapping_entries():
     imported = {"population_reference_records": ["not-a-mapping"]}
     records, warnings = resolve_imported_population_reference_records(imported)
@@ -2211,6 +2235,52 @@ class TestResolveImportedPopulationReferenceArtifacts:
         )
         # The set's fingerprint is computed over both records as uploaded -
         # genuinely matching at upload time.
+        fingerprint_over_both = compute_population_records_fingerprint(
+            [PopulationReferenceRecord.from_dict(good_record)]
+            + [PopulationReferenceRecord(**{**bad_record, "population": 1.0})]
+        )
+        set_dict = _valid_population_reference_set_dict(
+            records_fingerprint=fingerprint_over_both
+        )
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": [good_record, bad_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        # bad_record is quarantined by the records resolver first...
+        assert len(resolved_records) == 1
+        assert resolved_records[0]["population_reference_id"] == "pop-good"
+        # ...which leaves the set's own fingerprint no longer reconciling.
+        assert resolved_set is None
+        assert any(
+            "does not match the fingerprint recomputed" in warning
+            for warning in warnings
+        )
+
+    def test_an_oversized_population_record_breaks_a_formerly_matching_set_fingerprint(
+        self,
+    ):
+        """Codex P2 (2026-09-14, eighth review pass): mirrors the test
+        above, but the record is quarantined for an oversized integer
+        population (10**400, which previously raised an uncaught
+        OverflowError instead of being quarantined) - fingerprint
+        reconciliation must behave identically, and the combined resolver
+        must not crash while getting there."""
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        good_record = _valid_population_reference_record_dict(
+            population_reference_id="pop-good"
+        )
+        bad_record = _valid_population_reference_record_dict(
+            population_reference_id="pop-oversized", population=10**400
+        )
+        # The set's fingerprint is computed over both records as if the
+        # oversized one had a valid population at upload time.
         fingerprint_over_both = compute_population_records_fingerprint(
             [PopulationReferenceRecord.from_dict(good_record)]
             + [PopulationReferenceRecord(**{**bad_record, "population": 1.0})]

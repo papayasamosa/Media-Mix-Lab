@@ -1845,7 +1845,13 @@ def resolve_imported_population_reference_records(
             continue
         try:
             normalised.append(PopulationReferenceRecord.from_dict(item).to_dict())
-        except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        except (TypeError, ValueError, KeyError, AttributeError, OverflowError) as exc:
+            # OverflowError is caught defensively alongside `Population
+            # ReferenceRecord.__post_init__`'s own explicit re-raise (as
+            # ValueError) of the same condition - Codex P2 (2026-09-14,
+            # eighth review pass), mirroring the existing precedent in
+            # `application.population_service`'s upload path for
+            # `reference_year`.
             population_reference_id = item.get("population_reference_id", "<unknown>")
             warnings.append(
                 f"Population reference record {index} "

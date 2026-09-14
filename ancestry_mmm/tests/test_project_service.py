@@ -695,6 +695,41 @@ class TestProjectExportInputPopulationArtefacts:
         )
         assert any("malformed" in warning for warning in import_result.warnings)
 
+    def test_import_bundle_quarantines_oversized_population_instead_of_crashing(
+        self, tmp_path, governed_project
+    ):
+        """Codex P2 (2026-09-14, eighth review pass): a bundle containing
+        a record with an arbitrary-precision population too large to
+        represent as a float (10**400) must make ProjectService.
+        import_bundle return a normal ProjectServiceResult - never
+        propagate the uncaught OverflowError math.isfinite() previously
+        raised - and a genuinely valid sibling record must survive."""
+        governed_project = dict(governed_project)
+        governed_project["population_reference_records"] = [
+            self._population_reference_record_dict(
+                population_reference_id="pop-oversized", population=10**400
+            ),
+            self._population_reference_record_dict(population_reference_id="pop-good"),
+        ]
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        assert len(import_result.project_state["population_reference_records"]) == 1
+        assert (
+            import_result.project_state["population_reference_records"][0][
+                "population_reference_id"
+            ]
+            == "pop-good"
+        )
+        assert any("pop-oversized" in warning for warning in import_result.warnings)
+
     def test_import_bundle_quarantines_non_list_records_container_instead_of_crashing(
         self, tmp_path, governed_project
     ):

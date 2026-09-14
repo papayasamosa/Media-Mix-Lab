@@ -87,6 +87,44 @@ class TestPopulationReferenceRecord:
         with pytest.raises(ValueError):
             _record(population=-1.0)
 
+    def test_ordinary_positive_integer_population_accepted(self):
+        record = _record(population=1_000_000)
+        assert record.population == 1_000_000
+
+    def test_ordinary_positive_float_population_accepted(self):
+        record = _record(population=1_000_000.5)
+        assert record.population == 1_000_000.5
+
+    @pytest.mark.parametrize(
+        "bad_population",
+        [0, 0.0, -1, -1.0, float("nan"), float("inf"), float("-inf")],
+        ids=[
+            "zero-int",
+            "zero-float",
+            "negative-int",
+            "negative-float",
+            "nan",
+            "inf",
+            "-inf",
+        ],
+    )
+    def test_invalid_population_values_rejected(self, bad_population):
+        with pytest.raises(ValueError):
+            _record(population=bad_population)
+
+    def test_oversized_integer_population_rejected_as_value_error(self):
+        """Codex P2 (2026-09-14, eighth review pass): an arbitrary-
+        precision Python int too large to represent as a float (e.g.
+        10**400) previously made `math.isfinite` itself raise
+        `OverflowError` - a different exception type than every other
+        population validation failure in this dataclass, and one the
+        import-quarantine mechanism's `except (TypeError, ValueError,
+        ...)` does not catch. It must now raise the same `ValueError`
+        this dataclass already uses for other invalid population values,
+        never be clamped, truncated, or silently substituted."""
+        with pytest.raises(ValueError):
+            _record(population=10**400)
+
     def test_unknown_basis_rejected(self):
         # Mirrors the real-world finding that the analyst-supplied file
         # uses a non-canonical basis label ("total_residents") - the

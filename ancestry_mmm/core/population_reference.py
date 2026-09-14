@@ -140,7 +140,25 @@ class PopulationReferenceRecord:
                 "PopulationReferenceRecord.population must be numeric, got "
                 f"{type(self.population).__name__}."
             )
-        if not math.isfinite(self.population):
+        try:
+            population_is_finite = math.isfinite(self.population)
+        except OverflowError as exc:
+            # Codex P2 (2026-09-14, eighth review pass): `self.population`
+            # is already known to be a genuine int/float above, but an
+            # arbitrary-precision Python int too large to represent as a
+            # float (e.g. `10**400`) makes `math.isfinite` itself raise
+            # `OverflowError` rather than returning `False` - a different
+            # exception type than every other validation failure in this
+            # method, and one the import-quarantine mechanism's `except
+            # (TypeError, ValueError, ...)` does not catch. Re-raised as
+            # the same `ValueError` this method already uses for "not
+            # finite" so the record is quarantined identically, never
+            # clamped, truncated, or silently substituted.
+            raise ValueError(
+                "PopulationReferenceRecord.population is too large to "
+                f"represent, got {self.population!r}."
+            ) from exc
+        if not population_is_finite:
             raise ValueError("PopulationReferenceRecord.population must be finite.")
         if self.population <= 0:
             raise ValueError(
