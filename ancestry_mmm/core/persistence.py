@@ -1898,14 +1898,33 @@ def _resolve_imported_project_market_ids(imported: Dict[str, Any]) -> Tuple[str,
     way `reconstruct_model_state` already does (`ModelSpec.from_dict
     (model_spec_dict)`). Never inferred from the population records
     themselves, and never a global repository market list. Returns `()`
-    (never a guessed default) when no usable model_spec is present."""
+    (never a guessed default) when no usable model_spec is present.
+
+    Codex P2 (2026-09-14, seventh review pass): `ModelSpec` itself does
+    not validate `markets`, so a malformed persisted value (a nested list
+    such as `[["UK"]]`, a non-string element such as `42`/`None`, or a
+    non-list `markets` shape entirely) previously reached this function's
+    caller as an unhashable/wrong-typed "market universe" and crashed
+    `set(known_market_ids)` inside `validate_population_records`. Any
+    such malformed shape now resolves to `()` - the same "no authoritative
+    governed market configuration could be resolved" signal already used
+    for a genuinely absent `model_spec`, which the caller already treats
+    as fail-closed for *approved* records (pending records are
+    unaffected). A markets list that is only partially malformed (e.g.
+    `["UK", 42]`) is never partially accepted - one bad element
+    invalidates the whole universe rather than silently narrowing it."""
     model_spec_dict = imported.get("model_spec")
     if not model_spec_dict:
         return ()
     try:
-        return tuple(ModelSpec.from_dict(model_spec_dict).markets)
+        markets = ModelSpec.from_dict(model_spec_dict).markets
     except (TypeError, ValueError, KeyError, AttributeError):
         return ()
+    if not isinstance(markets, (list, tuple)):
+        return ()
+    if not all(isinstance(market_id, str) and market_id for market_id in markets):
+        return ()
+    return tuple(markets)
 
 
 def resolve_imported_population_reference_artifacts(

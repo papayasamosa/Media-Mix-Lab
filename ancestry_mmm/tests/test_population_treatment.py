@@ -495,6 +495,60 @@ class TestFromDictCollectionFieldShapeValidation:
         )
         assert spec.population_reference_map == {}
 
+    @pytest.mark.parametrize(
+        "bad_value",
+        [["pop-1"], 42, True, None, {}, ""],
+        ids=["list", "int", "bool", "none", "mapping", "empty-string"],
+    )
+    def test_population_reference_map_non_string_or_empty_value_is_rejected(
+        self, bad_value
+    ):
+        """Codex P2 (2026-09-14, seventh review pass): the declared
+        contract is `Mapping[str, str]` - a value that is itself a list,
+        a number, a bool, None, a mapping, or an empty string must fail
+        validation rather than being accepted (or silently stringified/
+        dropped)."""
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK"],
+                    "owner": "test_owner",
+                    "population_reference_map": {"UK": bad_value},
+                }
+            )
+
+    @pytest.mark.parametrize(
+        "bad_key", [42, True, "", None], ids=["int", "bool", "empty-string", "none"]
+    )
+    def test_population_reference_map_non_string_or_empty_key_is_rejected(
+        self, bad_key
+    ):
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK"],
+                    "owner": "test_owner",
+                    "population_reference_map": {bad_key: "pop-1"},
+                }
+            )
+
+    def test_population_reference_map_valid_dict_round_trips_unchanged(self):
+        spec = PopulationTreatmentSpecification.from_dict(
+            {
+                "population_treatment_spec_id": "spec-1",
+                "project_id": "proj-1",
+                "market_scope": ["UK"],
+                "owner": "test_owner",
+                "population_reference_map": {"UK": "pop-1"},
+            }
+        )
+        assert spec.population_reference_map == {"UK": "pop-1"}
+        assert spec.to_dict()["population_reference_map"] == {"UK": "pop-1"}
+
 
 class TestVersionFieldTypeEnforcement:
     """Codex P2 (2026-09-14, sixth review pass): Python equality allows

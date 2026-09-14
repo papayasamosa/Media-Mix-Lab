@@ -2485,6 +2485,162 @@ class TestResolveImportedPopulationReferenceArtifactsMarketValidation:
         assert len(resolved_records) == 1
         assert warnings == []
 
+    def test_valid_flat_market_list_resolves_and_validates_normally(self):
+        """Codex P2 (2026-09-14, seventh review pass): a genuinely valid
+        `markets: ["UK"]` configuration continues to validate an approved
+        record against it exactly as before - this is the control case
+        for the malformed-shape tests below."""
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        approved_record = _valid_population_reference_record_dict(
+            market_id="UK",
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        fingerprint = compute_population_records_fingerprint(
+            [PopulationReferenceRecord.from_dict(approved_record)]
+        )
+        set_dict = _valid_population_reference_set_dict(
+            records_fingerprint=fingerprint,
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        imported = {
+            "model_spec": self._model_spec(["UK"]),
+            "population_reference_set": set_dict,
+            "population_reference_records": [approved_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert len(resolved_records) == 1
+        assert resolved_set is not None
+        assert warnings == []
+
+    @pytest.mark.parametrize(
+        "malformed_markets",
+        [
+            [["UK"]],
+            [42],
+            [None],
+            [{"market": "UK"}],
+            {"UK": 1},
+        ],
+        ids=[
+            "nested-list",
+            "int-element",
+            "null-element",
+            "dict-element",
+            "mapping-shape",
+        ],
+    )
+    def test_malformed_market_configuration_fails_closed_for_approved_artifacts(
+        self, malformed_markets
+    ):
+        """Codex P2 (2026-09-14, seventh review pass): a malformed
+        `model_spec.markets` shape (a nested list, a non-string element,
+        or a non-list `markets` value entirely) must be treated exactly
+        like a genuinely absent market configuration - approved records
+        fail closed via the existing quarantine mechanism - rather than
+        reaching `set(known_market_ids)` and crashing with an uncaught
+        `TypeError`."""
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        approved_record = _valid_population_reference_record_dict(
+            approval_status="approved", approved_by="reviewer", approved_at="2026-09-13"
+        )
+        fingerprint = compute_population_records_fingerprint(
+            [PopulationReferenceRecord.from_dict(approved_record)]
+        )
+        set_dict = _valid_population_reference_set_dict(
+            records_fingerprint=fingerprint,
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        imported = {
+            "model_spec": {
+                "date_col": "date",
+                "market_col": "market",
+                "markets": malformed_markets,
+            },
+            "population_reference_set": set_dict,
+            "population_reference_records": [approved_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_records == []
+        assert resolved_set is None
+        assert any(
+            "no governed project market configuration could be resolved" in warning
+            for warning in warnings
+        )
+
+    def test_mixed_valid_and_malformed_markets_does_not_become_partial_universe(self):
+        """Codex P2 (2026-09-14, seventh review pass): `markets: ["UK",
+        42]` must not silently narrow to `("UK",)` and validate a UK
+        record as if the malformed element were simply absent - the
+        whole configuration is invalid, so the UK record must fail
+        closed the same as if no market configuration existed at all."""
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        approved_record = _valid_population_reference_record_dict(
+            market_id="UK",
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        fingerprint = compute_population_records_fingerprint(
+            [PopulationReferenceRecord.from_dict(approved_record)]
+        )
+        set_dict = _valid_population_reference_set_dict(
+            records_fingerprint=fingerprint,
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        imported = {
+            "model_spec": self._model_spec(["UK", 42]),
+            "population_reference_set": set_dict,
+            "population_reference_records": [approved_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_records == []
+        assert resolved_set is None
+        assert any(
+            "no governed project market configuration could be resolved" in warning
+            for warning in warnings
+        )
+
+    def test_pending_records_unaffected_when_market_configuration_malformed(self):
+        """Only *approved* artefacts fail closed - a malformed market
+        configuration must not reject a pending record either, exactly
+        matching the existing genuinely-absent-configuration behaviour."""
+        pending_record = _valid_population_reference_record_dict()  # default pending
+        imported = {
+            "model_spec": self._model_spec([["UK"]]),
+            "population_reference_records": [pending_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert len(resolved_records) == 1
+        assert warnings == []
+
 
 def _valid_population_treatment_specification_dict(**overrides) -> dict:
     payload = dict(
@@ -2616,6 +2772,29 @@ def test_resolve_imported_population_treatment_specification_quarantines_list_of
     imported = {
         "population_treatment_specification": _valid_population_treatment_specification_dict(
             population_reference_map=["UK", "AU"]
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "spec-1" in warnings[0]
+
+
+@pytest.mark.parametrize(
+    "bad_reference_map",
+    [{"UK": ["pop-1"]}, {"UK": 42}, {"UK": ""}, {42: "pop-1"}, {"": "pop-1"}],
+    ids=["list-value", "int-value", "empty-value", "int-key", "empty-key"],
+)
+def test_resolve_imported_population_treatment_specification_quarantines_malformed_reference_map_entries(
+    bad_reference_map,
+):
+    """Codex P2 (2026-09-14, seventh review pass): population_reference_map
+    is declared Mapping[str, str] - an imported entry whose key or value
+    is not a non-empty string must quarantine the whole specification via
+    the existing mechanism, never be silently kept or stringified."""
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            population_reference_map=bad_reference_map
         )
     }
     resolved, warnings = resolve_imported_population_treatment_specification(imported)

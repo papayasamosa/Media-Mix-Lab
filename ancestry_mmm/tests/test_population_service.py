@@ -176,6 +176,41 @@ class TestBuildPopulationReferenceSet:
             _build(_valid_frame(), name="")
 
 
+class TestRowNumberingIndependentOfDataFrameIndex:
+    """Codex P2 (2026-09-14, seventh review pass): row-error messages
+    must use a plain positional ordinal, never arithmetic on the caller's
+    own DataFrame index - `index + 1` previously crashed for a
+    non-numeric (e.g. string) index instead of raising the documented
+    `PopulationUploadValidationError`."""
+
+    def test_ordinary_numeric_index_unaffected(self):
+        frame = _valid_frame()
+        frame.loc[1, "market"] = None
+        with pytest.raises(PopulationUploadValidationError, match="row 2"):
+            _build(frame)
+
+    def test_string_indexed_dataframe_with_valid_rows_succeeds(self):
+        frame = _valid_frame()
+        frame.index = ["uk-row", "au-row"]
+        _, records = _build(frame)
+        assert len(records) == 2
+        assert {r.market_id for r in records} == {"UK", "AU"}
+
+    def test_string_indexed_dataframe_invalid_row_raises_documented_error(self):
+        frame = _valid_frame()
+        frame.index = ["uk-row", "au-row"]
+        frame.loc["au-row", "market"] = None
+        with pytest.raises(PopulationUploadValidationError, match="row 2"):
+            _build(frame)
+
+    def test_string_indexed_dataframe_does_not_mutate_caller_index(self):
+        frame = _valid_frame()
+        frame.index = ["uk-row", "au-row"]
+        original_index = list(frame.index)
+        _build(frame)
+        assert list(frame.index) == original_index
+
+
 class TestDirectlyApprovedDuplicateRejection:
     """Codex P2 (2026-09-13, second pass): `approval_status="approved"`
     has no later approval stage in this path, so duplicate approved rows

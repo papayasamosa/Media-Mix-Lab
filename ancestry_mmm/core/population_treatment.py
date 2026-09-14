@@ -212,18 +212,22 @@ def _coerce_string_tuple_field(payload: dict, key: str) -> None:
 
 
 def _coerce_mapping_field(payload: dict, key: str) -> None:
-    """Validate and coerce a persisted mapping field (`population_
-    reference_map`) in place within `payload`.
+    """Validate and coerce a persisted `Mapping[str, str]` field
+    (`population_reference_map`) in place within `payload`.
 
     Absent key: untouched. `None`: becomes `{}`. A JSON object (Python
-    `Mapping`): becomes a plain `dict` copy of it. Anything else - a list
+    `Mapping`) whose keys and values are all non-empty strings: becomes a
+    plain `dict` copy of it. Anything else raises `ValueError` - a list
     (even a list of `[key, value]` pairs, which `dict()` would otherwise
-    silently accept), a scalar string, number, or bool - raises
-    `ValueError`. A mapping field's only valid JSON encoding is a JSON
-    object; a list is a shape mismatch, never an alternate encoding to
-    accept (`dict(["UK", "AU"])` would otherwise silently produce
+    silently accept), a scalar string, number, or bool for the outer
+    shape (`dict(["UK", "AU"])` would otherwise silently produce
     `{"U": "K", "A": "U"}` - each two-character string unpacked as one
-    key-value pair)."""
+    key-value pair); and, for the declared `Mapping[str, str]` element
+    contract (Codex P2, 2026-09-14, seventh review pass), a non-string or
+    empty-string key, or a non-string or empty-string value (a list, int,
+    bool, mapping, or `None`). No key or value is ever stringified or
+    silently dropped - any violation quarantines the whole
+    specification."""
     if key not in payload:
         return
     raw = payload[key]
@@ -234,6 +238,13 @@ def _coerce_mapping_field(payload: dict, key: str) -> None:
         raise ValueError(
             f"PopulationTreatmentSpecification.{key} must be a mapping, "
             f"got {raw!r} ({type(raw).__name__})."
+        )
+    if not all(
+        isinstance(k, str) and k and isinstance(v, str) and v for k, v in raw.items()
+    ):
+        raise ValueError(
+            f"PopulationTreatmentSpecification.{key} must map non-empty "
+            f"string keys to non-empty string values, got {raw!r}."
         )
     payload[key] = dict(raw)
 

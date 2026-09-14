@@ -717,6 +717,47 @@ class TestProjectExportInputPopulationArtefacts:
         assert import_result.project_state["population_reference_records"] == []
         assert any("is not a list" in warning for warning in import_result.warnings)
 
+    def test_import_bundle_quarantines_malformed_model_spec_markets_instead_of_crashing(
+        self, tmp_path, governed_project
+    ):
+        """Codex P2 (2026-09-14, seventh review pass): a bundle whose
+        `model_spec.markets` contains a nested list (`[["UK"]]`) must
+        make `ProjectService.import_bundle` return normally - the
+        malformed market configuration must fail closed for the approved
+        population record via the existing quarantine mechanism, never
+        propagate the uncaught `TypeError` that `set(known_market_ids)`
+        previously raised."""
+        governed_project = dict(governed_project)
+        governed_project["model_spec"] = dict(governed_project["model_spec"])
+        governed_project["model_spec"]["markets"] = [["UK"]]
+        records = [
+            self._population_reference_record_dict(
+                approval_status="approved",
+                approved_by="reviewer",
+                approved_at="2026-09-14",
+            )
+        ]
+        governed_project["population_reference_records"] = records
+        governed_project["population_reference_set"] = (
+            self._population_reference_set_dict(records)
+        )
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        assert import_result.project_state["population_reference_records"] == []
+        assert import_result.project_state["population_reference_set"] is None
+        assert any(
+            "no governed project market configuration could be resolved" in warning
+            for warning in import_result.warnings
+        )
+
     def test_import_bundle_quarantines_schema_version_type_impostor_record(
         self, tmp_path, governed_project
     ):
@@ -761,6 +802,34 @@ class TestProjectExportInputPopulationArtefacts:
         governed_project = dict(governed_project)
         governed_project["population_treatment_specification"] = (
             self._population_treatment_specification_dict(market_scope="UK")
+        )
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        assert import_result.project_state["population_treatment_specification"] is None
+        assert any("spec-1" in warning for warning in import_result.warnings)
+
+    def test_import_bundle_quarantines_malformed_reference_map_entry(
+        self, tmp_path, governed_project
+    ):
+        """Codex P2 (2026-09-14, seventh review pass): a
+        population_treatment_specification whose population_reference_map
+        has a non-string value (e.g. a list) must be quarantined by the
+        real application import path, never silently kept as valid
+        governed state despite violating the declared Mapping[str, str]
+        contract."""
+        governed_project = dict(governed_project)
+        governed_project["population_treatment_specification"] = (
+            self._population_treatment_specification_dict(
+                population_reference_map={"UK": ["pop-1"]}
+            )
         )
         exp_input = ProjectExportInput(
             output_path=str(tmp_path / "bundle.zip"), **governed_project

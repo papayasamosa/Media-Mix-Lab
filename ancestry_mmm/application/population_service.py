@@ -120,7 +120,7 @@ def build_population_reference_set(
         raise PopulationUploadValidationError("Population upload contains no rows.")
 
     records: List[PopulationReferenceRecord] = []
-    for index, values in frame.iterrows():
+    for row_number, (_index, values) in enumerate(frame.iterrows(), start=1):
         try:
             if pd.isna(values["market"]):
                 raise ValueError("market is required")
@@ -177,8 +177,17 @@ def build_population_reference_set(
             # math.isfinite() check above - the deliberate check is what
             # identifies a non-finite reference_year, this is only a
             # backstop for any other row-processing overflow.
+            #
+            # Codex P2 (2026-09-14, seventh review pass): `row_number` is
+            # a plain enumeration ordinal, not the DataFrame's own index
+            # label - a caller-supplied DataFrame with a non-numeric
+            # index (e.g. a string index) previously reached `index + 1`
+            # here and raised a second, undocumented `TypeError` instead
+            # of this method's documented `PopulationUploadValidationError`.
+            # The DataFrame itself is never mutated (no index reset) to
+            # get this numbering.
             raise PopulationUploadValidationError(
-                f"Population upload row {index + 1} is invalid: {exc}"
+                f"Population upload row {row_number} is invalid: {exc}"
             ) from exc
 
     # Codex P2 (2026-09-13, third pass): a directly approved upload must
