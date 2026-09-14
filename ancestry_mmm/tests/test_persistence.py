@@ -82,6 +82,10 @@ from ancestry_mmm.core.persistence import (
     resolve_imported_outcome_valuation_records,
     resolve_imported_fx_rate_set,
     resolve_imported_fx_rate_records,
+    resolve_imported_population_reference_artifacts,
+    resolve_imported_population_reference_records,
+    resolve_imported_population_reference_set,
+    resolve_imported_population_treatment_specification,
     resolve_imported_prefit_runs,
     resolve_imported_search_objects,
     resolve_imported_source_definitions,
@@ -1773,6 +1777,1100 @@ def test_resolve_imported_fx_rate_set_reports_malformed_set_by_id():
     assert resolved is None
     assert len(warnings) == 1
     assert "fx-2026" in warnings[0]
+
+
+def _valid_population_reference_record_dict(**overrides) -> dict:
+    payload = dict(
+        population_reference_id="pop-1",
+        market_id="UK",
+        population=1_000_000.0,
+        population_basis="total_resident_population",
+        source_name="synthetic_source",
+        owner="test_owner",
+        reference_year=2024,
+    )
+    payload.update(overrides)
+    return payload
+
+
+def test_resolve_imported_population_reference_records_absent_resolves_empty():
+    records, warnings = resolve_imported_population_reference_records({})
+    assert records == []
+    assert warnings == []
+
+
+def test_resolve_imported_population_reference_records_valid_round_trips():
+    imported = {
+        "population_reference_records": [_valid_population_reference_record_dict()]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert warnings == []
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-1"
+
+
+def test_resolve_imported_population_reference_records_quarantines_malformed_but_keeps_valid_ones():
+    """A malformed record (non-positive population) in one row must not
+    take down the other, genuinely valid records in the same import -
+    each record is independently quarantined or kept, mirroring
+    `resolve_imported_fx_rate_records`."""
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-bad", population=0.0
+            ),
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-good", population=2_000_000.0
+            ),
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-good"
+    assert len(warnings) == 1
+    assert "pop-bad" in warnings[0]
+    assert "malformed" in warnings[0]
+
+
+def test_resolve_imported_population_reference_records_quarantines_oversized_integer_population():
+    """Codex P2 (2026-09-14, eighth review pass): an arbitrary-precision
+    Python int too large to represent as a float (e.g. 10**400) must be
+    quarantined via the normal ValueError-based path - not propagate the
+    OverflowError math.isfinite() raises for such a value - and must not
+    take down a genuinely valid sibling record in the same import."""
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-oversized", population=10**400
+            ),
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-good", population=2_000_000.0
+            ),
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-good"
+    assert len(warnings) == 1
+    assert "pop-oversized" in warnings[0]
+    assert "malformed" in warnings[0]
+
+
+def test_resolve_imported_population_reference_records_quarantines_non_mapping_entries():
+    imported = {"population_reference_records": ["not-a-mapping"]}
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert records == []
+    assert len(warnings) == 1
+
+
+@pytest.mark.parametrize("bad_shape", [7, True, "a string", {"a": 1}, 3.14], ids=repr)
+def test_resolve_imported_population_reference_records_quarantines_non_list_container(
+    bad_shape,
+):
+    """Codex P2 (2026-09-13, fifth pass): population_reference_records
+    must be list-or-absent. A truthy non-list top-level shape (a scalar
+    number, string, bool, or mapping/object) previously reached
+    enumerate() directly - crashing with an uncaught TypeError for
+    non-iterable types (int, bool) or silently exploding into nonsense
+    per-character/per-key warnings for iterable-but-wrong types (str,
+    dict). Every one of these shapes must now quarantine the whole
+    artefact cleanly instead."""
+    records, warnings = resolve_imported_population_reference_records(
+        {"population_reference_records": bad_shape}
+    )
+    assert records == []
+    assert len(warnings) == 1
+    assert "is not a list" in warnings[0]
+
+
+def test_resolve_imported_population_reference_records_false_is_treated_as_absent():
+    # `False` is falsy, so it takes the same pre-existing "absent" branch
+    # as None/0/""/{}/[] always have - documented explicitly here so the
+    # shape check above is understood to apply only to *truthy* non-list
+    # values, not a behaviour change for already-falsy ones.
+    records, warnings = resolve_imported_population_reference_records(
+        {"population_reference_records": False}
+    )
+    assert records == []
+    assert warnings == []
+
+
+def test_resolve_imported_population_reference_records_empty_list_is_valid():
+    records, warnings = resolve_imported_population_reference_records(
+        {"population_reference_records": []}
+    )
+    assert records == []
+    assert warnings == []
+
+
+def test_resolve_imported_population_reference_records_absent_is_still_not_an_error():
+    records, warnings = resolve_imported_population_reference_records(
+        {"population_reference_records": None}
+    )
+    assert records == []
+    assert warnings == []
+
+
+def test_resolve_imported_population_reference_records_valid_list_still_works():
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(population_reference_id="pop-1")
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert warnings == []
+
+
+@pytest.mark.parametrize("bad_id", [[1, 2, 3], {"a": 1}, 42, 3.14, None], ids=repr)
+def test_resolve_imported_population_reference_records_quarantines_non_string_id(
+    bad_id,
+):
+    """Codex P2 (2026-09-13, fourth pass): a malformed
+    population_reference_id (list/dict/int/float/None - anything the
+    real persisted JSON path can represent) must be quarantined here,
+    while a genuinely valid sibling record in the same import survives -
+    never crashing the whole import."""
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(population_reference_id=bad_id),
+            _valid_population_reference_record_dict(population_reference_id="pop-good"),
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-good"
+    assert len(warnings) == 1
+    assert "malformed" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_market_id", [["UK"], {"a": 1}, 42, 3.14, None], ids=repr)
+def test_resolve_imported_population_reference_records_quarantines_non_string_market_id(
+    bad_market_id,
+):
+    """Codex P2 (2026-09-13, fifth pass): mirrors the non-string-id test
+    above for market_id - fresh malformed-field evidence found during the
+    bounded same-class audit."""
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(market_id=bad_market_id),
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-good", market_id="UK"
+            ),
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-good"
+    assert len(warnings) == 1
+    assert "malformed" in warnings[0]
+
+
+def test_resolve_imported_population_reference_records_quarantines_contradictory_approval_metadata():
+    """Codex P2 (2026-09-13, third pass): a 'pending' record carrying
+    stale approved_by/approved_at must flow through the existing
+    quarantine mechanism rather than being silently accepted or having
+    its contradictory metadata silently stripped."""
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-contradictory",
+                approval_status="pending",
+                approved_by="reviewer",
+                approved_at="2026-09-13",
+            ),
+            _valid_population_reference_record_dict(population_reference_id="pop-good"),
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-good"
+    assert any("pop-contradictory" in warning for warning in warnings)
+    assert any("malformed" in warning for warning in warnings)
+
+
+def test_resolve_imported_population_reference_records_quarantines_unsupported_schema_version():
+    """Codex P2 (2026-09-13): an explicitly incompatible schema_version
+    (future, zero, or malformed) must flow into the existing quarantine
+    mechanism rather than being silently accepted and re-exported in a
+    lossy current shape."""
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-future", schema_version=999
+            ),
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-good", schema_version=1
+            ),
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-good"
+    assert len(warnings) == 1
+    assert "pop-future" in warnings[0]
+    assert "malformed" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_version", [True, 1.0])
+def test_resolve_imported_population_reference_records_quarantines_schema_version_type_impostor(
+    bad_version,
+):
+    """Codex P2 (2026-09-14, sixth review pass): a bool/float impostor
+    for schema_version=1 must quarantine exactly like an out-of-range
+    integer version does."""
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-impostor", schema_version=bad_version
+            ),
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-good", schema_version=1
+            ),
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-good"
+    assert len(warnings) == 1
+    assert "pop-impostor" in warnings[0]
+
+
+def _valid_population_reference_set_dict(**overrides) -> dict:
+    import hashlib
+
+    payload = dict(
+        reference_set_id="pop-set-2026",
+        reference_set_version=1,
+        name="UK population reference",
+        source_name="synthetic_source",
+        retrieved_at="2026-01-01T00:00:00Z",
+        records_fingerprint=hashlib.sha256(b"test").hexdigest(),
+    )
+    payload.update(overrides)
+    return payload
+
+
+def test_resolve_imported_population_reference_set_absent_resolves_none():
+    resolved, warnings = resolve_imported_population_reference_set({})
+    assert resolved is None
+    assert warnings == []
+
+
+def test_resolve_imported_population_reference_set_valid_round_trips():
+    imported = {"population_reference_set": _valid_population_reference_set_dict()}
+    resolved, warnings = resolve_imported_population_reference_set(imported)
+    assert warnings == []
+    assert resolved["reference_set_id"] == "pop-set-2026"
+
+
+def test_resolve_imported_population_reference_set_reports_malformed_set_by_id():
+    imported = {
+        "population_reference_set": _valid_population_reference_set_dict(
+            records_fingerprint="too-short"
+        )
+    }
+    resolved, warnings = resolve_imported_population_reference_set(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "pop-set-2026" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_id", [["s1"], {"a": 1}, 42, None], ids=repr)
+def test_resolve_imported_population_reference_set_quarantines_non_string_id(bad_id):
+    """2026-09-14: reference_set_id is declared `str` - a non-string
+    imported value must quarantine through the existing mechanism
+    (dropped to None), never enter valid project state, and never crash
+    the import."""
+    imported = {
+        "population_reference_set": _valid_population_reference_set_dict(
+            reference_set_id=bad_id
+        )
+    }
+    resolved, warnings = resolve_imported_population_reference_set(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+
+
+def test_resolve_imported_population_reference_set_quarantines_contradictory_approval_metadata():
+    """Codex P2 (2026-09-13, third pass): mirrors the record-level test
+    for the set object."""
+    imported = {
+        "population_reference_set": _valid_population_reference_set_dict(
+            approval_status="rejected", approved_by="reviewer"
+        )
+    }
+    resolved, warnings = resolve_imported_population_reference_set(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "pop-set-2026" in warnings[0]
+
+
+def test_resolve_imported_population_reference_set_quarantines_unsupported_schema_version():
+    """Codex P2 (2026-09-13): mirrors the record-level test above for the
+    set object."""
+    imported = {
+        "population_reference_set": _valid_population_reference_set_dict(
+            schema_version=999
+        )
+    }
+    resolved, warnings = resolve_imported_population_reference_set(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "pop-set-2026" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_version", [True, 1.0])
+def test_resolve_imported_population_reference_set_quarantines_schema_version_type_impostor(
+    bad_version,
+):
+    imported = {
+        "population_reference_set": _valid_population_reference_set_dict(
+            schema_version=bad_version
+        )
+    }
+    resolved, warnings = resolve_imported_population_reference_set(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "pop-set-2026" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_version", [True, 1.0, 1.5])
+def test_resolve_imported_population_reference_set_quarantines_reference_set_version_type_impostor(
+    bad_version,
+):
+    """Codex P2 (2026-09-14, sixth review pass): reference_set_version
+    must be a genuine positive integer - a bool/float impostor must
+    quarantine the set, not be silently accepted."""
+    imported = {
+        "population_reference_set": _valid_population_reference_set_dict(
+            reference_set_version=bad_version
+        )
+    }
+    resolved, warnings = resolve_imported_population_reference_set(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "pop-set-2026" in warnings[0]
+
+
+def _matching_population_reference_set_and_records(**record_overrides):
+    """A `(set_dict, [record_dict])` pair whose `records_fingerprint`
+    genuinely describes the accompanying record(s) - built the same way
+    `resolve_imported_population_reference_artifacts` itself recomputes
+    it, so a mismatch in these tests always signals a deliberately
+    introduced discrepancy, never a fixture bug."""
+    from ancestry_mmm.core.population_reference import (
+        PopulationReferenceRecord,
+        compute_population_records_fingerprint,
+    )
+
+    record_dict = _valid_population_reference_record_dict(**record_overrides)
+    fingerprint = compute_population_records_fingerprint(
+        [PopulationReferenceRecord.from_dict(record_dict)]
+    )
+    set_dict = _valid_population_reference_set_dict(records_fingerprint=fingerprint)
+    return set_dict, [record_dict]
+
+
+class TestResolveImportedPopulationReferenceArtifacts:
+    """Codex P2 (2026-09-13, second review pass): resolving
+    `population_reference_set` and `population_reference_records`
+    independently is not enough - the set's `records_fingerprint` can
+    describe different contents than what actually survives import."""
+
+    def test_valid_set_and_matching_records_survives(self):
+        set_dict, records = _matching_population_reference_set_and_records()
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": records,
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_set is not None
+        assert resolved_set["reference_set_id"] == "pop-set-2026"
+        assert len(resolved_records) == 1
+        assert warnings == []
+
+    def test_corrupted_record_causes_mismatch_and_fail_closed_quarantine(self):
+        """The record itself is well-formed (survives its own quarantine
+        check) but its content genuinely differs from what the set's
+        fingerprint describes - e.g. the set was computed over one
+        population value and the bundle's record has another."""
+        set_dict, records = _matching_population_reference_set_and_records(
+            population=1_000_000.0
+        )
+        records[0] = dict(records[0], population=2_000_000.0)
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": records,
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_set is None
+        assert len(resolved_records) == 1  # the record itself is still valid
+        assert any(
+            "does not match the fingerprint recomputed" in warning
+            for warning in warnings
+        )
+        assert any("pop-set-2026" in warning for warning in warnings)
+
+    def test_a_quarantined_record_breaks_a_formerly_matching_set_fingerprint(self):
+        """Two records genuinely match the set's fingerprint as uploaded,
+        but one of them is itself malformed (non-positive population) and
+        gets quarantined by the records resolver - the set's fingerprint
+        now describes a record set that no longer matches what survived,
+        so the set must not be restored as valid either."""
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        good_record = _valid_population_reference_record_dict(
+            population_reference_id="pop-good"
+        )
+        bad_record = _valid_population_reference_record_dict(
+            population_reference_id="pop-bad", population=0.0
+        )
+        # The set's fingerprint is computed over both records as uploaded -
+        # genuinely matching at upload time.
+        fingerprint_over_both = compute_population_records_fingerprint(
+            [PopulationReferenceRecord.from_dict(good_record)]
+            + [PopulationReferenceRecord(**{**bad_record, "population": 1.0})]
+        )
+        set_dict = _valid_population_reference_set_dict(
+            records_fingerprint=fingerprint_over_both
+        )
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": [good_record, bad_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        # bad_record is quarantined by the records resolver first...
+        assert len(resolved_records) == 1
+        assert resolved_records[0]["population_reference_id"] == "pop-good"
+        # ...which leaves the set's own fingerprint no longer reconciling.
+        assert resolved_set is None
+        assert any(
+            "does not match the fingerprint recomputed" in warning
+            for warning in warnings
+        )
+
+    def test_an_oversized_population_record_breaks_a_formerly_matching_set_fingerprint(
+        self,
+    ):
+        """Codex P2 (2026-09-14, eighth review pass): mirrors the test
+        above, but the record is quarantined for an oversized integer
+        population (10**400, which previously raised an uncaught
+        OverflowError instead of being quarantined) - fingerprint
+        reconciliation must behave identically, and the combined resolver
+        must not crash while getting there."""
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        good_record = _valid_population_reference_record_dict(
+            population_reference_id="pop-good"
+        )
+        bad_record = _valid_population_reference_record_dict(
+            population_reference_id="pop-oversized", population=10**400
+        )
+        # The set's fingerprint is computed over both records as if the
+        # oversized one had a valid population at upload time.
+        fingerprint_over_both = compute_population_records_fingerprint(
+            [PopulationReferenceRecord.from_dict(good_record)]
+            + [PopulationReferenceRecord(**{**bad_record, "population": 1.0})]
+        )
+        set_dict = _valid_population_reference_set_dict(
+            records_fingerprint=fingerprint_over_both
+        )
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": [good_record, bad_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        # bad_record is quarantined by the records resolver first...
+        assert len(resolved_records) == 1
+        assert resolved_records[0]["population_reference_id"] == "pop-good"
+        # ...which leaves the set's own fingerprint no longer reconciling.
+        assert resolved_set is None
+        assert any(
+            "does not match the fingerprint recomputed" in warning
+            for warning in warnings
+        )
+
+    def test_a_non_string_id_record_breaks_a_formerly_matching_set_fingerprint(self):
+        """Codex P2 (2026-09-13, fourth pass): mirrors the test above, but
+        the record is quarantined for having a malformed
+        population_reference_id (rather than a non-positive population) -
+        fingerprint reconciliation must behave identically either way, and
+        the combined resolver must not crash while getting there."""
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        good_record = _valid_population_reference_record_dict(
+            population_reference_id="pop-good"
+        )
+        bad_record_id = [1, 2, 3]
+        bad_record = _valid_population_reference_record_dict(
+            population_reference_id=bad_record_id
+        )
+        # The set's fingerprint is computed over both records as if the
+        # bad one had a valid id at upload time.
+        fingerprint_over_both = compute_population_records_fingerprint(
+            [
+                PopulationReferenceRecord.from_dict(good_record),
+                PopulationReferenceRecord.from_dict(
+                    {**bad_record, "population_reference_id": "pop-was-valid"}
+                ),
+            ]
+        )
+        set_dict = _valid_population_reference_set_dict(
+            records_fingerprint=fingerprint_over_both
+        )
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": [good_record, bad_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert len(resolved_records) == 1
+        assert resolved_records[0]["population_reference_id"] == "pop-good"
+        assert resolved_set is None
+        assert any(
+            "does not match the fingerprint recomputed" in warning
+            for warning in warnings
+        )
+
+    def test_no_automatic_fingerprint_repair_occurs(self):
+        """A mismatch must quarantine the set (to None), never silently
+        rewrite its records_fingerprint to match what actually survived."""
+        set_dict, records = _matching_population_reference_set_and_records()
+        original_fingerprint = set_dict["records_fingerprint"]
+        records[0] = dict(records[0], population=2_000_000.0)
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": records,
+        }
+        resolved_set, _, _ = resolve_imported_population_reference_artifacts(imported)
+        assert resolved_set is None
+        # The input dict itself (and the original fingerprint value) must
+        # never have been mutated in place either.
+        assert set_dict["records_fingerprint"] == original_fingerprint
+
+    def test_non_list_records_container_does_not_crash_the_combined_resolver(self):
+        """Codex P2 (2026-09-13, fifth pass): the combined artefacts
+        resolver must not crash either, and a set present alongside a
+        malformed (non-list) records container correctly fails to
+        reconcile against the now-empty retained records."""
+        set_dict, _ = _matching_population_reference_set_and_records()
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": 7,
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_records == []
+        assert resolved_set is None
+        assert any("is not a list" in warning for warning in warnings)
+
+    def test_absent_set_is_not_affected_by_reconciliation(self):
+        record_dict = _valid_population_reference_record_dict()
+        imported = {"population_reference_records": [record_dict]}
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_set is None
+        assert len(resolved_records) == 1
+        assert warnings == []
+
+    def test_absent_records_with_a_present_set_quarantines_the_set(self):
+        """An empty records list has its own (empty-list) fingerprint,
+        which a non-empty set's records_fingerprint will not match -
+        correctly quarantining a set that claims contents nothing in the
+        bundle actually backs up."""
+        set_dict, _ = _matching_population_reference_set_and_records()
+        imported = {"population_reference_set": set_dict}
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_set is None
+        assert resolved_records == []
+        assert any(
+            "does not match the fingerprint recomputed" in warning
+            for warning in warnings
+        )
+
+
+class TestResolveImportedPopulationReferenceArtifactsMarketValidation:
+    """Codex P2 (2026-09-13, third review pass): the combined resolver
+    must also validate retained records against the *imported project's
+    own* governed market universe (`ModelSpec.markets`, read from
+    `imported["model_spec"]` - never inferred from the population records
+    themselves, never a global repository list, never `MarketDescriptors.
+    population`)."""
+
+    @staticmethod
+    def _model_spec(markets):
+        return {"date_col": "date", "market_col": "market", "markets": list(markets)}
+
+    def test_configured_market_and_matching_record_survives(self):
+        record_dict = _valid_population_reference_record_dict(market_id="UK")
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        fingerprint = compute_population_records_fingerprint(
+            [PopulationReferenceRecord.from_dict(record_dict)]
+        )
+        set_dict = _valid_population_reference_set_dict(records_fingerprint=fingerprint)
+        imported = {
+            "model_spec": self._model_spec(["UK", "AU"]),
+            "population_reference_set": set_dict,
+            "population_reference_records": [record_dict],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_set is not None
+        assert len(resolved_records) == 1
+        assert warnings == []
+
+    def test_unconfigured_market_record_is_quarantined(self):
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        good = _valid_population_reference_record_dict(
+            population_reference_id="pop-uk", market_id="UK"
+        )
+        bad = _valid_population_reference_record_dict(
+            population_reference_id="pop-zz", market_id="ZZ"
+        )
+        # Fingerprint over both, as if uploaded together before market
+        # configuration was known to be a mismatch.
+        fingerprint = compute_population_records_fingerprint(
+            [
+                PopulationReferenceRecord.from_dict(good),
+                PopulationReferenceRecord.from_dict(bad),
+            ]
+        )
+        set_dict = _valid_population_reference_set_dict(records_fingerprint=fingerprint)
+        imported = {
+            "model_spec": self._model_spec(["UK"]),  # ZZ is not configured
+            "population_reference_set": set_dict,
+            "population_reference_records": [good, bad],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert len(resolved_records) == 1
+        assert resolved_records[0]["population_reference_id"] == "pop-uk"
+        assert any("pop-zz" in warning for warning in warnings)
+        # The set's fingerprint described both records, so quarantining
+        # pop-zz also breaks the set's own reconciliation.
+        assert resolved_set is None
+
+    def test_duplicate_approved_records_are_rejected_on_import(self):
+        one = _valid_population_reference_record_dict(
+            population_reference_id="pop-1",
+            market_id="UK",
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        two = _valid_population_reference_record_dict(
+            population_reference_id="pop-2",
+            market_id="UK",
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        imported = {
+            "model_spec": self._model_spec(["UK"]),
+            "population_reference_records": [one, two],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_records == []
+        assert any("duplicate approved" in warning for warning in warnings)
+
+    def test_missing_market_configuration_fails_closed_for_approved_artifacts(self):
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        approved_record = _valid_population_reference_record_dict(
+            approval_status="approved", approved_by="reviewer", approved_at="2026-09-13"
+        )
+        fingerprint = compute_population_records_fingerprint(
+            [PopulationReferenceRecord.from_dict(approved_record)]
+        )
+        set_dict = _valid_population_reference_set_dict(
+            records_fingerprint=fingerprint,
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        # No "model_spec" key at all - no governed market configuration
+        # can be resolved.
+        imported = {
+            "population_reference_set": set_dict,
+            "population_reference_records": [approved_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_records == []
+        assert resolved_set is None
+        assert any(
+            "no governed project market configuration could be resolved" in warning
+            for warning in warnings
+        )
+
+    def test_pending_records_unaffected_when_market_configuration_missing(self):
+        """Only *approved* artefacts fail closed when the market universe
+        is unresolvable - a pending record has its own separate review
+        workflow and is not rejected merely because no model_spec was
+        supplied for this test."""
+        pending_record = _valid_population_reference_record_dict()  # default pending
+        imported = {"population_reference_records": [pending_record]}
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert len(resolved_records) == 1
+        assert warnings == []
+
+    def test_valid_flat_market_list_resolves_and_validates_normally(self):
+        """Codex P2 (2026-09-14, seventh review pass): a genuinely valid
+        `markets: ["UK"]` configuration continues to validate an approved
+        record against it exactly as before - this is the control case
+        for the malformed-shape tests below."""
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        approved_record = _valid_population_reference_record_dict(
+            market_id="UK",
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        fingerprint = compute_population_records_fingerprint(
+            [PopulationReferenceRecord.from_dict(approved_record)]
+        )
+        set_dict = _valid_population_reference_set_dict(
+            records_fingerprint=fingerprint,
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        imported = {
+            "model_spec": self._model_spec(["UK"]),
+            "population_reference_set": set_dict,
+            "population_reference_records": [approved_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert len(resolved_records) == 1
+        assert resolved_set is not None
+        assert warnings == []
+
+    @pytest.mark.parametrize(
+        "malformed_markets",
+        [
+            [["UK"]],
+            [42],
+            [None],
+            [{"market": "UK"}],
+            {"UK": 1},
+        ],
+        ids=[
+            "nested-list",
+            "int-element",
+            "null-element",
+            "dict-element",
+            "mapping-shape",
+        ],
+    )
+    def test_malformed_market_configuration_fails_closed_for_approved_artifacts(
+        self, malformed_markets
+    ):
+        """Codex P2 (2026-09-14, seventh review pass): a malformed
+        `model_spec.markets` shape (a nested list, a non-string element,
+        or a non-list `markets` value entirely) must be treated exactly
+        like a genuinely absent market configuration - approved records
+        fail closed via the existing quarantine mechanism - rather than
+        reaching `set(known_market_ids)` and crashing with an uncaught
+        `TypeError`."""
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        approved_record = _valid_population_reference_record_dict(
+            approval_status="approved", approved_by="reviewer", approved_at="2026-09-13"
+        )
+        fingerprint = compute_population_records_fingerprint(
+            [PopulationReferenceRecord.from_dict(approved_record)]
+        )
+        set_dict = _valid_population_reference_set_dict(
+            records_fingerprint=fingerprint,
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        imported = {
+            "model_spec": {
+                "date_col": "date",
+                "market_col": "market",
+                "markets": malformed_markets,
+            },
+            "population_reference_set": set_dict,
+            "population_reference_records": [approved_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_records == []
+        assert resolved_set is None
+        assert any(
+            "no governed project market configuration could be resolved" in warning
+            for warning in warnings
+        )
+
+    def test_mixed_valid_and_malformed_markets_does_not_become_partial_universe(self):
+        """Codex P2 (2026-09-14, seventh review pass): `markets: ["UK",
+        42]` must not silently narrow to `("UK",)` and validate a UK
+        record as if the malformed element were simply absent - the
+        whole configuration is invalid, so the UK record must fail
+        closed the same as if no market configuration existed at all."""
+        from ancestry_mmm.core.population_reference import (
+            PopulationReferenceRecord,
+            compute_population_records_fingerprint,
+        )
+
+        approved_record = _valid_population_reference_record_dict(
+            market_id="UK",
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        fingerprint = compute_population_records_fingerprint(
+            [PopulationReferenceRecord.from_dict(approved_record)]
+        )
+        set_dict = _valid_population_reference_set_dict(
+            records_fingerprint=fingerprint,
+            approval_status="approved",
+            approved_by="reviewer",
+            approved_at="2026-09-13",
+        )
+        imported = {
+            "model_spec": self._model_spec(["UK", 42]),
+            "population_reference_set": set_dict,
+            "population_reference_records": [approved_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert resolved_records == []
+        assert resolved_set is None
+        assert any(
+            "no governed project market configuration could be resolved" in warning
+            for warning in warnings
+        )
+
+    def test_pending_records_unaffected_when_market_configuration_malformed(self):
+        """Only *approved* artefacts fail closed - a malformed market
+        configuration must not reject a pending record either, exactly
+        matching the existing genuinely-absent-configuration behaviour."""
+        pending_record = _valid_population_reference_record_dict()  # default pending
+        imported = {
+            "model_spec": self._model_spec([["UK"]]),
+            "population_reference_records": [pending_record],
+        }
+        resolved_set, resolved_records, warnings = (
+            resolve_imported_population_reference_artifacts(imported)
+        )
+        assert len(resolved_records) == 1
+        assert warnings == []
+
+
+def _valid_population_treatment_specification_dict(**overrides) -> dict:
+    payload = dict(
+        population_treatment_spec_id="spec-1",
+        project_id="proj-1",
+        market_scope=["UK"],
+        owner="test_owner",
+    )
+    payload.update(overrides)
+    return payload
+
+
+def test_resolve_imported_population_treatment_specification_absent_resolves_none():
+    resolved, warnings = resolve_imported_population_treatment_specification({})
+    assert resolved is None
+    assert warnings == []
+
+
+def test_resolve_imported_population_treatment_specification_valid_round_trips():
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict()
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert warnings == []
+    assert resolved["population_treatment_spec_id"] == "spec-1"
+    # Round-tripping an absent-outcome specification must still resolve to
+    # fully inactive, never an implicit default.
+    assert resolved["outcome_population_treatment"] == "none"
+    assert resolved["predictor_population_treatment"] == "none"
+
+
+def test_resolve_imported_population_treatment_specification_reports_malformed_by_id():
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            outcome_population_treatment="not_a_real_treatment"
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "spec-1" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_id", [["spec-1"], {"a": 1}, 42, None], ids=repr)
+def test_resolve_imported_population_treatment_specification_quarantines_non_string_id(
+    bad_id,
+):
+    """2026-09-14: population_treatment_spec_id is declared `str` - a
+    non-string imported value must quarantine through the existing
+    mechanism, never enter valid project state, and never crash import."""
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            population_treatment_spec_id=bad_id
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+
+
+def test_resolve_imported_population_treatment_specification_quarantines_contradictory_approval_metadata():
+    """Codex P2 (2026-09-13, third pass): mirrors the record/set-level
+    tests for the treatment-specification object."""
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            approval_status="pending", approved_at="2026-09-13"
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "spec-1" in warnings[0]
+
+
+def test_resolve_imported_population_treatment_specification_quarantines_unsupported_schema_version():
+    """Codex P2 (2026-09-13): mirrors the record/set-level tests above for
+    the treatment-specification object."""
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            schema_version=999
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "spec-1" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_version", [True, 1.0])
+def test_resolve_imported_population_treatment_specification_quarantines_schema_version_type_impostor(
+    bad_version,
+):
+    """Codex P2 (2026-09-14, sixth review pass): mirrors the record-level
+    schema-version-impostor test for the treatment-specification object."""
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            schema_version=bad_version
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "spec-1" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_market_scope", ["UK", 42, {"a": 1}])
+def test_resolve_imported_population_treatment_specification_quarantines_scalar_market_scope(
+    bad_market_scope,
+):
+    """Codex P2 (2026-09-14, sixth review pass): an imported
+    market_scope scalar (e.g. the string "UK") must quarantine the whole
+    specification rather than being silently exploded into a
+    per-character tuple and re-exported as valid governed state."""
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            market_scope=bad_market_scope
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "spec-1" in warnings[0]
+
+
+def test_resolve_imported_population_treatment_specification_quarantines_list_of_pairs_reference_map():
+    """Codex P2 (2026-09-14, sixth review pass): a population_reference_map
+    encoded as a list of [market, reference] pairs must not be silently
+    reinterpreted as a mapping via dict(list_of_pairs)."""
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            population_reference_map=["UK", "AU"]
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "spec-1" in warnings[0]
+
+
+@pytest.mark.parametrize(
+    "bad_reference_map",
+    [{"UK": ["pop-1"]}, {"UK": 42}, {"UK": ""}, {42: "pop-1"}, {"": "pop-1"}],
+    ids=["list-value", "int-value", "empty-value", "int-key", "empty-key"],
+)
+def test_resolve_imported_population_treatment_specification_quarantines_malformed_reference_map_entries(
+    bad_reference_map,
+):
+    """Codex P2 (2026-09-14, seventh review pass): population_reference_map
+    is declared Mapping[str, str] - an imported entry whose key or value
+    is not a non-empty string must quarantine the whole specification via
+    the existing mechanism, never be silently kept or stringified."""
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            population_reference_map=bad_reference_map
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "spec-1" in warnings[0]
 
 
 def test_export_then_import_causal_graphs_round_trip(tmp_path, sample_project):

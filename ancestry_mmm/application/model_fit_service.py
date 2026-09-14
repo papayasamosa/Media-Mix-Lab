@@ -34,6 +34,11 @@ from ancestry_mmm.core.hierarchical_model import (
 from ancestry_mmm.core.market_specific_model import build_fh_market_specific_model
 from ancestry_mmm.core.named_event_fit_inputs import NamedEventFitInputs
 from ancestry_mmm.core.experiment_lift_test_mapping import ModelLiftTestCalibrationInput
+from ancestry_mmm.core.population_preparation import (
+    PopulationPreparationResult,
+    prepare_population_aware_observed_target,
+)
+from ancestry_mmm.core.population_treatment import PopulationTreatmentSpecification
 from ancestry_mmm.core.schema import ModelSpec
 from ancestry_mmm.core.search_capacity import (
     SEARCH_CANDIDATE_A_ENGINE,
@@ -157,6 +162,7 @@ class ModelFitResult:
     engine: str
     model_type: str
     candidate_a_readiness: Optional[CandidateAReadiness] = None
+    population_preparation_result: Optional[PopulationPreparationResult] = None
 
 
 def build_model_for_spec(
@@ -174,6 +180,7 @@ def build_model_for_spec(
     named_event_fit_inputs: Optional[NamedEventFitInputs] = None,
     calibration_inputs: Optional[Sequence[ModelLiftTestCalibrationInput]] = None,
     seo_fit_inputs: Optional[SeoModelFitInputs | SeoModelFitInputsCollection] = None,
+    population_treatment: Optional[PopulationTreatmentSpecification] = None,
 ) -> ModelFitResult:
     """The one place `pages/05_Model_Training.py` (or any non-Streamlit
     caller - a future FastAPI service, a batch job) should build a proposed
@@ -184,7 +191,30 @@ def build_model_for_spec(
     this project Candidate A-shaped?") does not need to have already
     assembled Search observation arrays. Actually fitting raises
     ModelFitServiceError if the engine requires it and it is missing.
+
+    `population_treatment` (REQ-POPULATION-001, 2026-09-13 review follow-
+    up) is an optional fit-time sibling dependency - never a `ModelSpec`
+    field (see `core.population_preparation`'s module docstring for why).
+    Every existing caller passes nothing, so this always executes
+    `core.population_preparation.prepare_population_aware_observed_
+    target`'s identity-preserving inactive path first, before `resolve_
+    engine` or any builder runs - the returned target replaces
+    `frame["Y"]` with the exact same object, so existing behaviour is
+    provably unchanged. An active specification raises `Population
+    TreatmentUnresolvedError` here, before the Candidate A engine
+    resolution, the ordinary shared/market-specific dispatch, or any PyMC
+    builder executes - this single call site therefore guards every
+    dispatch branch below at once, rather than requiring a separate guard
+    inside each builder.
     """
+    prepared_target, population_preparation_result = (
+        prepare_population_aware_observed_target(
+            frame.get("Y"), treatment_spec=population_treatment
+        )
+    )
+    if "Y" in frame:
+        frame = {**frame, "Y": prepared_target}
+
     engine = resolve_engine(causal_graph=causal_graph, search_objects=search_objects)
 
     if engine == SEARCH_CANDIDATE_A_ENGINE:
@@ -228,6 +258,7 @@ def build_model_for_spec(
             engine=engine,
             model_type=MODEL_TYPE_SHARED,
             candidate_a_readiness=readiness,
+            population_preparation_result=population_preparation_result,
         )
 
     builder = (
@@ -252,6 +283,7 @@ def build_model_for_spec(
         meta=meta,
         engine=engine,
         model_type=model_type,
+        population_preparation_result=population_preparation_result,
     )
 
 

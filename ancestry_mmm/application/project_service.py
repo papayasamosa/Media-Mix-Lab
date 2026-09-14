@@ -103,6 +103,14 @@ class ProjectExportInput:
     # default (export_project() falls back to None, matching the manifest
     # before this field existed).
     project_display_name: Optional[str] = None
+    # REQ-POPULATION-001 (2026-09-13 review follow-up): the three governed
+    # population artefacts, mirroring fx_rate_set/fx_rate_records above -
+    # appended at the end for the same backward-compatibility reason as
+    # project_display_name. Absent/None means "no population reference or
+    # treatment configured for this project", never inferred as active.
+    population_reference_set: Optional[dict] = None
+    population_reference_records: Optional[List[dict]] = None
+    population_treatment_specification: Optional[dict] = None
 
 
 @dataclass
@@ -235,6 +243,9 @@ class ProjectService:
                 context_variable_metadata=exp_input.context_variable_metadata,
                 source_domain_semantics=exp_input.source_domain_semantics,
                 project_display_name=exp_input.project_display_name,
+                population_reference_set=exp_input.population_reference_set,
+                population_reference_records=exp_input.population_reference_records,
+                population_treatment_specification=exp_input.population_treatment_specification,
             )
         except Exception as exc:
             errors.append(f"Project export failed: {exc}")
@@ -277,6 +288,8 @@ class ProjectService:
         from ancestry_mmm.core.persistence import (
             import_project,
             reconstruct_model_state,
+            resolve_imported_population_reference_artifacts,
+            resolve_imported_population_treatment_specification,
         )
 
         bundle_path = Path(imp_input.bundle_path)
@@ -289,6 +302,42 @@ class ProjectService:
         except Exception as exc:
             errors.append(f"Project import failed: {exc}")
             return ProjectServiceResult(success=False, errors=errors)
+
+        # REQ-POPULATION-001 (2026-09-13 review follow-up, extended
+        # 2026-09-13 second pass): restore the three governed population
+        # artefacts through their quarantine resolvers before they become
+        # part of the project state this method returns - `import_
+        # project()` above only reads the raw, unvalidated bundle JSON; a
+        # malformed/quarantined record must never silently reappear as
+        # valid state merely because it was present in the file.
+        # `resolve_imported_population_reference_artifacts` resolves the
+        # set and records *together* and cross-checks the set's
+        # `records_fingerprint` against the records that actually survive
+        # quarantine - calling the set/records resolvers independently
+        # here would reopen exactly the fingerprint-reconciliation gap
+        # that function exists to close, and every application import
+        # path must go through it rather than each doing its own,
+        # potentially divergent, reconciliation. Restoring an active
+        # treatment specification here does not run or activate anything
+        # by itself - it is still blocked at fit time by `core.
+        # population_preparation`'s unresolved-policy guard (DD-020/
+        # MD-025) the first time it is actually passed to `build_model_
+        # for_spec`.
+        (
+            population_reference_set,
+            population_reference_records,
+            pop_artifact_warnings,
+        ) = resolve_imported_population_reference_artifacts(project_state)
+        population_treatment_specification, pop_spec_warnings = (
+            resolve_imported_population_treatment_specification(project_state)
+        )
+        warnings.extend(pop_artifact_warnings)
+        warnings.extend(pop_spec_warnings)
+        project_state["population_reference_records"] = population_reference_records
+        project_state["population_reference_set"] = population_reference_set
+        project_state["population_treatment_specification"] = (
+            population_treatment_specification
+        )
 
         # Attempt model state reconstruction (non-fatal if fails)
         model_state = None

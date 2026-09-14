@@ -11,6 +11,7 @@ tested directly; only the dispatch tests build a (small, fast) real model.
 import numpy as np
 import pytest
 
+from ancestry_mmm.application import model_fit_service
 from ancestry_mmm.application.model_fit_service import (
     MODEL_TYPE_MARKET_SPECIFIC,
     MODEL_TYPE_SHARED,
@@ -18,6 +19,11 @@ from ancestry_mmm.application.model_fit_service import (
     build_model_for_spec,
     check_candidate_a_fit_readiness,
     resolve_engine,
+)
+from ancestry_mmm.core.population_preparation import PopulationTreatmentUnresolvedError
+from ancestry_mmm.core.population_treatment import (
+    OUTCOME_POPULATION_TREATMENT_EXPOSURE_OR_OFFSET,
+    PopulationTreatmentSpecification,
 )
 from ancestry_mmm.core.causal_graph import (
     CausalEdge,
@@ -320,3 +326,157 @@ class TestBuildModelForSpec:
                 causal_graph=_candidate_a_graph(),
                 search_objects=_search_objects(),
             )
+
+
+def _inactive_population_spec() -> PopulationTreatmentSpecification:
+    return PopulationTreatmentSpecification(
+        population_treatment_spec_id="spec-1",
+        project_id="proj-1",
+        market_scope=("UK",),
+        owner="test_owner",
+    )
+
+
+def _active_population_spec() -> PopulationTreatmentSpecification:
+    return PopulationTreatmentSpecification(
+        population_treatment_spec_id="spec-1",
+        project_id="proj-1",
+        market_scope=("UK",),
+        owner="test_owner",
+        outcome_population_treatment=OUTCOME_POPULATION_TREATMENT_EXPOSURE_OR_OFFSET,
+    )
+
+
+class TestBuildModelForSpecPopulationBoundary:
+    """REQ-POPULATION-001, 2026-09-13 review follow-up (Codex P1): the
+    population-preparation boundary must actually run inside the real fit
+    orchestration path (`build_model_for_spec`), covering ordinary shared,
+    market-specific, and Candidate A dispatch, rather than existing only
+    as a disconnected utility."""
+
+    _frame = staticmethod(TestBuildModelForSpec._frame)
+    _model_spec = staticmethod(TestBuildModelForSpec._model_spec)
+
+    def test_no_population_treatment_dispatches_exactly_as_before(self):
+        result = build_model_for_spec(
+            frame=self._frame(),
+            model_spec=self._model_spec(),
+            model_type=MODEL_TYPE_SHARED,
+        )
+        assert result.population_preparation_result is not None
+        assert result.population_preparation_result.population_treatment_active is False
+        assert result.population_preparation_result.count_preservation_verified is True
+
+    def test_explicitly_inactive_population_treatment_preserves_observed_target(self):
+        result = build_model_for_spec(
+            frame=self._frame(),
+            model_spec=self._model_spec(),
+            model_type=MODEL_TYPE_SHARED,
+            population_treatment=_inactive_population_spec(),
+        )
+        assert result.population_preparation_result.population_treatment_active is False
+        assert result.population_preparation_result.count_preservation_verified is True
+
+    def test_the_boundary_is_actually_invoked_with_the_frames_own_target(
+        self, monkeypatch
+    ):
+        frame = self._frame()
+        calls = []
+        original = model_fit_service.prepare_population_aware_observed_target
+
+        def _spy(observed_counts, treatment_spec=None):
+            calls.append((observed_counts, treatment_spec))
+            return original(observed_counts, treatment_spec=treatment_spec)
+
+        monkeypatch.setattr(
+            model_fit_service, "prepare_population_aware_observed_target", _spy
+        )
+        build_model_for_spec(
+            frame=frame, model_spec=self._model_spec(), model_type=MODEL_TYPE_SHARED
+        )
+        assert len(calls) == 1
+        observed_counts, treatment_spec = calls[0]
+        assert observed_counts is frame["Y"]
+        assert treatment_spec is None
+
+    def test_active_outcome_treatment_blocks_before_shared_dispatch(self, monkeypatch):
+        def _boom(*args, **kwargs):
+            raise AssertionError("build_fh_hierarchical_model must not be called")
+
+        monkeypatch.setattr(model_fit_service, "build_fh_hierarchical_model", _boom)
+        with pytest.raises(PopulationTreatmentUnresolvedError):
+            build_model_for_spec(
+                frame=self._frame(),
+                model_spec=self._model_spec(),
+                model_type=MODEL_TYPE_SHARED,
+                population_treatment=_active_population_spec(),
+            )
+
+    def test_active_treatment_blocks_before_market_specific_dispatch(self, monkeypatch):
+        def _boom(*args, **kwargs):
+            raise AssertionError("build_fh_market_specific_model must not be called")
+
+        monkeypatch.setattr(model_fit_service, "build_fh_market_specific_model", _boom)
+        with pytest.raises(PopulationTreatmentUnresolvedError):
+            build_model_for_spec(
+                frame=self._frame(),
+                model_spec=self._model_spec(),
+                model_type=MODEL_TYPE_MARKET_SPECIFIC,
+                population_treatment=_active_population_spec(),
+            )
+
+    def test_active_treatment_blocks_before_candidate_a_dispatch(self, monkeypatch):
+        # Deliberately omit candidate_a_fit_inputs - if the population guard
+        # did not run first, this would instead raise ModelFitServiceError
+        # for missing Candidate A fit inputs. Getting
+        # PopulationTreatmentUnresolvedError instead proves the guard
+        # preempts every other check, including Candidate A dispatch.
+        def _boom(*args, **kwargs):
+            raise AssertionError("build_fh_hierarchical_model must not be called")
+
+        monkeypatch.setattr(model_fit_service, "build_fh_hierarchical_model", _boom)
+        with pytest.raises(PopulationTreatmentUnresolvedError):
+            build_model_for_spec(
+                frame=self._frame(),
+                model_spec=self._model_spec(),
+                model_type=MODEL_TYPE_SHARED,
+                causal_graph=_candidate_a_graph(),
+                search_objects=_search_objects(),
+                candidate_a_fit_inputs=None,
+                population_treatment=_active_population_spec(),
+            )
+
+    def test_active_treatment_error_names_the_unresolved_decisions(self):
+        with pytest.raises(PopulationTreatmentUnresolvedError, match="DD-020"):
+            build_model_for_spec(
+                frame=self._frame(),
+                model_spec=self._model_spec(),
+                model_type=MODEL_TYPE_SHARED,
+                population_treatment=_active_population_spec(),
+            )
+        with pytest.raises(PopulationTreatmentUnresolvedError, match="MD-025"):
+            build_model_for_spec(
+                frame=self._frame(),
+                model_spec=self._model_spec(),
+                model_type=MODEL_TYPE_SHARED,
+                population_treatment=_active_population_spec(),
+            )
+
+    def test_existing_model_fitting_behaviour_unchanged_when_population_absent(self):
+        from ancestry_mmm.core.graph_model_compiler import (
+            GRAPH_ENGINE_PYMC_HIERARCHICAL,
+        )
+
+        baseline = build_model_for_spec(
+            frame=self._frame(),
+            model_spec=self._model_spec(),
+            model_type=MODEL_TYPE_SHARED,
+        )
+        with_none = build_model_for_spec(
+            frame=self._frame(),
+            model_spec=self._model_spec(),
+            model_type=MODEL_TYPE_SHARED,
+            population_treatment=None,
+        )
+        assert baseline.engine == with_none.engine == GRAPH_ENGINE_PYMC_HIERARCHICAL
+        assert baseline.model_type == with_none.model_type == MODEL_TYPE_SHARED

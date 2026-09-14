@@ -1,0 +1,587 @@
+"""Tests for `ancestry_mmm.core.population_treatment` (REQ-POPULATION-001).
+Every population value used is a clearly synthetic test value."""
+
+import math
+
+import pytest
+
+from ancestry_mmm.core.population_treatment import (
+    OUTCOME_POPULATION_TREATMENT_EXPOSURE_OR_OFFSET,
+    OUTCOME_POPULATION_TREATMENT_NONE,
+    PREDICTOR_POPULATION_TREATMENT_NONE,
+    PREDICTOR_POPULATION_TREATMENT_SELECTED_ELIGIBLE_PREDICTORS,
+    PopulationTreatmentSpecification,
+    geometric_mean_population,
+    is_predictor_unit_eligible_for_population_normalisation,
+    is_predictor_unit_protected,
+    population_exposure_log_term,
+    population_normalised_predictor_value,
+)
+
+
+def _spec(**overrides) -> PopulationTreatmentSpecification:
+    defaults = dict(
+        population_treatment_spec_id="spec-1",
+        project_id="proj-1",
+        market_scope=("UK",),
+        owner="test_owner",
+    )
+    defaults.update(overrides)
+    return PopulationTreatmentSpecification(**defaults)
+
+
+class TestPopulationTreatmentSpecificationDefaults:
+    def test_default_specification_is_fully_inactive(self):
+        spec = _spec()
+        assert spec.outcome_population_treatment == OUTCOME_POPULATION_TREATMENT_NONE
+        assert (
+            spec.predictor_population_treatment == PREDICTOR_POPULATION_TREATMENT_NONE
+        )
+        assert spec.is_active is False
+
+    def test_enabling_outcome_treatment_makes_it_active(self):
+        spec = _spec(
+            outcome_population_treatment=OUTCOME_POPULATION_TREATMENT_EXPOSURE_OR_OFFSET
+        )
+        assert spec.is_active is True
+
+    def test_enabling_predictor_treatment_makes_it_active(self):
+        spec = _spec(
+            predictor_population_treatment=(
+                PREDICTOR_POPULATION_TREATMENT_SELECTED_ELIGIBLE_PREDICTORS
+            ),
+            eligible_measure_units=("impressions",),
+        )
+        assert spec.is_active is True
+
+    def test_round_trips(self):
+        spec = _spec(
+            predictor_population_treatment=(
+                PREDICTOR_POPULATION_TREATMENT_SELECTED_ELIGIBLE_PREDICTORS
+            ),
+            eligible_measure_units=("impressions", "clicks"),
+            population_reference_map={"UK": "pop-uk-1"},
+        )
+        assert PopulationTreatmentSpecification.from_dict(spec.to_dict()) == spec
+
+
+class TestPopulationTreatmentSpecificationValidation:
+    @pytest.mark.parametrize("bad_id", [["spec-1"], {"a": 1}, 42, 3.14, None], ids=repr)
+    def test_non_string_spec_id_rejected(self, bad_id):
+        """2026-09-14: population_treatment_spec_id is declared `str` -
+        same defect class already fixed for PopulationReferenceRecord's
+        identity fields and PopulationReferenceSet.reference_set_id."""
+        with pytest.raises(ValueError):
+            _spec(population_treatment_spec_id=bad_id)
+
+    def test_valid_string_spec_id_still_accepted(self):
+        spec = _spec(population_treatment_spec_id="spec-valid-1")
+        assert spec.population_treatment_spec_id == "spec-valid-1"
+
+    def test_unknown_outcome_treatment_rejected(self):
+        with pytest.raises(ValueError):
+            _spec(outcome_population_treatment="rescale_the_count")
+
+    def test_unknown_predictor_treatment_rejected(self):
+        with pytest.raises(ValueError):
+            _spec(predictor_population_treatment="rescale_everything")
+
+    def test_selected_eligible_predictors_requires_units(self):
+        with pytest.raises(ValueError):
+            _spec(
+                predictor_population_treatment=(
+                    PREDICTOR_POPULATION_TREATMENT_SELECTED_ELIGIBLE_PREDICTORS
+                ),
+                eligible_measure_units=(),
+            )
+
+    @pytest.mark.parametrize(
+        "protected_unit",
+        [
+            "GRP",
+            "tvr",
+            "Reach_Percentage",
+            "Index",
+            "%",
+            "pct",
+            "percent",
+            "reach %",
+            "rates",
+            "indices",
+            "index_0_to_1",
+        ],
+    )
+    def test_protected_units_cannot_be_declared_eligible(self, protected_unit):
+        with pytest.raises(ValueError):
+            _spec(
+                predictor_population_treatment=(
+                    PREDICTOR_POPULATION_TREATMENT_SELECTED_ELIGIBLE_PREDICTORS
+                ),
+                eligible_measure_units=(protected_unit,),
+            )
+
+    def test_approved_requires_approver(self):
+        with pytest.raises(ValueError):
+            _spec(approval_status="approved")
+
+    @pytest.mark.parametrize("status", ["pending", "rejected"])
+    def test_non_approved_rejects_stale_approver_metadata(self, status):
+        """Codex P2 (2026-09-13, third pass): the symmetric case - a
+        pending/rejected specification must not carry approver metadata
+        that contradicts its own status."""
+        with pytest.raises(ValueError):
+            _spec(approval_status=status, approved_by="reviewer")
+        with pytest.raises(ValueError):
+            _spec(approval_status=status, approved_at="2026-09-12")
+        _spec(approval_status=status)  # neither set - succeeds
+
+    def test_omitted_schema_version_defaults_to_current(self):
+        assert _spec().schema_version == 1
+
+    @pytest.mark.parametrize("bad_version", [999, 0, "1", "abc", None, 1.5])
+    def test_unsupported_schema_version_rejected(self, bad_version):
+        with pytest.raises(ValueError):
+            _spec(schema_version=bad_version)
+
+
+class TestProtectedUnits:
+    @pytest.mark.parametrize(
+        "unit",
+        [
+            "GRP",
+            "GRPs",
+            "TVR",
+            "TVRs",
+            "reach percentage",
+            "rate",
+            "Percentage",
+            "index",
+        ],
+    )
+    def test_known_protected_units_are_protected(self, unit):
+        assert is_predictor_unit_protected(unit) is True
+
+    @pytest.mark.parametrize(
+        "unit",
+        [
+            "%",
+            "Pct",
+            "PCT",
+            "percent",
+            "percents",
+            "reach %",
+            "Reach%",
+            "reach_pct",
+            "reach percent",
+            "rates",
+            "Rates",
+            "indices",
+            "Indices",
+            "indexes",
+        ],
+    )
+    def test_governed_aliases_are_also_protected(self, unit):
+        """Codex P2 (2026-09-13): the original exact-string check was too
+        narrow to catch these ordinary governed aliases."""
+        assert is_predictor_unit_protected(unit) is True
+
+    @pytest.mark.parametrize("unit", ["impressions", "clicks", "spend", "sends"])
+    def test_extensive_units_are_not_protected(self, unit):
+        assert is_predictor_unit_protected(unit) is False
+
+    @pytest.mark.parametrize(
+        "unit",
+        [
+            "conversion_rate_index",  # contains "rate" and "index" as fragments
+            "aggregate",  # contains "gr" fragments, unrelated to GRP
+            "percentagewise_delivery",  # contains "percentage" as a fragment
+        ],
+    )
+    def test_unrelated_units_containing_protected_fragments_are_not_protected(
+        self, unit
+    ):
+        """The canonicalisation is an exact-identity match, never a
+        substring search - a unit that merely contains "rate", "index" or
+        "percentage" as part of an unrelated word must not be caught."""
+        assert is_predictor_unit_protected(unit) is False
+
+    @pytest.mark.parametrize(
+        "unit",
+        ["index_0_to_1", "Index_0_To_1", "index_0_to_100", "index-0-to-1"],
+    )
+    def test_governed_index_range_family_is_protected(self, unit):
+        """Codex P2 (2026-09-13, second pass): the repository's existing
+        governed SEO unit `core.seo_visibility.
+        SEO_POSITIONAL_VISIBILITY_METRIC.unit == "index_0_to_1"` must be
+        classified as an index, not left unprotected because it isn't the
+        bare word "index"."""
+        assert is_predictor_unit_protected(unit) is True
+
+    @pytest.mark.parametrize(
+        "unit",
+        [
+            "index_abc",  # not a numeric range - not the governed family
+            "index_0",  # missing the "_to_<upper>" half
+            "rate_0_to_1",  # a different word entirely, not the index family
+        ],
+    )
+    def test_non_range_shaped_units_are_not_swept_in_by_the_family_rule(self, unit):
+        assert is_predictor_unit_protected(unit) is False
+
+
+class TestEligibilityHelper:
+    def test_ineligible_when_predictor_treatment_disabled(self):
+        spec = _spec()
+        assert (
+            is_predictor_unit_eligible_for_population_normalisation("impressions", spec)
+            is False
+        )
+
+    def test_eligible_when_declared_and_not_protected(self):
+        spec = _spec(
+            predictor_population_treatment=(
+                PREDICTOR_POPULATION_TREATMENT_SELECTED_ELIGIBLE_PREDICTORS
+            ),
+            eligible_measure_units=("impressions",),
+        )
+        assert (
+            is_predictor_unit_eligible_for_population_normalisation("impressions", spec)
+            is True
+        )
+        assert (
+            is_predictor_unit_eligible_for_population_normalisation("clicks", spec)
+            is False
+        )
+
+    @pytest.mark.parametrize(
+        "protected_unit",
+        ["GRP", "%", "pct", "reach %", "rates", "indices", "index_0_to_1"],
+    )
+    def test_protected_unit_never_eligible_even_if_declared_elsewhere(
+        self, protected_unit
+    ):
+        # A protected unit can never even be constructed into eligible_measure_units
+        # (TestProtectedUnits above), so this asserts the helper's own defence in
+        # depth - a specification must not be able to list a protected unit as
+        # eligible and then have this helper return True for it.
+        spec = _spec(
+            predictor_population_treatment=(
+                PREDICTOR_POPULATION_TREATMENT_SELECTED_ELIGIBLE_PREDICTORS
+            ),
+            eligible_measure_units=("impressions",),
+        )
+        assert (
+            is_predictor_unit_eligible_for_population_normalisation(
+                protected_unit, spec
+            )
+            is False
+        )
+
+
+class TestGeometricMeanPopulation:
+    def test_single_value_returns_itself(self):
+        assert geometric_mean_population([100.0]) == pytest.approx(100.0)
+
+    def test_geometric_mean_of_two_values(self):
+        assert geometric_mean_population([100.0, 400.0]) == pytest.approx(200.0)
+
+    def test_empty_sequence_rejected(self):
+        with pytest.raises(ValueError):
+            geometric_mean_population([])
+
+    def test_non_positive_value_rejected(self):
+        with pytest.raises(ValueError):
+            geometric_mean_population([100.0, 0.0])
+        with pytest.raises(ValueError):
+            geometric_mean_population([100.0, -5.0])
+
+    def test_non_finite_value_rejected(self):
+        with pytest.raises(ValueError):
+            geometric_mean_population([100.0, float("nan")])
+
+
+class TestPopulationExposureLogTerm:
+    def test_population_equal_to_reference_scale_is_zero(self):
+        assert population_exposure_log_term(1_000_000.0, 1_000_000.0) == pytest.approx(
+            0.0
+        )
+
+    def test_larger_population_gives_positive_term(self):
+        assert population_exposure_log_term(2_000_000.0, 1_000_000.0) == pytest.approx(
+            math.log(2)
+        )
+
+    def test_smaller_population_gives_negative_term(self):
+        assert population_exposure_log_term(500_000.0, 1_000_000.0) == pytest.approx(
+            math.log(0.5)
+        )
+
+    @pytest.mark.parametrize("population", [0.0, -1.0, float("nan"), float("inf")])
+    def test_invalid_population_rejected(self, population):
+        with pytest.raises(ValueError):
+            population_exposure_log_term(population, 1_000_000.0)
+
+    @pytest.mark.parametrize("reference_scale", [0.0, -1.0, float("nan"), float("inf")])
+    def test_invalid_reference_scale_rejected(self, reference_scale):
+        with pytest.raises(ValueError):
+            population_exposure_log_term(1_000_000.0, reference_scale)
+
+
+class TestPopulationNormalisedPredictorValue:
+    def test_basic_division_and_scale(self):
+        # (10 / 5) * 3 = 6.
+        assert population_normalised_predictor_value(
+            10.0, 5.0, unit_scale=3.0
+        ) == pytest.approx(6.0)
+
+    def test_default_unit_scale_is_one(self):
+        assert population_normalised_predictor_value(500.0, 1000.0) == pytest.approx(
+            0.5
+        )
+
+    @pytest.mark.parametrize("population", [0.0, -1.0, float("nan")])
+    def test_invalid_population_rejected(self, population):
+        with pytest.raises(ValueError):
+            population_normalised_predictor_value(100.0, population)
+
+    def test_invalid_unit_scale_rejected(self):
+        with pytest.raises(ValueError):
+            population_normalised_predictor_value(100.0, 1000.0, unit_scale=0.0)
+
+
+class TestFromDictCollectionFieldShapeValidation:
+    """Codex P2 (2026-09-14, sixth review pass): `from_dict`'s previous
+    `tuple(raw or ())`/`dict(raw or {})` coercions accepted any iterable,
+    so a plausible scalar string silently became a tuple of its
+    characters (`"UK"` -> `("U", "K")`) instead of being rejected."""
+
+    @pytest.mark.parametrize("bad_shape", ["UK", 42, True, 3.14, {"a": 1}])
+    def test_market_scope_scalar_is_rejected_not_exploded(self, bad_shape):
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": bad_shape,
+                    "owner": "test_owner",
+                }
+            )
+
+    def test_market_scope_valid_list_still_works(self):
+        spec = PopulationTreatmentSpecification.from_dict(
+            {
+                "population_treatment_spec_id": "spec-1",
+                "project_id": "proj-1",
+                "market_scope": ["UK", "AU"],
+                "owner": "test_owner",
+            }
+        )
+        assert spec.market_scope == ("UK", "AU")
+
+    def test_market_scope_none_becomes_empty_tuple(self):
+        spec = PopulationTreatmentSpecification.from_dict(
+            {
+                "population_treatment_spec_id": "spec-1",
+                "project_id": "proj-1",
+                "market_scope": None,
+                "owner": "test_owner",
+            }
+        )
+        assert spec.market_scope == ()
+
+    def test_market_scope_list_with_a_non_string_element_is_rejected(self):
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK", 42],
+                    "owner": "test_owner",
+                }
+            )
+
+    def test_market_scope_list_with_an_empty_string_element_is_rejected(self):
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK", ""],
+                    "owner": "test_owner",
+                }
+            )
+
+    @pytest.mark.parametrize("bad_shape", ["impressions", 42, True, {"a": 1}])
+    def test_eligible_measure_units_scalar_is_rejected_not_exploded(self, bad_shape):
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK"],
+                    "owner": "test_owner",
+                    "predictor_population_treatment": (
+                        PREDICTOR_POPULATION_TREATMENT_SELECTED_ELIGIBLE_PREDICTORS
+                    ),
+                    "eligible_measure_units": bad_shape,
+                }
+            )
+
+    def test_eligible_measure_units_valid_list_still_works(self):
+        spec = PopulationTreatmentSpecification.from_dict(
+            {
+                "population_treatment_spec_id": "spec-1",
+                "project_id": "proj-1",
+                "market_scope": ["UK"],
+                "owner": "test_owner",
+                "predictor_population_treatment": (
+                    PREDICTOR_POPULATION_TREATMENT_SELECTED_ELIGIBLE_PREDICTORS
+                ),
+                "eligible_measure_units": ["impressions", "clicks"],
+            }
+        )
+        assert spec.eligible_measure_units == ("impressions", "clicks")
+
+    @pytest.mark.parametrize("bad_shape", ["UK", 42, True, 3.14])
+    def test_population_reference_map_wrong_scalar_shape_is_rejected(self, bad_shape):
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK"],
+                    "owner": "test_owner",
+                    "population_reference_map": bad_shape,
+                }
+            )
+
+    def test_population_reference_map_list_of_pairs_is_rejected_not_reinterpreted(self):
+        """A list of plausible-looking [market, reference] pairs must not
+        be silently accepted as an alternate mapping encoding -
+        dict(["UK", "AU"]) would otherwise silently produce
+        {"U": "K", "A": "U"}."""
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK"],
+                    "owner": "test_owner",
+                    "population_reference_map": ["UK", "AU"],
+                }
+            )
+
+    def test_population_reference_map_valid_dict_still_works(self):
+        spec = PopulationTreatmentSpecification.from_dict(
+            {
+                "population_treatment_spec_id": "spec-1",
+                "project_id": "proj-1",
+                "market_scope": ["UK"],
+                "owner": "test_owner",
+                "population_reference_map": {"UK": "pop-set-1"},
+            }
+        )
+        assert spec.population_reference_map == {"UK": "pop-set-1"}
+
+    def test_population_reference_map_none_becomes_empty_dict(self):
+        spec = PopulationTreatmentSpecification.from_dict(
+            {
+                "population_treatment_spec_id": "spec-1",
+                "project_id": "proj-1",
+                "market_scope": ["UK"],
+                "owner": "test_owner",
+                "population_reference_map": None,
+            }
+        )
+        assert spec.population_reference_map == {}
+
+    @pytest.mark.parametrize(
+        "bad_value",
+        [["pop-1"], 42, True, None, {}, ""],
+        ids=["list", "int", "bool", "none", "mapping", "empty-string"],
+    )
+    def test_population_reference_map_non_string_or_empty_value_is_rejected(
+        self, bad_value
+    ):
+        """Codex P2 (2026-09-14, seventh review pass): the declared
+        contract is `Mapping[str, str]` - a value that is itself a list,
+        a number, a bool, None, a mapping, or an empty string must fail
+        validation rather than being accepted (or silently stringified/
+        dropped)."""
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK"],
+                    "owner": "test_owner",
+                    "population_reference_map": {"UK": bad_value},
+                }
+            )
+
+    @pytest.mark.parametrize(
+        "bad_key", [42, True, "", None], ids=["int", "bool", "empty-string", "none"]
+    )
+    def test_population_reference_map_non_string_or_empty_key_is_rejected(
+        self, bad_key
+    ):
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK"],
+                    "owner": "test_owner",
+                    "population_reference_map": {bad_key: "pop-1"},
+                }
+            )
+
+    def test_population_reference_map_valid_dict_round_trips_unchanged(self):
+        spec = PopulationTreatmentSpecification.from_dict(
+            {
+                "population_treatment_spec_id": "spec-1",
+                "project_id": "proj-1",
+                "market_scope": ["UK"],
+                "owner": "test_owner",
+                "population_reference_map": {"UK": "pop-1"},
+            }
+        )
+        assert spec.population_reference_map == {"UK": "pop-1"}
+        assert spec.to_dict()["population_reference_map"] == {"UK": "pop-1"}
+
+
+class TestVersionFieldTypeEnforcement:
+    """Codex P2 (2026-09-14, sixth review pass): Python equality allows
+    `True == 1` and `1.0 == 1`, so `schema_version != 1` alone is
+    insufficient - a bool or float impostor must be rejected explicitly."""
+
+    def test_correct_integer_accepted(self):
+        spec = _spec(specification_version=1)
+        assert spec.specification_version == 1
+
+    @pytest.mark.parametrize(
+        "bad_version", [True, False, 1.0, 1.5, "1", None, [1], {"v": 1}]
+    )
+    def test_non_integer_specification_version_rejected(self, bad_version):
+        with pytest.raises(ValueError):
+            _spec(specification_version=bad_version)
+
+    def test_unsupported_specification_version_zero_rejected(self):
+        with pytest.raises(ValueError):
+            _spec(specification_version=0)
+
+    def test_correct_schema_version_accepted(self):
+        spec = _spec(schema_version=1)
+        assert spec.schema_version == 1
+
+    @pytest.mark.parametrize(
+        "bad_version", [True, False, 1.0, 1.5, "1", None, [1], {"v": 1}]
+    )
+    def test_non_integer_schema_version_rejected(self, bad_version):
+        with pytest.raises(ValueError):
+            _spec(schema_version=bad_version)
+
+    @pytest.mark.parametrize("bad_version", [0, 999])
+    def test_unsupported_integer_schema_version_still_rejected(self, bad_version):
+        with pytest.raises(ValueError):
+            _spec(schema_version=bad_version)
