@@ -58,6 +58,18 @@ _MAX_PLAUSIBLE_YEAR = 2200
 APPROVAL_STATUSES = ("pending", "approved", "rejected")
 
 
+def _is_exact_int(value: Any) -> bool:
+    """`True` only for a genuine `int` - never a `bool` (Python's `bool`
+    is a subclass of `int`, so `isinstance(True, int)` and `True == 1`
+    are both `True`; `type(value) is int` is the deliberate exclusion),
+    and never a `float`/numeric string/other type that merely compares
+    equal to an integer (`1.0 == 1` is also `True`). Used to guard every
+    persisted schema/version field before comparing it, so a JSON
+    `schema_version: true` or `schema_version: 1.0` cannot pass an
+    equality/range check meant for `1`."""
+    return type(value) is int
+
+
 @dataclass(frozen=True)
 class PopulationReferenceRecord:
     """One approved market-population observation (Part 5 v1.6 section 7.7
@@ -178,7 +190,10 @@ class PopulationReferenceRecord:
                 f"set when approval_status={self.approval_status!r} (only "
                 "'approved' records may carry approver metadata)."
             )
-        if self.schema_version != POPULATION_REFERENCE_SCHEMA_VERSION:
+        if (
+            not _is_exact_int(self.schema_version)
+            or self.schema_version != POPULATION_REFERENCE_SCHEMA_VERSION
+        ):
             raise ValueError(
                 "PopulationReferenceRecord: unsupported schema_version "
                 f"{self.schema_version!r}; this build only understands "
@@ -249,9 +264,14 @@ class PopulationReferenceSet:
                 f"reference_set_id, got {self.reference_set_id!r} "
                 f"({type(self.reference_set_id).__name__})."
             )
-        if self.reference_set_version < 1:
+        if (
+            not _is_exact_int(self.reference_set_version)
+            or self.reference_set_version < 1
+        ):
             raise ValueError(
-                "PopulationReferenceSet.reference_set_version must be >= 1."
+                "PopulationReferenceSet.reference_set_version must be a "
+                f"positive integer >= 1, got {self.reference_set_version!r} "
+                f"({type(self.reference_set_version).__name__})."
             )
         if len(self.records_fingerprint) != 64:
             raise ValueError(
@@ -277,7 +297,10 @@ class PopulationReferenceSet:
                 f"when approval_status={self.approval_status!r} (only 'approved' "
                 "sets may carry approver metadata)."
             )
-        if self.schema_version != POPULATION_REFERENCE_SCHEMA_VERSION:
+        if (
+            not _is_exact_int(self.schema_version)
+            or self.schema_version != POPULATION_REFERENCE_SCHEMA_VERSION
+        ):
             raise ValueError(
                 "PopulationReferenceSet: unsupported schema_version "
                 f"{self.schema_version!r}; this build only understands "

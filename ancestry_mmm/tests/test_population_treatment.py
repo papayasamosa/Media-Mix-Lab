@@ -347,3 +347,187 @@ class TestPopulationNormalisedPredictorValue:
     def test_invalid_unit_scale_rejected(self):
         with pytest.raises(ValueError):
             population_normalised_predictor_value(100.0, 1000.0, unit_scale=0.0)
+
+
+class TestFromDictCollectionFieldShapeValidation:
+    """Codex P2 (2026-09-14, sixth review pass): `from_dict`'s previous
+    `tuple(raw or ())`/`dict(raw or {})` coercions accepted any iterable,
+    so a plausible scalar string silently became a tuple of its
+    characters (`"UK"` -> `("U", "K")`) instead of being rejected."""
+
+    @pytest.mark.parametrize("bad_shape", ["UK", 42, True, 3.14, {"a": 1}])
+    def test_market_scope_scalar_is_rejected_not_exploded(self, bad_shape):
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": bad_shape,
+                    "owner": "test_owner",
+                }
+            )
+
+    def test_market_scope_valid_list_still_works(self):
+        spec = PopulationTreatmentSpecification.from_dict(
+            {
+                "population_treatment_spec_id": "spec-1",
+                "project_id": "proj-1",
+                "market_scope": ["UK", "AU"],
+                "owner": "test_owner",
+            }
+        )
+        assert spec.market_scope == ("UK", "AU")
+
+    def test_market_scope_none_becomes_empty_tuple(self):
+        spec = PopulationTreatmentSpecification.from_dict(
+            {
+                "population_treatment_spec_id": "spec-1",
+                "project_id": "proj-1",
+                "market_scope": None,
+                "owner": "test_owner",
+            }
+        )
+        assert spec.market_scope == ()
+
+    def test_market_scope_list_with_a_non_string_element_is_rejected(self):
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK", 42],
+                    "owner": "test_owner",
+                }
+            )
+
+    def test_market_scope_list_with_an_empty_string_element_is_rejected(self):
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK", ""],
+                    "owner": "test_owner",
+                }
+            )
+
+    @pytest.mark.parametrize("bad_shape", ["impressions", 42, True, {"a": 1}])
+    def test_eligible_measure_units_scalar_is_rejected_not_exploded(self, bad_shape):
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK"],
+                    "owner": "test_owner",
+                    "predictor_population_treatment": (
+                        PREDICTOR_POPULATION_TREATMENT_SELECTED_ELIGIBLE_PREDICTORS
+                    ),
+                    "eligible_measure_units": bad_shape,
+                }
+            )
+
+    def test_eligible_measure_units_valid_list_still_works(self):
+        spec = PopulationTreatmentSpecification.from_dict(
+            {
+                "population_treatment_spec_id": "spec-1",
+                "project_id": "proj-1",
+                "market_scope": ["UK"],
+                "owner": "test_owner",
+                "predictor_population_treatment": (
+                    PREDICTOR_POPULATION_TREATMENT_SELECTED_ELIGIBLE_PREDICTORS
+                ),
+                "eligible_measure_units": ["impressions", "clicks"],
+            }
+        )
+        assert spec.eligible_measure_units == ("impressions", "clicks")
+
+    @pytest.mark.parametrize("bad_shape", ["UK", 42, True, 3.14])
+    def test_population_reference_map_wrong_scalar_shape_is_rejected(self, bad_shape):
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK"],
+                    "owner": "test_owner",
+                    "population_reference_map": bad_shape,
+                }
+            )
+
+    def test_population_reference_map_list_of_pairs_is_rejected_not_reinterpreted(self):
+        """A list of plausible-looking [market, reference] pairs must not
+        be silently accepted as an alternate mapping encoding -
+        dict(["UK", "AU"]) would otherwise silently produce
+        {"U": "K", "A": "U"}."""
+        with pytest.raises(ValueError):
+            PopulationTreatmentSpecification.from_dict(
+                {
+                    "population_treatment_spec_id": "spec-1",
+                    "project_id": "proj-1",
+                    "market_scope": ["UK"],
+                    "owner": "test_owner",
+                    "population_reference_map": ["UK", "AU"],
+                }
+            )
+
+    def test_population_reference_map_valid_dict_still_works(self):
+        spec = PopulationTreatmentSpecification.from_dict(
+            {
+                "population_treatment_spec_id": "spec-1",
+                "project_id": "proj-1",
+                "market_scope": ["UK"],
+                "owner": "test_owner",
+                "population_reference_map": {"UK": "pop-set-1"},
+            }
+        )
+        assert spec.population_reference_map == {"UK": "pop-set-1"}
+
+    def test_population_reference_map_none_becomes_empty_dict(self):
+        spec = PopulationTreatmentSpecification.from_dict(
+            {
+                "population_treatment_spec_id": "spec-1",
+                "project_id": "proj-1",
+                "market_scope": ["UK"],
+                "owner": "test_owner",
+                "population_reference_map": None,
+            }
+        )
+        assert spec.population_reference_map == {}
+
+
+class TestVersionFieldTypeEnforcement:
+    """Codex P2 (2026-09-14, sixth review pass): Python equality allows
+    `True == 1` and `1.0 == 1`, so `schema_version != 1` alone is
+    insufficient - a bool or float impostor must be rejected explicitly."""
+
+    def test_correct_integer_accepted(self):
+        spec = _spec(specification_version=1)
+        assert spec.specification_version == 1
+
+    @pytest.mark.parametrize(
+        "bad_version", [True, False, 1.0, 1.5, "1", None, [1], {"v": 1}]
+    )
+    def test_non_integer_specification_version_rejected(self, bad_version):
+        with pytest.raises(ValueError):
+            _spec(specification_version=bad_version)
+
+    def test_unsupported_specification_version_zero_rejected(self):
+        with pytest.raises(ValueError):
+            _spec(specification_version=0)
+
+    def test_correct_schema_version_accepted(self):
+        spec = _spec(schema_version=1)
+        assert spec.schema_version == 1
+
+    @pytest.mark.parametrize(
+        "bad_version", [True, False, 1.0, 1.5, "1", None, [1], {"v": 1}]
+    )
+    def test_non_integer_schema_version_rejected(self, bad_version):
+        with pytest.raises(ValueError):
+            _spec(schema_version=bad_version)
+
+    @pytest.mark.parametrize("bad_version", [0, 999])
+    def test_unsupported_integer_schema_version_still_rejected(self, bad_version):
+        with pytest.raises(ValueError):
+            _spec(schema_version=bad_version)

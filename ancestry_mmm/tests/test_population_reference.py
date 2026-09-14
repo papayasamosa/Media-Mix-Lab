@@ -143,6 +143,20 @@ class TestPopulationReferenceRecord:
         with pytest.raises(ValueError):
             _record(schema_version=bad_version)
 
+    @pytest.mark.parametrize("bad_version", [True, False, 1.0])
+    def test_schema_version_type_impostors_rejected(self, bad_version):
+        """Codex P2 (2026-09-14, sixth review pass): `True == 1` and
+        `1.0 == 1` in Python, so equality alone must not be trusted -
+        a bool or float impostor for the correct value must still be
+        rejected."""
+        with pytest.raises(ValueError):
+            _record(schema_version=bad_version)
+
+    def test_correct_integer_schema_version_accepted(self):
+        record = _record(schema_version=1)
+        assert record.schema_version == 1
+        assert type(record.schema_version) is int
+
 
 class TestPopulationReferenceSet:
     def _fingerprint(self, records):
@@ -223,6 +237,47 @@ class TestPopulationReferenceSet:
                 records_fingerprint=self._fingerprint([_record()]),
                 schema_version=bad_version,
             )
+
+    @pytest.mark.parametrize("bad_version", [True, False, 1.0])
+    def test_schema_version_type_impostors_rejected(self, bad_version):
+        with pytest.raises(ValueError):
+            PopulationReferenceSet(
+                reference_set_id="set-1",
+                reference_set_version=1,
+                name="Synthetic set",
+                source_name="synthetic_source",
+                retrieved_at="2026-09-12T00:00:00Z",
+                records_fingerprint=self._fingerprint([_record()]),
+                schema_version=bad_version,
+            )
+
+    @pytest.mark.parametrize(
+        "bad_version", [True, 1.0, 1.5, "1", None, 0, [1], {"v": 1}]
+    )
+    def test_non_integer_reference_set_version_rejected(self, bad_version):
+        """Codex P2 (2026-09-14, sixth review pass): reference_set_version
+        is a positive-integer counter, not a fixed schema constant, but
+        the same bool/float/string-impostor risk applies to it."""
+        with pytest.raises(ValueError):
+            PopulationReferenceSet(
+                reference_set_id="set-1",
+                reference_set_version=bad_version,
+                name="Synthetic set",
+                source_name="synthetic_source",
+                retrieved_at="2026-09-12T00:00:00Z",
+                records_fingerprint=self._fingerprint([_record()]),
+            )
+
+    def test_correct_integer_reference_set_version_accepted(self):
+        reference_set = PopulationReferenceSet(
+            reference_set_id="set-1",
+            reference_set_version=2,
+            name="Synthetic set",
+            source_name="synthetic_source",
+            retrieved_at="2026-09-12T00:00:00Z",
+            records_fingerprint=self._fingerprint([_record()]),
+        )
+        assert reference_set.reference_set_version == 2
 
     def test_approved_requires_approver(self):
         with pytest.raises(ValueError):

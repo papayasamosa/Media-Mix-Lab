@@ -1988,6 +1988,30 @@ def test_resolve_imported_population_reference_records_quarantines_unsupported_s
     assert "malformed" in warnings[0]
 
 
+@pytest.mark.parametrize("bad_version", [True, 1.0])
+def test_resolve_imported_population_reference_records_quarantines_schema_version_type_impostor(
+    bad_version,
+):
+    """Codex P2 (2026-09-14, sixth review pass): a bool/float impostor
+    for schema_version=1 must quarantine exactly like an out-of-range
+    integer version does."""
+    imported = {
+        "population_reference_records": [
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-impostor", schema_version=bad_version
+            ),
+            _valid_population_reference_record_dict(
+                population_reference_id="pop-good", schema_version=1
+            ),
+        ]
+    }
+    records, warnings = resolve_imported_population_reference_records(imported)
+    assert len(records) == 1
+    assert records[0]["population_reference_id"] == "pop-good"
+    assert len(warnings) == 1
+    assert "pop-impostor" in warnings[0]
+
+
 def _valid_population_reference_set_dict(**overrides) -> dict:
     import hashlib
 
@@ -2064,6 +2088,39 @@ def test_resolve_imported_population_reference_set_quarantines_unsupported_schem
     imported = {
         "population_reference_set": _valid_population_reference_set_dict(
             schema_version=999
+        )
+    }
+    resolved, warnings = resolve_imported_population_reference_set(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "pop-set-2026" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_version", [True, 1.0])
+def test_resolve_imported_population_reference_set_quarantines_schema_version_type_impostor(
+    bad_version,
+):
+    imported = {
+        "population_reference_set": _valid_population_reference_set_dict(
+            schema_version=bad_version
+        )
+    }
+    resolved, warnings = resolve_imported_population_reference_set(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "pop-set-2026" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_version", [True, 1.0, 1.5])
+def test_resolve_imported_population_reference_set_quarantines_reference_set_version_type_impostor(
+    bad_version,
+):
+    """Codex P2 (2026-09-14, sixth review pass): reference_set_version
+    must be a genuine positive integer - a bool/float impostor must
+    quarantine the set, not be silently accepted."""
+    imported = {
+        "population_reference_set": _valid_population_reference_set_dict(
+            reference_set_version=bad_version
         )
     }
     resolved, warnings = resolve_imported_population_reference_set(imported)
@@ -2508,6 +2565,57 @@ def test_resolve_imported_population_treatment_specification_quarantines_unsuppo
     imported = {
         "population_treatment_specification": _valid_population_treatment_specification_dict(
             schema_version=999
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "spec-1" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_version", [True, 1.0])
+def test_resolve_imported_population_treatment_specification_quarantines_schema_version_type_impostor(
+    bad_version,
+):
+    """Codex P2 (2026-09-14, sixth review pass): mirrors the record-level
+    schema-version-impostor test for the treatment-specification object."""
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            schema_version=bad_version
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "spec-1" in warnings[0]
+
+
+@pytest.mark.parametrize("bad_market_scope", ["UK", 42, {"a": 1}])
+def test_resolve_imported_population_treatment_specification_quarantines_scalar_market_scope(
+    bad_market_scope,
+):
+    """Codex P2 (2026-09-14, sixth review pass): an imported
+    market_scope scalar (e.g. the string "UK") must quarantine the whole
+    specification rather than being silently exploded into a
+    per-character tuple and re-exported as valid governed state."""
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            market_scope=bad_market_scope
+        )
+    }
+    resolved, warnings = resolve_imported_population_treatment_specification(imported)
+    assert resolved is None
+    assert len(warnings) == 1
+    assert "spec-1" in warnings[0]
+
+
+def test_resolve_imported_population_treatment_specification_quarantines_list_of_pairs_reference_map():
+    """Codex P2 (2026-09-14, sixth review pass): a population_reference_map
+    encoded as a list of [market, reference] pairs must not be silently
+    reinterpreted as a mapping via dict(list_of_pairs)."""
+    imported = {
+        "population_treatment_specification": _valid_population_treatment_specification_dict(
+            population_reference_map=["UK", "AU"]
         )
     }
     resolved, warnings = resolve_imported_population_treatment_specification(imported)

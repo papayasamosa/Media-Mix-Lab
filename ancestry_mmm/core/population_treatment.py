@@ -125,6 +125,17 @@ _PROTECTED_UNIT_ALIASES = {
 
 APPROVAL_STATUSES = ("pending", "approved", "rejected")
 
+
+def _is_exact_int(value: Any) -> bool:
+    """`True` only for a genuine `int` - never a `bool` (a subclass of
+    `int` in Python, so `isinstance(True, int)` and `True == 1` are both
+    `True`) and never a `float`/other type that merely compares equal to
+    an integer. Mirrors `core.population_reference._is_exact_int`
+    (duplicated rather than imported, matching this module's existing
+    preference for self-contained helpers)."""
+    return type(value) is int
+
+
 # Codex P2 (2026-09-13, second pass): the repository already defines a
 # governed index unit with a numeric range suffix -
 # `core.seo_visibility.SEO_POSITIONAL_VISIBILITY_METRIC.unit ==
@@ -168,6 +179,63 @@ def is_predictor_unit_protected(unit: str) -> bool:
     if canonical is not None and canonical in PROTECTED_UNIT_CANONICAL_FORMS:
         return True
     return bool(_INDEX_RANGE_FAMILY_PATTERN.match(canonical_label))
+
+
+def _coerce_string_tuple_field(payload: dict, key: str) -> None:
+    """Validate and coerce a persisted collection-of-strings field (e.g.
+    `market_scope`, `eligible_measure_units`) in place within `payload`.
+
+    Absent key: untouched (the dataclass field default applies). `None`:
+    becomes `()`. A JSON array of non-empty strings: becomes that tuple,
+    unchanged in content. Anything else - a scalar string, number, bool,
+    mapping, or a list containing a non-string/empty-string element -
+    raises `ValueError` rather than being silently coerced (never
+    `tuple(raw)` directly, which would explode a string into individual
+    characters) or wrapped into a one-element collection."""
+    if key not in payload:
+        return
+    raw = payload[key]
+    if raw is None:
+        payload[key] = ()
+        return
+    if isinstance(raw, str) or not isinstance(raw, (list, tuple)):
+        raise ValueError(
+            f"PopulationTreatmentSpecification.{key} must be a list of "
+            f"non-empty strings, got {raw!r} ({type(raw).__name__})."
+        )
+    if not all(isinstance(item, str) and item for item in raw):
+        raise ValueError(
+            f"PopulationTreatmentSpecification.{key} must contain only "
+            f"non-empty strings, got {raw!r}."
+        )
+    payload[key] = tuple(raw)
+
+
+def _coerce_mapping_field(payload: dict, key: str) -> None:
+    """Validate and coerce a persisted mapping field (`population_
+    reference_map`) in place within `payload`.
+
+    Absent key: untouched. `None`: becomes `{}`. A JSON object (Python
+    `Mapping`): becomes a plain `dict` copy of it. Anything else - a list
+    (even a list of `[key, value]` pairs, which `dict()` would otherwise
+    silently accept), a scalar string, number, or bool - raises
+    `ValueError`. A mapping field's only valid JSON encoding is a JSON
+    object; a list is a shape mismatch, never an alternate encoding to
+    accept (`dict(["UK", "AU"])` would otherwise silently produce
+    `{"U": "K", "A": "U"}` - each two-character string unpacked as one
+    key-value pair)."""
+    if key not in payload:
+        return
+    raw = payload[key]
+    if raw is None:
+        payload[key] = {}
+        return
+    if not isinstance(raw, Mapping):
+        raise ValueError(
+            f"PopulationTreatmentSpecification.{key} must be a mapping, "
+            f"got {raw!r} ({type(raw).__name__})."
+        )
+    payload[key] = dict(raw)
 
 
 @dataclass(frozen=True)
@@ -246,9 +314,14 @@ class PopulationTreatmentSpecification:
                 f"protected (already-normalised) units {protected_requested} - these "
                 "must never be automatically population-divided."
             )
-        if self.specification_version < 1:
+        if (
+            not _is_exact_int(self.specification_version)
+            or self.specification_version < 1
+        ):
             raise ValueError(
-                "PopulationTreatmentSpecification.specification_version must be >= 1."
+                "PopulationTreatmentSpecification.specification_version must be a "
+                f"positive integer >= 1, got {self.specification_version!r} "
+                f"({type(self.specification_version).__name__})."
             )
         if self.approval_status not in APPROVAL_STATUSES:
             raise ValueError(
@@ -270,7 +343,10 @@ class PopulationTreatmentSpecification:
                 f"be set when approval_status={self.approval_status!r} (only "
                 "'approved' specifications may carry approver metadata)."
             )
-        if self.schema_version != POPULATION_TREATMENT_SCHEMA_VERSION:
+        if (
+            not _is_exact_int(self.schema_version)
+            or self.schema_version != POPULATION_TREATMENT_SCHEMA_VERSION
+        ):
             raise ValueError(
                 "PopulationTreatmentSpecification: unsupported schema_version "
                 f"{self.schema_version!r}; this build only understands "
@@ -296,17 +372,23 @@ class PopulationTreatmentSpecification:
 
     @classmethod
     def from_dict(cls, values: Mapping[str, Any]) -> "PopulationTreatmentSpecification":
+        """Codex P2 (2026-09-14, sixth review pass): the previous
+        `tuple(payload[key] or ())`/`dict(payload[key] or {})` coercions
+        each accepted *any* iterable, including a plausible-looking scalar
+        string - `tuple("UK")` silently produces `("U", "K")`, and
+        `dict(["UK", "AU"])` silently produces `{"U": "K", "A": "U"}`
+        (each two-character string element unpacks as one key-value
+        pair). Both are malformed governed state entering "valid" project
+        state without any error. `_coerce_string_tuple_field`/`_coerce_
+        mapping_field` below validate the actual persisted shape first -
+        a JSON array for the tuple fields, a JSON object for the mapping
+        field - and raise (quarantining the whole specification via the
+        existing import-quarantine mechanism) for anything else, rather
+        than silently wrapping or reinterpreting a wrong-shaped value."""
         payload = dict(values)
-        if "market_scope" in payload:
-            payload["market_scope"] = tuple(payload["market_scope"] or ())
-        if "eligible_measure_units" in payload:
-            payload["eligible_measure_units"] = tuple(
-                payload["eligible_measure_units"] or ()
-            )
-        if "population_reference_map" in payload:
-            payload["population_reference_map"] = dict(
-                payload["population_reference_map"] or {}
-            )
+        _coerce_string_tuple_field(payload, "market_scope")
+        _coerce_string_tuple_field(payload, "eligible_measure_units")
+        _coerce_mapping_field(payload, "population_reference_map")
         known = set(cls.__dataclass_fields__)
         return cls(**cast(Any, {k: v for k, v in payload.items() if k in known}))
 

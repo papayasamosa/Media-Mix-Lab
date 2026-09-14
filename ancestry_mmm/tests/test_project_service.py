@@ -717,6 +717,64 @@ class TestProjectExportInputPopulationArtefacts:
         assert import_result.project_state["population_reference_records"] == []
         assert any("is not a list" in warning for warning in import_result.warnings)
 
+    def test_import_bundle_quarantines_schema_version_type_impostor_record(
+        self, tmp_path, governed_project
+    ):
+        """Codex P2 (2026-09-14, sixth review pass): a record whose
+        schema_version is a bool/float impostor (True == 1, 1.0 == 1)
+        must be quarantined by the real application import path, never
+        silently accepted as a valid schema_version=1 record."""
+        governed_project = dict(governed_project)
+        governed_project["population_reference_records"] = [
+            self._population_reference_record_dict(
+                population_reference_id="pop-bad-schema", schema_version=True
+            ),
+            self._population_reference_record_dict(population_reference_id="pop-good"),
+        ]
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        assert len(import_result.project_state["population_reference_records"]) == 1
+        assert (
+            import_result.project_state["population_reference_records"][0][
+                "population_reference_id"
+            ]
+            == "pop-good"
+        )
+        assert any("pop-bad-schema" in warning for warning in import_result.warnings)
+
+    def test_import_bundle_quarantines_scalar_market_scope_treatment_specification(
+        self, tmp_path, governed_project
+    ):
+        """Codex P2 (2026-09-14, sixth review pass): a
+        population_treatment_specification whose market_scope is a bare
+        scalar string (e.g. "UK") must be quarantined by the real
+        application import path, never silently exploded into a tuple of
+        individual characters ("U", "K")."""
+        governed_project = dict(governed_project)
+        governed_project["population_treatment_specification"] = (
+            self._population_treatment_specification_dict(market_scope="UK")
+        )
+        exp_input = ProjectExportInput(
+            output_path=str(tmp_path / "bundle.zip"), **governed_project
+        )
+        export_result = ProjectService().export(exp_input)
+        assert export_result.success, export_result.errors
+
+        import_result = ProjectService().import_bundle(
+            ProjectImportInput(bundle_path=export_result.actual_export_path)
+        )
+        assert import_result.success, import_result.errors
+        assert import_result.project_state["population_treatment_specification"] is None
+        assert any("spec-1" in warning for warning in import_result.warnings)
+
     def test_import_bundle_quarantines_non_string_market_id_instead_of_crashing(
         self, tmp_path, governed_project
     ):
