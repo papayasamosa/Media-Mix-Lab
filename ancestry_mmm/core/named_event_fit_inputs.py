@@ -225,7 +225,9 @@ def named_event_classification_fingerprint(
     `fingerprint_model_spec` exactly like `named_event_fit_fingerprint`
     (falsy is omitted from the payload, never invalidating an approval
     that consumed no named event)."""
-    pairs = fit_inputs.consumed_family_classifications() if fit_inputs is not None else ()
+    pairs = (
+        fit_inputs.consumed_family_classifications() if fit_inputs is not None else ()
+    )
     payload = {"family_classifications": [list(pair) for pair in pairs]}
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -248,7 +250,9 @@ def named_event_fingerprint_components(
     applies to both fields."""
     if fit_inputs is None:
         return None, None
-    return fit_inputs.fingerprint(), (named_event_classification_fingerprint(fit_inputs) or None)
+    return fit_inputs.fingerprint(), (
+        named_event_classification_fingerprint(fit_inputs) or None
+    )
 
 
 def current_named_event_identity_fingerprints(
@@ -376,9 +380,7 @@ def _weekly_period_bounds(
         step = period_starts[1] - period_starts[0]
     else:
         step = pd.Timedelta(days=7)
-    next_starts = period_starts[1:].append(
-        pd.DatetimeIndex([period_starts[-1] + step])
-    )
+    next_starts = period_starts[1:].append(pd.DatetimeIndex([period_starts[-1] + step]))
     period_ends = next_starts - pd.Timedelta(days=1)
     return period_starts, period_ends
 

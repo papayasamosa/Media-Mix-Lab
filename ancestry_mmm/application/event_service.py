@@ -395,13 +395,17 @@ class BulkAdoptionOutcome:
 
 
 def _normalised_type_label(event_type: Any) -> str:
-    canonical = normalise_event_type(event_type if isinstance(event_type, str) else None)
+    canonical = normalise_event_type(
+        event_type if isinstance(event_type, str) else None
+    )
     if canonical is not None:
         return canonical
     return str(event_type).strip().lower() if isinstance(event_type, str) else ""
 
 
-def _conflicting_batch_families(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Tuple[str, ...]]:
+def _conflicting_batch_families(
+    rows: Sequence[Mapping[str, Any]],
+) -> Dict[str, Tuple[str, ...]]:
     """`event_family_id` values for which this batch itself supplies more
     than one distinct `event_type` label (after alias/case normalisation)
     - implementation brief section 5.1: "if source rows for the same
@@ -523,7 +527,9 @@ def bulk_adopt_preferred_event_rows(
                 # disclosed, decision-required statistical-method gap -
                 # not merely "unsupported event_type". See `docs/
                 # named_event_promotional_window_decision_package.md`.
-                classification_status = CLASSIFICATION_STATUS_PROMOTIONAL_WINDOW_UNRESOLVED
+                classification_status = (
+                    CLASSIFICATION_STATUS_PROMOTIONAL_WINDOW_UNRESOLVED
+                )
             else:
                 classification_status = CLASSIFICATION_STATUS_RESPONSE_POLICY_REQUIRED
             family_record = new_family(
@@ -565,7 +571,9 @@ def bulk_adopt_preferred_event_rows(
                     "family_id": family_id,
                 },
             )
-            current_occurrences = list(register_occurrence(current_occurrences, occurrence))
+            current_occurrences = list(
+                register_occurrence(current_occurrences, occurrence)
+            )
         except ValueError as exc:
             results.append(
                 RowAdoptionResult(

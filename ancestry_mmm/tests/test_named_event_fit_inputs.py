@@ -360,7 +360,9 @@ class TestConsumedFamilyClassificationsAndFingerprint:
     def test_two_families_are_both_reported_sorted_by_family_id(self):
         frame = _frame(["UK"], 30, start="2026-01-01")
         fathers_day_family = _family(
-            family_id="fathers_day", display_name="Father's Day", classification="gifting"
+            family_id="fathers_day",
+            display_name="Father's Day",
+            classification="gifting",
         )
         fathers_day_occurrence = _occurrence(
             event_id="fd-2026",
@@ -426,7 +428,10 @@ class TestFamiliesExcludedFromFitting:
     def test_family_with_no_response_definition_is_excluded(self):
         frame = _frame(["UK"], 20, start="2026-01-01")
         result = families_excluded_from_fitting(
-            frame, families=[_family()], occurrences=[_occurrence()], response_definitions=[]
+            frame,
+            families=[_family()],
+            occurrences=[_occurrence()],
+            response_definitions=[],
         )
         assert result == ("mothers_day",)
 
@@ -474,9 +479,13 @@ class TestWeeksOverlappingEventInterval:
         # Brief's own example: model week starts 2025-03-24 (Monday);
         # Mother's Day UK falls on 2025-03-30 (Sunday), inside that week.
         period_starts = self._monday_weeks("2025-03-24", 3)  # 03-24, 03-31, 04-07
-        _, period_ends = period_starts, period_starts[1:].append(
-            pd.DatetimeIndex([period_starts[-1] + pd.Timedelta(days=7)])
-        ) - pd.Timedelta(days=1)
+        _, period_ends = (
+            period_starts,
+            period_starts[1:].append(
+                pd.DatetimeIndex([period_starts[-1] + pd.Timedelta(days=7)])
+            )
+            - pd.Timedelta(days=1),
+        )
         occ = pd.Timestamp("2025-03-30")
         overlapping = weeks_overlapping_event_interval(
             period_starts, period_ends, occ, occ

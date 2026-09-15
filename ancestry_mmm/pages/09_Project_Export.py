@@ -89,7 +89,9 @@ from ancestry_mmm.core.named_events import (
     NamedEventFamily,
     NamedEventOccurrence,
 )
-from ancestry_mmm.core.named_event_fit_inputs import current_named_event_identity_fingerprints
+from ancestry_mmm.core.named_event_fit_inputs import (
+    current_named_event_identity_fingerprints,
+)
 from ancestry_mmm.application.project_service import verify_imported_readiness
 from ancestry_mmm.application.diagnostics_service import DiagnosticsArtefact
 from ancestry_mmm.application.curve_service import CurveService, CurveGovernanceError

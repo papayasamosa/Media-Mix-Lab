@@ -60,7 +60,9 @@ from ancestry_mmm.core.media_costs import (
     MonetarySpendSupport,
 )
 from ancestry_mmm.core.model_identity import ModelIdentity
-from ancestry_mmm.core.named_event_fit_inputs import current_named_event_identity_fingerprints
+from ancestry_mmm.core.named_event_fit_inputs import (
+    current_named_event_identity_fingerprints,
+)
 from ancestry_mmm.core.named_events import (
     EventResponseDefinition,
     NamedEventFamily,
@@ -269,7 +271,9 @@ def build_fitted_model(
     search_objects: Optional[Sequence[SearchObjectDefinition]] = None,
     named_event_families: Optional[Sequence[NamedEventFamily]] = None,
     named_event_occurrences: Optional[Sequence[NamedEventOccurrence]] = None,
-    named_event_response_definitions: Optional[Sequence[EventResponseDefinition]] = None,
+    named_event_response_definitions: Optional[
+        Sequence[EventResponseDefinition]
+    ] = None,
 ) -> FittedModel:
     """Deterministically build a complete, internally-consistent fitted
     model: transformed frame, model spec, structurally-valid trace, derived
@@ -379,7 +383,9 @@ def recompute_model_spec_fingerprint(
     search_objects: Optional[Sequence[SearchObjectDefinition]] = None,
     named_event_families: Optional[Sequence[NamedEventFamily]] = None,
     named_event_occurrences: Optional[Sequence[NamedEventOccurrence]] = None,
-    named_event_response_definitions: Optional[Sequence[EventResponseDefinition]] = None,
+    named_event_response_definitions: Optional[
+        Sequence[EventResponseDefinition]
+    ] = None,
 ) -> str:
     """Recompute `model_spec_fingerprint` exactly the way `build_fitted_model`
     did, but against a possibly-edited `search_objects` catalogue and/or
@@ -751,7 +757,9 @@ def build_lifecycle_project(
     search_objects: Optional[Sequence[SearchObjectDefinition]] = None,
     named_event_families: Optional[Sequence[NamedEventFamily]] = None,
     named_event_occurrences: Optional[Sequence[NamedEventOccurrence]] = None,
-    named_event_response_definitions: Optional[Sequence[EventResponseDefinition]] = None,
+    named_event_response_definitions: Optional[
+        Sequence[EventResponseDefinition]
+    ] = None,
 ) -> LifecycleProject:
     """The one builder that assembles the complete, deterministic,
     already-fitted synthetic project: fitted model, policy-backed model

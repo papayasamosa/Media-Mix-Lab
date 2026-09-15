@@ -68,7 +68,9 @@ from ancestry_mmm.core.fingerprint import (
     fingerprint_posterior,
 )
 from ancestry_mmm.core.causal_graph import current_structural_fingerprint_for_identity
-from ancestry_mmm.core.named_event_fit_inputs import current_named_event_identity_fingerprints
+from ancestry_mmm.core.named_event_fit_inputs import (
+    current_named_event_identity_fingerprints,
+)
 from ancestry_mmm.core.named_events import (
     EventResponseDefinition,
     NamedEventFamily,

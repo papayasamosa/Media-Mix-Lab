@@ -33,8 +33,13 @@ from dataclasses import asdict
 import numpy as np
 import pymc as pm
 
-from ancestry_mmm.core.hierarchical_model import FHModelMeta, build_fh_hierarchical_model
-from ancestry_mmm.core.named_event_diagnostics import build_fitted_named_event_diagnostics
+from ancestry_mmm.core.hierarchical_model import (
+    FHModelMeta,
+    build_fh_hierarchical_model,
+)
+from ancestry_mmm.core.named_event_diagnostics import (
+    build_fitted_named_event_diagnostics,
+)
 from ancestry_mmm.core.named_event_fit_inputs import build_named_event_fit_inputs
 from ancestry_mmm.core.named_event_response import NAMED_EVENT_RESPONSE_STRUCTURE
 from ancestry_mmm.core.named_events import (
@@ -208,7 +213,10 @@ class TestSuppliedFitInputsWireIntoTheRealModel:
         restored = FHModelMeta(**exported)
 
         assert restored.named_event_fit_fingerprint == meta.named_event_fit_fingerprint
-        assert restored.named_event_fit_block_provenance == meta.named_event_fit_block_provenance
+        assert (
+            restored.named_event_fit_block_provenance
+            == meta.named_event_fit_block_provenance
+        )
         assert [tuple(pair) for pair in restored.named_event_fit_blocks] == [
             tuple(pair) for pair in meta.named_event_fit_blocks
         ]

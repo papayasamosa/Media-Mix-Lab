@@ -322,8 +322,16 @@ class TestBulkAdoptPreferredEventRows:
 
     def test_repeated_yearly_occurrences_share_one_family_and_definition(self):
         rows = [
-            _preferred_row(event_id="mothers_day_2024_uk", start_date="2024-03-10", end_date="2024-03-10"),
-            _preferred_row(event_id="mothers_day_2025_uk", start_date="2025-03-30", end_date="2025-03-30"),
+            _preferred_row(
+                event_id="mothers_day_2024_uk",
+                start_date="2024-03-10",
+                end_date="2024-03-10",
+            ),
+            _preferred_row(
+                event_id="mothers_day_2025_uk",
+                start_date="2025-03-30",
+                end_date="2025-03-30",
+            ),
         ]
         outcome = self._adopt(rows)
         assert outcome.adopted_count == 2
@@ -385,9 +393,14 @@ class TestBulkAdoptPreferredEventRows:
         assert outcome.response_definitions == ()
         family = outcome.families[0]
         assert family.classification == "seasonal_pop_up"
-        assert family.classification_status == CLASSIFICATION_STATUS_RESPONSE_POLICY_REQUIRED
+        assert (
+            family.classification_status
+            == CLASSIFICATION_STATUS_RESPONSE_POLICY_REQUIRED
+        )
 
-    def test_promotion_event_type_creates_family_but_no_automatic_response_definition(self):
+    def test_promotion_event_type_creates_family_but_no_automatic_response_definition(
+        self,
+    ):
         row = _preferred_row(
             event_id="black_friday_2025_uk",
             event_name="Black Friday",
@@ -400,8 +413,12 @@ class TestBulkAdoptPreferredEventRows:
         assert outcome.adopted_count == 1
         family = outcome.families[0]
         assert family.family_id == "black_friday"
-        assert family.classification == "promotional"  # real classification, not raw literal
-        assert outcome.response_definitions == ()  # no auto policy - see brief section 9
+        assert (
+            family.classification == "promotional"
+        )  # real classification, not raw literal
+        assert (
+            outcome.response_definitions == ()
+        )  # no auto policy - see brief section 9
         assert outcome.results[0].response_policy_required is True
         # Distinct, specific status - not the generic "unsupported type"
         # status - so the UI can state the disclosed, decision-required
@@ -410,7 +427,10 @@ class TestBulkAdoptPreferredEventRows:
             family.classification_status
             == CLASSIFICATION_STATUS_PROMOTIONAL_WINDOW_UNRESOLVED
         )
-        assert family.classification_status != CLASSIFICATION_STATUS_RESPONSE_POLICY_REQUIRED
+        assert (
+            family.classification_status
+            != CLASSIFICATION_STATUS_RESPONSE_POLICY_REQUIRED
+        )
 
     def test_promotional_alias_also_gets_the_specific_status(self):
         row = _preferred_row(
@@ -424,7 +444,10 @@ class TestBulkAdoptPreferredEventRows:
         )
 
     def test_missing_required_field_blocks_only_that_row(self):
-        rows = [_preferred_row(event_id="good"), _preferred_row(event_id="bad", market="")]
+        rows = [
+            _preferred_row(event_id="good"),
+            _preferred_row(event_id="bad", market=""),
+        ]
         outcome = self._adopt(rows)
         assert outcome.adopted_count == 1
         bad_result = next(r for r in outcome.results if r.event_id == "bad")
@@ -445,7 +468,9 @@ class TestBulkAdoptPreferredEventRows:
         assert "some_unrelated_upstream_column" not in outcome.families[0].to_dict()
 
     def test_factual_dates_and_market_survive_verbatim(self):
-        row = _preferred_row(start_date="2025-11-28", end_date="2025-12-01", market="UK")
+        row = _preferred_row(
+            start_date="2025-11-28", end_date="2025-12-01", market="UK"
+        )
         outcome = self._adopt([row])
         occurrence = outcome.occurrences[0]
         assert occurrence.start_date == "2025-11-28"

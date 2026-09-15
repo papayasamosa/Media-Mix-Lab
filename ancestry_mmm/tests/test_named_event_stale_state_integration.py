@@ -143,7 +143,9 @@ class TestOccurrenceDateChangeStales:
     event_drift` also reports, proved here through the official chain)."""
 
     def _edited_occurrence(self) -> NamedEventOccurrence:
-        return _occurrence(event_version=2, start_date="2024-02-18", end_date="2024-02-18")
+        return _occurrence(
+            event_version=2, start_date="2024-02-18", end_date="2024-02-18"
+        )
 
     def test_model_identity_fingerprint_changes(self):
         families, occurrences, definitions = _fitted_registry()
@@ -317,9 +319,7 @@ class TestResponseDefinitionVersionChangeStales:
             named_event_occurrences=occurrences,
             named_event_response_definitions=definitions,
         )
-        widened_definition = replace(
-            _definition(version=2), max_lead=6
-        )
+        widened_definition = replace(_definition(version=2), max_lead=6)
         recomputed_fp = recompute_model_spec_fingerprint(
             project.fitted,
             named_event_families=families,
@@ -365,7 +365,9 @@ class TestNoNamedEventsBehavesExactlyAsBefore:
     def test_fingerprint_matches_the_plain_baseline_build(self):
         baseline = build_fitted_model()
         with_no_named_events = build_fitted_model(
-            named_event_families=[], named_event_occurrences=[], named_event_response_definitions=[]
+            named_event_families=[],
+            named_event_occurrences=[],
+            named_event_response_definitions=[],
         )
         assert (
             with_no_named_events.model_spec_fingerprint

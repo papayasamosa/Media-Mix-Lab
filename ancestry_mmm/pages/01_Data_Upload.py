@@ -1550,9 +1550,7 @@ if sources:
                     if _canonical_type in ("gifting", "remembrance"):
                         _response_status = "yes - fitted automatically"
                     elif _canonical_type == EVENT_TYPE_PROMOTION:
-                        _response_status = (
-                            "no - response mechanism unresolved (governed metadata only)"
-                        )
+                        _response_status = "no - response mechanism unresolved (governed metadata only)"
                     else:
                         _response_status = "no - unrecognised event_type"
                     _review_records.append(
@@ -1568,7 +1566,9 @@ if sources:
                 st.dataframe(
                     pd.DataFrame(_review_records),
                     width="stretch",
-                    column_config=dataframe_column_config(pd.DataFrame(_review_records)),
+                    column_config=dataframe_column_config(
+                        pd.DataFrame(_review_records)
+                    ),
                 )
                 if st.button("Bulk adopt valid rows", key="ne_bulk_adopt_button"):
                     _outcome = bulk_adopt_preferred_event_rows(

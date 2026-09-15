@@ -147,9 +147,15 @@ def _response_policy_for(
             return RESPONSE_POLICY_OPTED_IN
         return RESPONSE_POLICY_REGISTERED_NOT_OPTED_IN
     if family is not None:
-        if family.classification_status == CLASSIFICATION_STATUS_PROMOTIONAL_WINDOW_UNRESOLVED:
+        if (
+            family.classification_status
+            == CLASSIFICATION_STATUS_PROMOTIONAL_WINDOW_UNRESOLVED
+        ):
             return RESPONSE_POLICY_PROMOTIONAL_WINDOW_UNRESOLVED
-        if family.classification_status == CLASSIFICATION_STATUS_RESPONSE_POLICY_REQUIRED:
+        if (
+            family.classification_status
+            == CLASSIFICATION_STATUS_RESPONSE_POLICY_REQUIRED
+        ):
             return RESPONSE_POLICY_RESPONSE_POLICY_REQUIRED
     return RESPONSE_POLICY_NONE_REGISTERED
 
@@ -172,8 +178,12 @@ def build_named_event_diagnostics(
     }
     current_occs = current_occurrence_versions(occurrences)
     defs_by_family: Dict[str, List[EventResponseDefinition]] = {}
-    for definition in current_response_definition_versions(response_definitions):
-        defs_by_family.setdefault(definition.family_id, []).append(definition)
+    for current_definition in current_response_definition_versions(
+        response_definitions
+    ):
+        defs_by_family.setdefault(current_definition.family_id, []).append(
+            current_definition
+        )
 
     occs_by_key: Dict[Tuple[str, str], List[NamedEventOccurrence]] = {}
     for occ in current_occs:
@@ -223,9 +233,7 @@ def build_named_event_diagnostics(
         if block is not None:
             fit_status = FIT_STATUS_INCLUDED_IN_FIT
             exclusion_reason = ""
-            fitted_support_weeks = int(
-                np.any(block.design != 0.0, axis=1).sum()
-            )
+            fitted_support_weeks = int(np.any(block.design != 0.0, axis=1).sum())
         elif model_periods_affected == 0:
             fit_status = FIT_STATUS_OUTSIDE_MODEL_WINDOW
             if market not in frame_markets:
@@ -247,8 +255,7 @@ def build_named_event_diagnostics(
         elif response_policy == RESPONSE_POLICY_RESPONSE_POLICY_REQUIRED:
             fit_status = FIT_STATUS_RESPONSE_POLICY_REQUIRED
             exclusion_reason = (
-                "event_type has no automatic response policy and none is "
-                "registered"
+                "event_type has no automatic response policy and none is registered"
             )
         elif response_policy == RESPONSE_POLICY_NONE_REGISTERED:
             fit_status = FIT_STATUS_REGISTERED_NOT_FITTED
@@ -272,15 +279,23 @@ def build_named_event_diagnostics(
         rows.append(
             NamedEventDiagnosticRow(
                 event_family_id=family_id,
-                event_type=(family.classification if family is not None else "(unregistered family)"),
+                event_type=(
+                    family.classification
+                    if family is not None
+                    else "(unregistered family)"
+                ),
                 market=market,
                 occurrence_count=len(family_occs),
                 first_occurrence=min(starts).date().isoformat(),
                 last_occurrence=max(ends).date().isoformat(),
                 model_periods_affected=model_periods_affected,
                 response_policy=response_policy,
-                temporal_treatment=(definition.treatment if definition is not None else None),
-                max_lead_weeks=(definition.max_lead if definition is not None else None),
+                temporal_treatment=(
+                    definition.treatment if definition is not None else None
+                ),
+                max_lead_weeks=(
+                    definition.max_lead if definition is not None else None
+                ),
                 max_lag_weeks=(definition.max_lag if definition is not None else None),
                 fit_status=fit_status,
                 exclusion_reason=exclusion_reason,
@@ -334,7 +349,9 @@ class FittedNamedEventDiagnosticRow:
         }
 
 
-def build_fitted_named_event_diagnostics(meta: Any) -> Tuple[FittedNamedEventDiagnosticRow, ...]:
+def build_fitted_named_event_diagnostics(
+    meta: Any,
+) -> Tuple[FittedNamedEventDiagnosticRow, ...]:
     """The "This fitted model" view: a pure function of `meta` alone.
 
     Never reads the current governed registry and never reads a frame -
@@ -383,7 +400,9 @@ def build_fitted_named_event_diagnostics(meta: Any) -> Tuple[FittedNamedEventDia
                     event_family_id=key[0],
                     market=key[1],
                     response_definition_id=detail.get("response_definition_id"),
-                    response_definition_version=detail.get("response_definition_version"),
+                    response_definition_version=detail.get(
+                        "response_definition_version"
+                    ),
                     classification=(detail.get("classification") or None),
                     response_policy=RESPONSE_POLICY_OPTED_IN,
                     fit_status=FIT_STATUS_INCLUDED_IN_FIT,
@@ -464,11 +483,14 @@ def assess_named_event_drift(
     """
     fit_time_fingerprint = getattr(meta, "named_event_fit_fingerprint", "") or ""
     fit_time_blocks = {
-        (str(f), str(m)) for f, m in (getattr(meta, "named_event_fit_blocks", None) or ())
+        (str(f), str(m))
+        for f, m in (getattr(meta, "named_event_fit_blocks", None) or ())
     }
     fit_time_definitions = {
         tuple(pair)
-        for pair in (getattr(meta, "named_event_response_definitions_at_fit", None) or ())
+        for pair in (
+            getattr(meta, "named_event_response_definitions_at_fit", None) or ()
+        )
     }
     fit_time_classification_by_family: Dict[str, str] = {
         str(item.get("family_id")): str(item.get("classification") or "")
@@ -553,7 +575,8 @@ def assess_named_event_drift(
     )
     if changed_classifications:
         reasons.append(
-            "classification/event type changed for: " + ", ".join(changed_classifications)
+            "classification/event type changed for: "
+            + ", ".join(changed_classifications)
         )
     if not reasons and fingerprint_differs:
         # Same block set, same consumed-definition set, same classification
@@ -567,8 +590,7 @@ def assess_named_event_drift(
         # identity/dates, which does not exist; report the honest
         # boundary of what can be proven, never a more specific claim.
         reasons.append(
-            "event occurrence set or timing changed for an already-fitted "
-            "family"
+            "event occurrence set or timing changed for an already-fitted family"
         )
     if not reasons:
         # Neither the fingerprint (design/consumed-definitions) nor

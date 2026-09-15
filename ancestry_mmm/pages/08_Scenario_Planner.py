@@ -172,7 +172,9 @@ from ancestry_mmm.core.named_events import (
     NamedEventFamily,
     NamedEventOccurrence,
 )
-from ancestry_mmm.core.named_event_fit_inputs import current_named_event_identity_fingerprints
+from ancestry_mmm.core.named_event_fit_inputs import (
+    current_named_event_identity_fingerprints,
+)
 from ancestry_mmm.core.planning.terminal_response import (
     build_zero_decision_terminal_extension_plan,
 )

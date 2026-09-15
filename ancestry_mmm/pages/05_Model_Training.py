@@ -341,7 +341,9 @@ with SectionCard(
         }
         _ne_excluded_labels = []
         for _fam_id in _ne_excluded_families:
-            _status = (_ne_excluded_by_id.get(_fam_id) or {}).get("classification_status")
+            _status = (_ne_excluded_by_id.get(_fam_id) or {}).get(
+                "classification_status"
+            )
             if _status == "promotional_window_unresolved":
                 _ne_excluded_labels.append(f"{_fam_id} (response mechanism unresolved)")
             else:
@@ -362,10 +364,14 @@ with SectionCard(
         )
         _ne_status_counts: dict = {}
         for _row in _ne_diag_rows:
-            _ne_status_counts[_row.fit_status] = _ne_status_counts.get(_row.fit_status, 0) + 1
+            _ne_status_counts[_row.fit_status] = (
+                _ne_status_counts.get(_row.fit_status, 0) + 1
+            )
         st.caption(
             f"Named-event family x market combinations: {len(_ne_diag_rows)} "
-            + "(" + ", ".join(f"{k}: {v}" for k, v in sorted(_ne_status_counts.items())) + "). "
+            + "("
+            + ", ".join(f"{k}: {v}" for k, v in sorted(_ne_status_counts.items()))
+            + "). "
             "See Diagnostics for the full per-family/market breakdown "
             "(occurrence dates, model periods affected, response policy, "
             "fitted support)."
@@ -1187,8 +1193,8 @@ def _proposed_model_fingerprint(fingerprint_model_type: str) -> str:
     search_objects = get_state("search_objects") or []
     coverage_matrix_dict = get_state("variable_coverage_matrix")
     named_event_fit_inputs = _named_event_fit_inputs_for_current_frame()
-    _named_event_fit_fp, _named_event_classification_fp = named_event_fingerprint_components(
-        named_event_fit_inputs
+    _named_event_fit_fp, _named_event_classification_fp = (
+        named_event_fingerprint_components(named_event_fit_inputs)
     )
     calibration_inputs = _calibration_inputs_for_current_fit()
     model_spec_fingerprint = fingerprint_model_spec(

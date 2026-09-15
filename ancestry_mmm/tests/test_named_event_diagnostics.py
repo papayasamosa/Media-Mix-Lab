@@ -109,9 +109,15 @@ class TestRepeatedYearlyOccurrencesCollapseIntoOneRow:
     def test_three_uk_occurrences_produce_one_row_with_correct_counts_and_dates(self):
         frame = _monday_frame(["UK"], 60, start="2024-01-01")
         occurrences = [
-            _occurrence(event_id="md-2024", start_date="2024-03-10", end_date="2024-03-10"),
-            _occurrence(event_id="md-2025", start_date="2025-03-30", end_date="2025-03-30"),
-            _occurrence(event_id="md-2026", start_date="2026-03-15", end_date="2026-03-15"),
+            _occurrence(
+                event_id="md-2024", start_date="2024-03-10", end_date="2024-03-10"
+            ),
+            _occurrence(
+                event_id="md-2025", start_date="2025-03-30", end_date="2025-03-30"
+            ),
+            _occurrence(
+                event_id="md-2026", start_date="2026-03-15", end_date="2026-03-15"
+            ),
         ]
         rows = build_named_event_diagnostics(
             frame,
@@ -180,11 +186,16 @@ class TestEventOutsideModelWindow:
         assert row.model_periods_affected == 0
         assert row.fit_status == FIT_STATUS_OUTSIDE_MODEL_WINDOW
         assert row.fitted_support_weeks is None
-        assert "overlap" in row.exclusion_reason or "not part of this model" in row.exclusion_reason
+        assert (
+            "overlap" in row.exclusion_reason
+            or "not part of this model" in row.exclusion_reason
+        )
 
     def test_market_not_in_the_model_at_all_is_also_outside_model_window(self):
         frame = _monday_frame(["UK"], 20, start="2026-01-05")
-        occurrence = _occurrence(start_date="2026-03-16", end_date="2026-03-16", market_scope=("FR",))
+        occurrence = _occurrence(
+            start_date="2026-03-16", end_date="2026-03-16", market_scope=("FR",)
+        )
         rows = build_named_event_diagnostics(
             frame,
             families=[_family()],
@@ -339,7 +350,10 @@ class TestSortedDeterministicOutput:
             ),
             _occurrence(start_date="2026-03-15", end_date="2026-03-15"),
         ]
-        families = [_family(), _family(family_id="fathers_day", display_name="Father's Day")]
+        families = [
+            _family(),
+            _family(family_id="fathers_day", display_name="Father's Day"),
+        ]
         rows = build_named_event_diagnostics(
             frame, families=families, occurrences=occurrences, response_definitions=[]
         )
@@ -411,7 +425,10 @@ class TestBuildFittedNamedEventDiagnostics:
         occurrence = _occurrence(start_date="2026-03-16", end_date="2026-03-16")
         definition = _definition()
         meta = _meta_from_fit(
-            frame, families=[family], occurrences=[occurrence], response_definitions=[definition]
+            frame,
+            families=[family],
+            occurrences=[occurrence],
+            response_definitions=[definition],
         )
         rows = build_fitted_named_event_diagnostics(meta)
         assert len(rows) == 1
@@ -455,7 +472,10 @@ class TestAssessNamedEventDrift:
         occurrence = _occurrence(start_date="2026-03-16", end_date="2026-03-16")
         definition = _definition()
         meta = _meta_from_fit(
-            frame, families=[family], occurrences=[occurrence], response_definitions=[definition]
+            frame,
+            families=[family],
+            occurrences=[occurrence],
+            response_definitions=[definition],
         )
         result = assess_named_event_drift(
             frame,
@@ -473,7 +493,10 @@ class TestAssessNamedEventDrift:
         occurrence = _occurrence(start_date="2026-03-16", end_date="2026-03-16")
         definition = _definition()
         meta = _meta_from_fit(
-            frame, families=[family], occurrences=[occurrence], response_definitions=[definition]
+            frame,
+            families=[family],
+            occurrences=[occurrence],
+            response_definitions=[definition],
         )
         fitted_before = build_fitted_named_event_diagnostics(meta)
 
@@ -497,13 +520,18 @@ class TestAssessNamedEventDrift:
         )
         assert result.status == NAMED_EVENT_CONFIG_CURRENT
 
-    def test_changing_an_occurrence_date_leaves_fitted_view_unchanged_but_shows_drift(self):
+    def test_changing_an_occurrence_date_leaves_fitted_view_unchanged_but_shows_drift(
+        self,
+    ):
         frame = _monday_frame(["UK"], 20, start="2026-01-05")
         family = _family()
         occurrence = _occurrence(start_date="2026-03-16", end_date="2026-03-16")
         definition = _definition()
         meta = _meta_from_fit(
-            frame, families=[family], occurrences=[occurrence], response_definitions=[definition]
+            frame,
+            families=[family],
+            occurrences=[occurrence],
+            response_definitions=[definition],
         )
         fitted_before = build_fitted_named_event_diagnostics(meta)
 
@@ -521,7 +549,9 @@ class TestAssessNamedEventDrift:
             response_definitions=[definition],
         )
         assert result.status == NAMED_EVENT_CONFIG_CHANGED_SINCE_FIT
-        assert any("event occurrence set or timing changed" in r for r in result.reasons)
+        assert any(
+            "event occurrence set or timing changed" in r for r in result.reasons
+        )
 
     def test_classification_change_is_visible_as_drift(self):
         frame = _monday_frame(["UK"], 20, start="2026-01-05")
@@ -529,7 +559,10 @@ class TestAssessNamedEventDrift:
         occurrence = _occurrence(start_date="2026-03-16", end_date="2026-03-16")
         definition = _definition()
         meta = _meta_from_fit(
-            frame, families=[family], occurrences=[occurrence], response_definitions=[definition]
+            frame,
+            families=[family],
+            occurrences=[occurrence],
+            response_definitions=[definition],
         )
         reclassified_family = _family(classification="commercial")
         result = assess_named_event_drift(
@@ -548,7 +581,10 @@ class TestAssessNamedEventDrift:
         occurrence = _occurrence(start_date="2026-03-16", end_date="2026-03-16")
         definition = _definition()
         meta = _meta_from_fit(
-            frame, families=[family], occurrences=[occurrence], response_definitions=[definition]
+            frame,
+            families=[family],
+            occurrences=[occurrence],
+            response_definitions=[definition],
         )
 
         fitted = build_fitted_named_event_diagnostics(meta)
@@ -602,7 +638,10 @@ class TestAssessNamedEventDrift:
         )
         assert len(current_rows) == 1
         assert current_rows[0].fit_status == FIT_STATUS_PROMOTIONAL_WINDOW_UNRESOLVED
-        assert current_rows[0].response_policy == RESPONSE_POLICY_PROMOTIONAL_WINDOW_UNRESOLVED
+        assert (
+            current_rows[0].response_policy
+            == RESPONSE_POLICY_PROMOTIONAL_WINDOW_UNRESOLVED
+        )
 
     def test_no_fit_time_fingerprint_reports_unknown_not_current_or_changed(self):
         # A model fitted before named_event_fit_fingerprint existed, but

@@ -370,7 +370,10 @@ def test_fitted_model_view_shows_drift_when_occurrence_date_changed():
     assert "event occurrence set or timing changed" in text
     # The fitted-model table itself must not have been rewritten by the
     # occurrence edit.
-    assert list(at.session_state["model_meta"].named_event_fit_blocks) == fitted_blocks_before
+    assert (
+        list(at.session_state["model_meta"].named_event_fit_blocks)
+        == fitted_blocks_before
+    )
 
 
 def test_no_named_event_consumed_at_fit_shows_readiness_only():
