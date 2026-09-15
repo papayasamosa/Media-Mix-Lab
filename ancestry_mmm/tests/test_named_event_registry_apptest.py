@@ -307,6 +307,95 @@ def test_promotion_row_adopts_as_governed_data_with_no_response_definition():
     assert "decision-required" in text
 
 
+def _preferred_events_frame_a():
+    import pandas as pd
+
+    return pd.DataFrame(
+        [
+            {
+                "event_id": "mothers_day_2025_uk",
+                "event_name": "Mother's Day",
+                "event_family_id": "mothers_day",
+                "event_type": "gifting",
+                "market": "UK",
+                "start_date": "2025-03-30",
+                "end_date": "2025-03-30",
+            }
+        ]
+    )
+
+
+def _preferred_events_frame_b():
+    import pandas as pd
+
+    return pd.DataFrame(
+        [
+            {
+                "event_id": "fathers_day_2025_uk",
+                "event_name": "Father's Day",
+                "event_family_id": "fathers_day",
+                "event_type": "gifting",
+                "market": "UK",
+                "start_date": "2025-06-15",
+                "end_date": "2025-06-15",
+            }
+        ]
+    )
+
+
+def test_bulk_adopt_preserves_each_source_own_lineage():
+    # Two Context `events` workbooks are simultaneously active - the
+    # second workbook's source_id/source_version must never be collapsed
+    # onto the first's (the regression: only `_preferred_rows[0]`'s
+    # lineage used to be applied to the whole batch).
+    at = AppTest.from_file(str(PAGE), default_timeout=60)
+    at.session_state["raw_sources"] = {
+        "workbook_a__sheet__events": _preferred_events_frame_a(),
+        "workbook_b__sheet__events": _preferred_events_frame_b(),
+    }
+    at.session_state["active_source_upload_version"] = {
+        "workbook_a__sheet__events": 1,
+        "workbook_b__sheet__events": 7,
+    }
+    at.session_state["source_definitions"] = [
+        SourceDefinition(
+            source_id="workbook_a__sheet__events",
+            name="events",
+            logical_domain=DOMAIN_CONTEXT_AND_EXTERNAL_FACTORS,
+        ).to_dict(),
+        SourceDefinition(
+            source_id="workbook_b__sheet__events",
+            name="events",
+            logical_domain=DOMAIN_CONTEXT_AND_EXTERNAL_FACTORS,
+        ).to_dict(),
+    ]
+    at.session_state["data_loaded"] = True
+    at.run()
+    assert not at.exception, f"page raised: {at.exception}"
+
+    submit = next(b for b in at.button if b.key == "ne_bulk_adopt_button")
+    submit.click().run()
+    assert not at.exception, f"page raised after bulk adopt: {at.exception}"
+
+    families = at.session_state["named_event_families"]
+    occurrences = at.session_state["named_event_occurrences"]
+    # Both source groups' rows adopted - result counts/warnings reflect
+    # the combined batch, not just the first group.
+    assert len(families) == 2
+    assert len(occurrences) == 2
+    assert "Adopted 2 of 2 rows" in _all_text(at)
+
+    occurrences_by_family = {o["family_id"]: o for o in occurrences}
+    mothers_day_occ = occurrences_by_family["mothers_day"]
+    fathers_day_occ = occurrences_by_family["fathers_day"]
+    # Each occurrence records its own workbook's lineage - never the
+    # other workbook's, and never silently collapsed onto one identity.
+    assert mothers_day_occ["source_id"] == "workbook_a__sheet__events"
+    assert mothers_day_occ["source_version"] == 1
+    assert fathers_day_occ["source_id"] == "workbook_b__sheet__events"
+    assert fathers_day_occ["source_version"] == 7
+
+
 def test_registered_families_enable_definition_form():
     from ancestry_mmm.core.named_events import NamedEventFamily
 

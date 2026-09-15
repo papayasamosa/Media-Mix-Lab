@@ -50,10 +50,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, TypeVar
 
+import pandas as pd
+
+from ancestry_mmm.core.named_event_response import NAMED_EVENT_RESPONSE_STRUCTURE
 from ancestry_mmm.core.named_event_type_policy import (
     CLASSIFICATION_STATUS_PROMOTIONAL_WINDOW_UNRESOLVED,
     CLASSIFICATION_STATUS_RESPONSE_POLICY_REQUIRED,
     EVENT_TYPE_PROMOTION,
+    EventTypeResponsePolicy,
     default_response_definition_id,
     normalise_event_type,
     resolve_event_type_policy,
@@ -347,13 +351,41 @@ def registry_has_content(
 # --- Preferred seven-column source contract (implementation brief) --------
 
 
+def _is_blank_preferred_value(value: Any) -> bool:
+    """True for anything that must never be adopted as a governed field
+    value: `None`, a pandas/NumPy null (`NaN`/`NaT` - a spreadsheet cell
+    pandas leaves empty, whose Python truth value is `True`, is exactly
+    the case `if not row.get(column)` used to miss), or a whitespace-only
+    string. Never raises on a scalar; `pd.isna` on a non-scalar (a list-
+    like accidentally stored in a cell) raises `ValueError`, which is
+    treated as "not a blank scalar" rather than propagated - this
+    function's job is null-detection, not shape validation."""
+    if value is None:
+        return True
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, str) and not value.strip():
+        return True
+    return False
+
+
 def missing_preferred_row_fields(row: Mapping[str, Any]) -> Tuple[str, ...]:
     """The `data.templates.EVENT_UPLOAD_COLUMNS` fields still blank on
-    `row`. An empty result does not by itself mean the row is adoptable -
-    `end_date >= start_date` and family/event_type consistency are
-    checked separately, at adoption time, so a single bad row never masks
-    the reason another row in the same batch failed."""
-    return tuple(column for column in EVENT_UPLOAD_COLUMNS if not row.get(column))
+    `row` - including a pandas/NumPy null (`NaN`/`NaT`), never just a
+    falsey Python value, so a genuinely missing cell can never be adopted
+    as the literal governed string `"nan"`/`"NaT"`. An empty result does
+    not by itself mean the row is adoptable - `end_date >= start_date`
+    and family/event_type consistency are checked separately, at
+    adoption time, so a single bad row never masks the reason another row
+    in the same batch failed."""
+    return tuple(
+        column
+        for column in EVENT_UPLOAD_COLUMNS
+        if _is_blank_preferred_value(row.get(column))
+    )
 
 
 def is_preferred_source_row(row: Mapping[str, Any]) -> bool:
@@ -428,6 +460,24 @@ def _conflicting_batch_families(
     }
 
 
+def _response_definition_matches_policy(
+    definition: EventResponseDefinition, policy: EventTypeResponsePolicy
+) -> bool:
+    """Whether `definition` (an existing, current, opted-in response
+    definition for a family) is fit-compatible with the automatic
+    `event_type` policy for a new row - compared on the actual
+    fit-relevant fields (`core.named_event_fit_inputs` consumes exactly
+    these plus the transformation reference, never the definition's own
+    id), never on `response_definition_id` equality."""
+    return (
+        definition.treatment == policy.treatment
+        and definition.max_lead == policy.max_lead
+        and definition.max_lag == policy.max_lag
+        and definition.transformation_method_reference
+        == policy.transformation_method_reference
+    )
+
+
 def bulk_adopt_preferred_event_rows(
     rows: Sequence[Mapping[str, Any]],
     *,
@@ -450,19 +500,40 @@ def bulk_adopt_preferred_event_rows(
     2. verify an already-registered family's classification is
        compatible with this row's resolved classification - a genuine
        mismatch blocks that row rather than silently reclassifying the
-       family (section 5.1);
+       family (section 5.1). An unresolvable `event_type` is also
+       blocked here if the family already has a current opted-in (fitted)
+       response definition - joining would otherwise let the occurrence
+       be silently fitted through that existing family-level definition
+       with no governed classification of its own;
     3. register the `NamedEventOccurrence` (factual dates preserved
        verbatim);
-    4. register or reuse the family's deterministic `EventResponseDefinition`
-       (`{family_id}_default_response`, section 6.1) when `event_type`
-       resolves to an automatic policy - repeated yearly rows for the
-       same family reuse the identical, idempotent definition rather than
-       creating a new one each time.
+    4. register or reuse the family's response definition when
+       `event_type` resolves to an automatic policy - reuse is decided by
+       inspecting every current, opted-in response definition already
+       registered for the family (never by `response_definition_id`
+       equality with the deterministic default id alone): exactly one
+       fit-compatible definition is reused as-is (repeated yearly rows
+       for the same family never create a second one); a materially
+       conflicting definition, or more than one already-current opted-in
+       definition for the family, blocks the row instead of ever creating
+       a second opted-in definition for the same family (which would
+       otherwise produce two fit blocks - and a duplicate
+       `event_coefs_<family>_<market>` PyMC variable - for one family/
+       market at fit time).
 
     A row that fails validation, a within-batch family/event_type
     conflict, or a genuine cross-registration conflict is skipped with an
     explanatory `RowAdoptionResult` - it never raises and never blocks
     unrelated rows in the same batch.
+
+    **Row atomicity**: each row's family/occurrence/response-definition
+    work is staged against local candidate copies of the registries and
+    committed back to the authoritative `current_families`/
+    `current_occurrences`/`current_definitions` lists only once every step
+    for that row has succeeded. A row reported as `adopted=False` -
+    whatever stage it failed at - therefore leaves no trace in the
+    returned registries; a previously committed row in the same batch is
+    never affected by a later row's failure.
     """
     current_families: List[NamedEventFamily] = list(families)
     current_occurrences: List[NamedEventOccurrence] = list(occurrences)
@@ -471,7 +542,12 @@ def bulk_adopt_preferred_event_rows(
     results: List[RowAdoptionResult] = []
 
     for row in rows:
-        event_id = str(row.get("event_id") or "") or "(missing event_id)"
+        _raw_event_id = row.get("event_id")
+        event_id = (
+            "(missing event_id)"
+            if _is_blank_preferred_value(_raw_event_id)
+            else str(_raw_event_id)
+        )
 
         missing = missing_preferred_row_fields(row)
         if missing:
@@ -517,6 +593,14 @@ def bulk_adopt_preferred_event_rows(
             None,
         )
 
+        # Stage this row's mutations against candidate copies of the
+        # authoritative registries - only committed back to
+        # current_families/current_occurrences/current_definitions once
+        # every step below succeeds (row atomicity, see docstring).
+        candidate_families = list(current_families)
+        candidate_occurrences = list(current_occurrences)
+        candidate_definitions = list(current_definitions)
+
         created_family = False
         response_policy_required = policy is None
         if existing_family is None:
@@ -538,25 +622,52 @@ def bulk_adopt_preferred_event_rows(
                 classification=resolved_classification or str(row["event_type"]),
                 classification_status=classification_status,
             )
-            current_families = list(register_family(current_families, family_record))
-            created_family = True
-        elif (
-            resolved_classification is not None
-            and existing_family.classification != resolved_classification
-        ):
-            results.append(
-                RowAdoptionResult(
-                    event_id=event_id,
-                    adopted=False,
-                    problems=(
-                        f"event_type {row['event_type']!r} resolves to classification "
-                        f"{resolved_classification!r}, which conflicts with family "
-                        f"{family_id!r}'s already-registered classification "
-                        f"{existing_family.classification!r}.",
-                    ),
-                )
+            candidate_families = list(
+                register_family(candidate_families, family_record)
             )
-            continue
+            created_family = True
+        else:
+            has_fitted_definition = any(
+                d.family_id == family_id
+                and d.transformation_method_reference == NAMED_EVENT_RESPONSE_STRUCTURE
+                for d in current_response_definition_versions(candidate_definitions)
+            )
+            if resolved_classification is None:
+                if has_fitted_definition:
+                    results.append(
+                        RowAdoptionResult(
+                            event_id=event_id,
+                            adopted=False,
+                            problems=(
+                                f"event_type {row['event_type']!r} does not resolve "
+                                "to a recognised classification, and family "
+                                f"{family_id!r} already has a fitted response "
+                                "definition - joining would silently include this "
+                                "occurrence in fitting without a governed "
+                                "classification.",
+                            ),
+                        )
+                    )
+                    continue
+                # An unrecognised type against a family with no fitted
+                # definition yet stays governed metadata only, exactly as
+                # before - never silently opted into fitting (section
+                # 6.2), and there is no already-fitted definition here for
+                # it to be silently consumed by.
+            elif existing_family.classification != resolved_classification:
+                results.append(
+                    RowAdoptionResult(
+                        event_id=event_id,
+                        adopted=False,
+                        problems=(
+                            f"event_type {row['event_type']!r} resolves to classification "
+                            f"{resolved_classification!r}, which conflicts with family "
+                            f"{family_id!r}'s already-registered classification "
+                            f"{existing_family.classification!r}.",
+                        ),
+                    )
+                )
+                continue
 
         try:
             occurrence = adopt_source_event_occurrence(
@@ -571,8 +682,8 @@ def bulk_adopt_preferred_event_rows(
                     "family_id": family_id,
                 },
             )
-            current_occurrences = list(
-                register_occurrence(current_occurrences, occurrence)
+            candidate_occurrences = list(
+                register_occurrence(candidate_occurrences, occurrence)
             )
         except ValueError as exc:
             results.append(
@@ -580,7 +691,6 @@ def bulk_adopt_preferred_event_rows(
                     event_id=event_id,
                     adopted=False,
                     problems=(str(exc),),
-                    created_family=created_family,
                     response_policy_required=response_policy_required,
                 )
             )
@@ -588,36 +698,88 @@ def bulk_adopt_preferred_event_rows(
 
         created_definition = False
         if policy is not None:
-            definition_id = default_response_definition_id(family_id)
-            already_registered = any(
-                d.response_definition_id == definition_id
-                for d in current_response_definition_versions(current_definitions)
-            )
-            new_definition = new_response_definition(
-                response_definition_id=definition_id,
-                family_id=family_id,
-                treatment=policy.treatment,
-                max_lead=policy.max_lead,
-                max_lag=policy.max_lag,
-                transformation_method_reference=policy.transformation_method_reference,
-            )
-            try:
-                current_definitions = list(
-                    register_response_definition(current_definitions, new_definition)
-                )
-                created_definition = not already_registered
-            except ValueError as exc:
+            opted_in_family_definitions = [
+                d
+                for d in current_response_definition_versions(candidate_definitions)
+                if d.family_id == family_id
+                and d.transformation_method_reference == NAMED_EVENT_RESPONSE_STRUCTURE
+            ]
+            if len(opted_in_family_definitions) > 1:
                 results.append(
                     RowAdoptionResult(
                         event_id=event_id,
-                        adopted=True,
-                        problems=(str(exc),),
-                        created_family=created_family,
+                        adopted=False,
+                        problems=(
+                            f"family {family_id!r} already has "
+                            f"{len(opted_in_family_definitions)} current opted-in "
+                            "response definitions - ambiguous governance; resolve "
+                            "the existing definitions before adopting further rows.",
+                        ),
                         response_policy_required=response_policy_required,
                     )
                 )
                 continue
+            if len(opted_in_family_definitions) == 1:
+                existing_definition = opted_in_family_definitions[0]
+                if not _response_definition_matches_policy(existing_definition, policy):
+                    results.append(
+                        RowAdoptionResult(
+                            event_id=event_id,
+                            adopted=False,
+                            problems=(
+                                f"family {family_id!r} already has an opted-in "
+                                "response definition "
+                                f"{existing_definition.response_definition_id!r} "
+                                "whose window (treatment="
+                                f"{existing_definition.treatment!r}, max_lead="
+                                f"{existing_definition.max_lead}, max_lag="
+                                f"{existing_definition.max_lag}) conflicts with the "
+                                f"automatic policy for event_type {row['event_type']!r} "
+                                f"(treatment={policy.treatment!r}, "
+                                f"max_lead={policy.max_lead}, max_lag={policy.max_lag}) "
+                                "- reconcile the definitions before adopting.",
+                            ),
+                            response_policy_required=response_policy_required,
+                        )
+                    )
+                    continue
+                # Reuse the existing opted-in definition as-is - identical
+                # fit-relevant window, nothing new to register (section
+                # 6.1: repeated yearly rows reuse one definition; never a
+                # second opted-in definition for the same family).
+            else:
+                definition_id = default_response_definition_id(family_id)
+                new_definition = new_response_definition(
+                    response_definition_id=definition_id,
+                    family_id=family_id,
+                    treatment=policy.treatment,
+                    max_lead=policy.max_lead,
+                    max_lag=policy.max_lag,
+                    transformation_method_reference=policy.transformation_method_reference,
+                )
+                try:
+                    candidate_definitions = list(
+                        register_response_definition(
+                            candidate_definitions, new_definition
+                        )
+                    )
+                    created_definition = True
+                except ValueError as exc:
+                    results.append(
+                        RowAdoptionResult(
+                            event_id=event_id,
+                            adopted=False,
+                            problems=(str(exc),),
+                            response_policy_required=response_policy_required,
+                        )
+                    )
+                    continue
 
+        # Every step for this row succeeded - commit the staged
+        # candidates as the new authoritative state.
+        current_families = candidate_families
+        current_occurrences = candidate_occurrences
+        current_definitions = candidate_definitions
         results.append(
             RowAdoptionResult(
                 event_id=event_id,

@@ -174,6 +174,90 @@ class TestNoOptInReturnsNone:
         assert result is None
 
 
+class TestDuplicateOptedInDefinitionFailsClosed:
+    """Narrow defensive registry-invariant check: `application.event_
+    service.bulk_adopt_preferred_event_rows` never creates a second
+    current opted-in response definition for one family, but this
+    function's registry inputs are also reachable through the manual
+    admin forms - so an already-invalid registry (two current opted-in
+    definitions for the same family) must fail early here, before either
+    model builder can hit a duplicate `event_coefs_<family>_<market>`
+    PyMC variable name."""
+
+    def test_two_opted_in_definitions_for_one_family_raises(self):
+        frame = _frame(["UK"], 20)
+        definitions = [
+            _definition(response_definition_id="md-def-a"),
+            _definition(response_definition_id="md-def-b", max_lead=6),
+        ]
+        try:
+            build_named_event_fit_inputs(
+                frame,
+                families=[_family()],
+                occurrences=[_occurrence()],
+                response_definitions=definitions,
+            )
+            assert False, "expected ValueError for duplicate opted-in definitions"
+        except ValueError as exc:
+            assert "mothers_day" in str(exc)
+            assert "more than one current opted-in" in str(exc)
+
+    def test_never_picks_a_definition_between_conflicting_ones(self):
+        """The safeguard must fail closed, not silently prefer one
+        definition over the other - it never selects."""
+        frame = _frame(["UK"], 20)
+        definitions = [
+            _definition(response_definition_id="md-def-a", max_lead=3),
+            _definition(response_definition_id="md-def-b", max_lead=6),
+        ]
+        raised = False
+        try:
+            build_named_event_fit_inputs(
+                frame,
+                families=[_family()],
+                occurrences=[_occurrence()],
+                response_definitions=definitions,
+            )
+        except ValueError:
+            raised = True
+        assert raised
+
+    def test_one_opted_in_definition_per_family_is_unaffected(self):
+        frame = _frame(["UK"], 20)
+        result = build_named_event_fit_inputs(
+            frame,
+            families=[_family()],
+            occurrences=[_occurrence()],
+            response_definitions=[_definition()],
+        )
+        assert result is not None
+        assert len(result.blocks) == 1
+
+    def test_two_different_families_each_with_one_definition_is_unaffected(self):
+        frame = _frame(["UK"], 30)
+        second_family = _family(family_id="fathers_day", display_name="Father's Day")
+        second_occurrence = _occurrence(
+            event_id="fd-2026",
+            family_id="fathers_day",
+            start_date="2026-06-21",
+            end_date="2026-06-21",
+        )
+        second_definition = _definition(
+            response_definition_id="fd-def", family_id="fathers_day"
+        )
+        result = build_named_event_fit_inputs(
+            frame,
+            families=[_family(), second_family],
+            occurrences=[_occurrence(), second_occurrence],
+            response_definitions=[_definition(), second_definition],
+        )
+        assert result is not None
+        assert {block.family_id for block in result.blocks} == {
+            "mothers_day",
+            "fathers_day",
+        }
+
+
 class TestOptedInFamilyProducesABlock:
     def test_single_market_produces_one_block_with_a_nonzero_design(self):
         frame = _frame(["UK"], 20, start="2026-01-01")

@@ -21,6 +21,7 @@ from ancestry_mmm.application.experiment_service import (
     register_experiment_record,
 )
 from ancestry_mmm.application.event_service import (
+    BulkAdoptionOutcome,
     adopt_source_event_occurrence,
     bulk_adopt_preferred_event_rows,
     is_preferred_source_row,
@@ -1571,13 +1572,47 @@ if sources:
                     ),
                 )
                 if st.button("Bulk adopt valid rows", key="ne_bulk_adopt_button"):
-                    _outcome = bulk_adopt_preferred_event_rows(
-                        _preferred_rows,
-                        source_id=(_preferred_rows[0].get("source_id") or "events"),
-                        source_version=_preferred_rows[0].get("source_version"),
-                        families=_families,
-                        occurrences=_occurrences,
-                        response_definitions=_definitions,
+                    # Group by each row's own (source_id, source_version) -
+                    # never the first row's lineage applied to the whole
+                    # batch - so occurrences from two simultaneously active
+                    # events sources each record their own true lineage.
+                    # Groups are adopted in order, threading the running
+                    # registries from one group into the next, so a family
+                    # created by an earlier source group is still visible
+                    # for conflict/reuse detection in a later group.
+                    _source_groups = {}
+                    _source_group_order = []
+                    for _row in _preferred_rows:
+                        _group_key = (
+                            _row.get("source_id") or "events",
+                            _row.get("source_version"),
+                        )
+                        if _group_key not in _source_groups:
+                            _source_groups[_group_key] = []
+                            _source_group_order.append(_group_key)
+                        _source_groups[_group_key].append(_row)
+
+                    _all_results = []
+                    for _group_key in _source_group_order:
+                        _group_source_id, _group_source_version = _group_key
+                        _group_outcome = bulk_adopt_preferred_event_rows(
+                            _source_groups[_group_key],
+                            source_id=_group_source_id,
+                            source_version=_group_source_version,
+                            families=_families,
+                            occurrences=_occurrences,
+                            response_definitions=_definitions,
+                        )
+                        _families = list(_group_outcome.families)
+                        _occurrences = list(_group_outcome.occurrences)
+                        _definitions = list(_group_outcome.response_definitions)
+                        _all_results.extend(_group_outcome.results)
+
+                    _outcome = BulkAdoptionOutcome(
+                        families=tuple(_families),
+                        occurrences=tuple(_occurrences),
+                        response_definitions=tuple(_definitions),
+                        results=tuple(_all_results),
                     )
                     set_state(
                         "named_event_families",

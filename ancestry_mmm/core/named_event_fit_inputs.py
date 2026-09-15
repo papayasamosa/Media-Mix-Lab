@@ -68,6 +68,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -458,6 +459,37 @@ def build_named_event_fit_inputs(
     ]
     if not opted_in_definitions:
         return None
+
+    # Defensive registry-invariant check: `application.event_service.
+    # bulk_adopt_preferred_event_rows` never creates a second current
+    # opted-in definition for one family, but this function's registry
+    # inputs are not exclusively reachable through that boundary (e.g. the
+    # manual family/response-definition admin forms). Two opted-in
+    # definitions for the same family would each produce their own block
+    # below, and both model builders key their PyMC variable purely on
+    # `family_id`/market (`event_coefs_<family_id>_<market>`) - so this
+    # fails closed here, before any block is built, rather than letting a
+    # duplicate-variable collision surface deep inside `pm.Model()`. This
+    # does not pick a definition to prefer; that would be inventing a
+    # selection rule this module has no approval to make.
+    _duplicate_opted_in_family_ids = sorted(
+        family_id
+        for family_id, count in Counter(
+            d.family_id for d in opted_in_definitions
+        ).items()
+        if count > 1
+    )
+    if _duplicate_opted_in_family_ids:
+        raise ValueError(
+            "Invalid named-event registry: famil"
+            + ("y" if len(_duplicate_opted_in_family_ids) == 1 else "ies")
+            + f" {tuple(_duplicate_opted_in_family_ids)!r} has more than one current "
+            "opted-in EventResponseDefinition - this would create duplicate "
+            "event_coefs_<family>_<market> variables at fit time. Reconcile the "
+            "registry to exactly one current opted-in response definition per "
+            "family before fitting."
+        )
+
     current_occurrences = current_occurrence_versions(occurrences)
 
     blocks: List[NamedEventFamilyFitBlock] = []
