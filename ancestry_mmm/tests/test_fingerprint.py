@@ -1234,3 +1234,141 @@ class TestFingerprintModelSpecPopulationFitFingerprint:
         fp_a = fingerprint_model_spec(spec, {}, 4, population_fit_fingerprint="a" * 64)
         fp_b = fingerprint_model_spec(spec, {}, 4, population_fit_fingerprint="b" * 64)
         assert fp_a != fp_b
+
+
+# ---------------------------------------------------------------------------
+# Model-specification fingerprint: named_event_classification_fingerprint
+# (REQ-EVENT-001 section 8 - official staleness for a governed family
+# classification change, e.g. gifting -> promotion, kept SEPARATE from
+# named_event_fit_fingerprint's numerical design identity, opt-in exactly
+# like named_event_fit_fingerprint/calibration_fit_fingerprint above)
+# ---------------------------------------------------------------------------
+
+
+class TestFingerprintModelSpecNamedEventClassificationFingerprint:
+    def test_omitted_is_backward_compatible_with_no_classification_fingerprint(self):
+        spec = {"markets": ["UK"]}
+        assert fingerprint_model_spec(spec, {}, 4) == fingerprint_model_spec(
+            spec, {}, 4, named_event_classification_fingerprint=None
+        )
+
+    def test_empty_string_is_also_treated_as_absent(self):
+        spec = {"markets": ["UK"]}
+        assert fingerprint_model_spec(spec, {}, 4) == fingerprint_model_spec(
+            spec, {}, 4, named_event_classification_fingerprint=""
+        )
+
+    def test_present_value_changes_the_fingerprint(self):
+        spec = {"markets": ["UK"]}
+        without = fingerprint_model_spec(spec, {}, 4)
+        with_classification = fingerprint_model_spec(
+            spec, {}, 4, named_event_classification_fingerprint="a" * 64
+        )
+        assert without != with_classification
+
+    def test_changing_the_value_changes_the_fingerprint(self):
+        spec = {"markets": ["UK"]}
+        fp_a = fingerprint_model_spec(
+            spec, {}, 4, named_event_classification_fingerprint="a" * 64
+        )
+        fp_b = fingerprint_model_spec(
+            spec, {}, 4, named_event_classification_fingerprint="b" * 64
+        )
+        assert fp_a != fp_b
+
+    def test_unchanged_design_fingerprint_still_changes_official_identity(self):
+        """The specific regression this dimension exists for: a family's
+        classification changes (gifting -> promotion) while the fitted
+        design itself (named_event_fit_fingerprint) is unaffected -
+        REQ-EVENT-001 section 8 requires this to stale the fit through
+        the OFFICIAL model-spec fingerprint, not merely an informational
+        Diagnostics-only difference (core.named_event_diagnostics.
+        assess_named_event_drift covers that separately)."""
+        spec = {"markets": ["UK"]}
+        design_fingerprint = "design-unaffected-by-reclassification"
+        fp_gifting = fingerprint_model_spec(
+            spec,
+            {},
+            4,
+            named_event_fit_fingerprint=design_fingerprint,
+            named_event_classification_fingerprint="gifting-classification-fp",
+        )
+        fp_promotion = fingerprint_model_spec(
+            spec,
+            {},
+            4,
+            named_event_fit_fingerprint=design_fingerprint,
+            named_event_classification_fingerprint="promotion-classification-fp",
+        )
+        assert fp_gifting != fp_promotion
+
+    def test_end_to_end_via_named_event_classification_fingerprint_helper(self):
+        """Integration with `core.named_event_fit_inputs.named_event_
+        classification_fingerprint` and a real `NamedEventFitInputs` -
+        proves the two modules actually compose to detect a
+        gifting -> promotion reclassification through the official
+        fingerprint, not merely that two arbitrary opaque strings differ."""
+        from ancestry_mmm.core.named_event_fit_inputs import (
+            NamedEventFamilyFitBlock,
+            NamedEventFitInputs,
+            named_event_classification_fingerprint,
+        )
+
+        design = np.array([[1.0]])
+        gifting_inputs = NamedEventFitInputs(
+            blocks=(
+                NamedEventFamilyFitBlock(
+                    family_id="black_friday",
+                    market="UK",
+                    design=design,
+                    response_definition_id="black_friday_default_response",
+                    response_definition_version=1,
+                    outcome_scope=(),
+                    classification="gifting",
+                ),
+            ),
+            shrinkage_prior_scale_by_family={"black_friday": 1.0},
+        )
+        promotion_inputs = NamedEventFitInputs(
+            blocks=(
+                NamedEventFamilyFitBlock(
+                    family_id="black_friday",
+                    market="UK",
+                    design=design,
+                    response_definition_id="black_friday_default_response",
+                    response_definition_version=1,
+                    outcome_scope=(),
+                    classification="promotion",
+                ),
+            ),
+            shrinkage_prior_scale_by_family={"black_friday": 1.0},
+        )
+        # The numerical design fingerprint is UNCHANGED (deliberately
+        # excludes classification) ...
+        assert gifting_inputs.fingerprint() == promotion_inputs.fingerprint()
+        # ... but the separate classification fingerprint, and therefore
+        # the official model-spec identity built from both, IS changed.
+        assert named_event_classification_fingerprint(
+            gifting_inputs
+        ) != named_event_classification_fingerprint(promotion_inputs)
+
+        spec = {"markets": ["UK"]}
+        fp_gifting = fingerprint_model_spec(
+            spec,
+            {},
+            4,
+            named_event_fit_fingerprint=gifting_inputs.fingerprint(),
+            named_event_classification_fingerprint=named_event_classification_fingerprint(
+                gifting_inputs
+            ),
+        )
+        fp_promotion = fingerprint_model_spec(
+            spec,
+            {},
+            4,
+            named_event_fit_fingerprint=promotion_inputs.fingerprint(),
+            named_event_classification_fingerprint=named_event_classification_fingerprint(
+                promotion_inputs
+            ),
+        )
+        assert fp_gifting != fp_promotion

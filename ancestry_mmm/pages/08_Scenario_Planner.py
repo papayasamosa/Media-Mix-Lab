@@ -172,6 +172,7 @@ from ancestry_mmm.core.named_events import (
     NamedEventFamily,
     NamedEventOccurrence,
 )
+from ancestry_mmm.core.named_event_fit_inputs import current_named_event_identity_fingerprints
 from ancestry_mmm.core.planning.terminal_response import (
     build_zero_decision_terminal_extension_plan,
 )
@@ -952,6 +953,26 @@ prior_config = get_state("prior_config") or {}
 dna_lag_weeks = get_state("dna_lag_weeks", 4)
 current_identity = None
 if model_run_id and spec_dict is not None:
+    _named_event_families = [
+        NamedEventFamily.from_dict(item)
+        for item in (get_state("named_event_families") or [])
+    ]
+    _named_event_occurrences = [
+        NamedEventOccurrence.from_dict(item)
+        for item in (get_state("named_event_occurrences") or [])
+    ]
+    _named_event_response_definitions = [
+        EventResponseDefinition.from_dict(item)
+        for item in (get_state("named_event_response_definitions") or [])
+    ]
+    _named_event_fit_fp, _named_event_classification_fp = (
+        current_named_event_identity_fingerprints(
+            frame,
+            families=_named_event_families,
+            occurrences=_named_event_occurrences,
+            response_definitions=_named_event_response_definitions,
+        )
+    )
     current_identity = {
         "model_run_id": model_run_id,
         "data_fingerprint": fingerprint_dataframe(frame["df"]),
@@ -1003,6 +1024,8 @@ if model_run_id and spec_dict is not None:
                 get_state("search_intent_group_versions") or [],
                 consumed_model_input_columns=spec_dict.get("channels") or [],
             ),
+            named_event_fit_fingerprint=_named_event_fit_fp,
+            named_event_classification_fingerprint=_named_event_classification_fp,
             variable_coverage_fingerprint=(
                 VariableCoverageMatrix.from_dict(coverage_matrix_dict).fingerprint()
                 if coverage_matrix_dict

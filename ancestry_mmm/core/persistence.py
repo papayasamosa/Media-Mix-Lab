@@ -3959,6 +3959,41 @@ def current_model_identity_fingerprints(
     taxonomy_groups = resolve_imported_search_intent_groups(
         imported.get("search_intent_groups") or []
     )
+    # Named-event identity (implementation brief: close the official
+    # staleness propagation gap) - reuses the exact shared helper every
+    # live page (05/06/07/08/09/13) calls, over the imported bundle's own
+    # governed registry (quarantine-checked exactly like search_objects/
+    # causal_graphs/coverage matrices above), never a page- or
+    # reconstruction-specific reimplementation.
+    from .named_events import (
+        EventResponseDefinition as _EventResponseDefinition,
+        NamedEventFamily as _NamedEventFamily,
+        NamedEventOccurrence as _NamedEventOccurrence,
+    )
+    from .named_event_fit_inputs import current_named_event_identity_fingerprints
+
+    (
+        _named_event_family_dicts,
+        _named_event_occurrence_dicts,
+        _named_event_definition_dicts,
+        _,
+    ) = resolve_imported_named_events(imported)
+    named_event_fit_fp, named_event_classification_fp = (
+        current_named_event_identity_fingerprints(
+            frame,
+            families=[
+                _NamedEventFamily.from_dict(item) for item in _named_event_family_dicts
+            ],
+            occurrences=[
+                _NamedEventOccurrence.from_dict(item)
+                for item in _named_event_occurrence_dicts
+            ],
+            response_definitions=[
+                _EventResponseDefinition.from_dict(item)
+                for item in _named_event_definition_dicts
+            ],
+        )
+    )
     spec_fp = fingerprint_model_spec(
         fitted_spec_dict or {},
         imported.get("prior_config") or {},
@@ -4007,6 +4042,8 @@ def current_model_identity_fingerprints(
         ),
         official_preparation_evidence=imported.get("official_preparation_result"),
         seo_fit_fingerprint=seo_fit_inputs_fingerprint(imported.get("seo_fit_inputs")),
+        named_event_fit_fingerprint=named_event_fit_fp,
+        named_event_classification_fingerprint=named_event_classification_fp,
     )
     posterior_fp = fingerprint_posterior(posterior_params)
     return data_fp, spec_fp, posterior_fp

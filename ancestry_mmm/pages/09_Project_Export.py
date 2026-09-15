@@ -89,6 +89,7 @@ from ancestry_mmm.core.named_events import (
     NamedEventFamily,
     NamedEventOccurrence,
 )
+from ancestry_mmm.core.named_event_fit_inputs import current_named_event_identity_fingerprints
 from ancestry_mmm.application.project_service import verify_imported_readiness
 from ancestry_mmm.application.diagnostics_service import DiagnosticsArtefact
 from ancestry_mmm.application.curve_service import CurveService, CurveGovernanceError
@@ -369,6 +370,26 @@ def _resolve_official_curve_artifact_rows() -> list[dict]:
         and frame is not None
         and params is not None
     ):
+        _named_event_families = [
+            NamedEventFamily.from_dict(item)
+            for item in (get_state("named_event_families") or [])
+        ]
+        _named_event_occurrences = [
+            NamedEventOccurrence.from_dict(item)
+            for item in (get_state("named_event_occurrences") or [])
+        ]
+        _named_event_response_definitions = [
+            EventResponseDefinition.from_dict(item)
+            for item in (get_state("named_event_response_definitions") or [])
+        ]
+        _named_event_fit_fp, _named_event_classification_fp = (
+            current_named_event_identity_fingerprints(
+                frame,
+                families=_named_event_families,
+                occurrences=_named_event_occurrences,
+                response_definitions=_named_event_response_definitions,
+            )
+        )
         current_identity = {
             "model_run_id": model_run_id,
             "data_fingerprint": fingerprint_dataframe(frame["df"]),
@@ -420,6 +441,8 @@ def _resolve_official_curve_artifact_rows() -> list[dict]:
                     get_state("search_intent_group_versions") or [],
                     consumed_model_input_columns=spec_dict.get("channels") or [],
                 ),
+                named_event_fit_fingerprint=_named_event_fit_fp,
+                named_event_classification_fingerprint=_named_event_classification_fp,
                 variable_coverage_fingerprint=(
                     VariableCoverageMatrix.from_dict(coverage_matrix_dict).fingerprint()
                     if coverage_matrix_dict
