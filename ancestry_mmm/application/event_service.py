@@ -1,35 +1,64 @@
 """Governed named-event adoption boundary (Work Package 1 of
-`Media-Mix-Lab: Coding LLM Next Steps Post PR #297`, `REQ-EVENT-001`).
+`Media-Mix-Lab: Coding LLM Next Steps Post PR #297`, `REQ-EVENT-001`;
+extended by the event-upload-contract implementation brief for the
+preferred seven-column source contract and automatic type-policy
+adoption).
 
-Connects the optional Context `events` source table (the raw
-`event_id`/`event_name`/`start_date`/`end_date` groundwork in
-`data.templates`) to the governed named-event registry
-(`core.named_events`) and the project lifecycle - without implementing
-any event-response mathematics.
+Connects the optional Context `events` source table to the governed
+named-event registry (`core.named_events`) and the project lifecycle -
+without implementing any event-response mathematics beyond the approved
+automatic policy resolution in `core.named_event_type_policy`.
 
-Contract summary:
+Two source contracts are supported:
+
+- **Legacy (four columns)**: `event_id`/`event_name`/`start_date`/
+  `end_date` only. Market scope, source lineage and the optional family
+  link must be analyst-supplied at this boundary (`adopt_source_event_
+  occurrence`, `missing_occurrence_adoption_fields`) - never invented.
+- **Preferred (seven columns, `data.templates.EVENT_UPLOAD_COLUMNS`)**:
+  adds `event_family_id`, `event_type` and `market` as explicit source
+  columns, enabling automatic bulk adoption (`bulk_adopt_preferred_event_
+  rows`) - the row itself now supplies the governance metadata that the
+  legacy path requires the analyst to retype. `event_type` resolves to a
+  family classification and an automatic `EventResponseDefinition`
+  through `core.named_event_type_policy`'s explicit, non-text-inferring
+  resolver only.
+
+Contract invariants (both paths):
 
 - an uploaded Context events row never becomes a governed occurrence
-  automatically: the analyst explicitly adopts it at this boundary;
-- the source row supplies identity (`event_id`), the factual interval
-  (`start_date`/`end_date`, preserved verbatim - never shifted) and a
-  free-text display label (`event_name`) only;
-- market scope, source lineage and the optional family link are
-  analyst-supplied, never invented - and event-family classification,
-  temporal treatment and lead/lag support are **never** inferred from
-  `event_name` (no code path here derives them from text);
+  automatically without an explicit adoption call (a single-row call for
+  the legacy path, a bulk call the analyst triggers for the preferred
+  path - never a background/implicit action);
+- the factual interval (`start_date`/`end_date`) is preserved verbatim -
+  never shifted;
+- event-family classification, temporal treatment and lead/lag support
+  are **never** inferred from `event_name` free text - only from the
+  explicit `event_type` source column (preferred path) or explicit
+  analyst input (legacy path);
 - the registry is immutable and lineage-versioned; every edit is a new
   version, never an in-place mutation;
 - response definitions reference a registered family and use exactly
   the closed four-value temporal-treatment vocabulary;
-- nothing in this service computes event-relative features or consumes
-  `transformation_method_reference` to build a model component.
+- nothing in this service computes event-relative features itself; it
+  only registers the governed `transformation_method_reference` that
+  `core.named_event_fit_inputs` later consumes at fit time.
 """
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional, Sequence, Tuple, TypeVar
+from dataclasses import dataclass
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, TypeVar
 
+from ancestry_mmm.core.named_event_type_policy import (
+    CLASSIFICATION_STATUS_PROMOTIONAL_WINDOW_UNRESOLVED,
+    CLASSIFICATION_STATUS_RESPONSE_POLICY_REQUIRED,
+    EVENT_TYPE_PROMOTION,
+    default_response_definition_id,
+    normalise_event_type,
+    resolve_event_type_policy,
+    resolve_family_classification,
+)
 from ancestry_mmm.core.named_events import (
     DEFAULT_EVENT_EVIDENCE_STATUS,
     EVENT_REGISTRY_SCHEMA_VERSION,
@@ -44,14 +73,16 @@ from ancestry_mmm.core.named_events import (
     new_response_definition_version,
     validate_registry_references,
 )
+from ancestry_mmm.data.templates import EVENT_UPLOAD_COLUMNS
 
-# Source-row columns the standard Context `events` template carries.
+# Source-row columns the standard Context `events` template carries
+# (legacy four-column contract).
 _SOURCE_ROW_COLUMNS = ("event_id", "event_name", "start_date", "end_date")
 
-# Occurrence fields a raw source events row can never supply by itself
-# (the template carries no market or lineage columns). They are required
-# by the record contract and must be analyst-supplied at this boundary -
-# never invented, defaulted, or zero-filled.
+# Occurrence fields a raw legacy source events row can never supply by
+# itself. They are required by the record contract and must be
+# analyst-supplied at this boundary - never invented, defaulted, or
+# zero-filled.
 ANALYST_REQUIRED_FIELDS = ("market", "source_id")
 
 
@@ -311,3 +342,287 @@ def registry_has_content(
     to decide whether to write the registry file at all, keeping older
     bundles byte-comparable."""
     return bool(families or occurrences or definitions)
+
+
+# --- Preferred seven-column source contract (implementation brief) --------
+
+
+def missing_preferred_row_fields(row: Mapping[str, Any]) -> Tuple[str, ...]:
+    """The `data.templates.EVENT_UPLOAD_COLUMNS` fields still blank on
+    `row`. An empty result does not by itself mean the row is adoptable -
+    `end_date >= start_date` and family/event_type consistency are
+    checked separately, at adoption time, so a single bad row never masks
+    the reason another row in the same batch failed."""
+    return tuple(column for column in EVENT_UPLOAD_COLUMNS if not row.get(column))
+
+
+def is_preferred_source_row(row: Mapping[str, Any]) -> bool:
+    """True when `row` supplies the full seven-column preferred contract
+    (`event_family_id`, `event_type` and `market` all present) rather
+    than only the legacy four columns, which still require manual
+    analyst completion via `adopt_source_event_occurrence`."""
+    return not missing_preferred_row_fields(row)
+
+
+@dataclass(frozen=True)
+class RowAdoptionResult:
+    """The outcome of attempting to adopt one preferred-contract source
+    row within a `bulk_adopt_preferred_event_rows` call."""
+
+    event_id: str
+    adopted: bool
+    problems: Tuple[str, ...] = ()
+    created_family: bool = False
+    created_response_definition: bool = False
+    response_policy_required: bool = False
+
+
+@dataclass(frozen=True)
+class BulkAdoptionOutcome:
+    """The registry state after a `bulk_adopt_preferred_event_rows` call,
+    plus a per-row report. `families`/`occurrences`/`response_definitions`
+    already include every successfully adopted row - callers persist
+    these directly, mirroring the single-row adoption functions above."""
+
+    families: Tuple[NamedEventFamily, ...]
+    occurrences: Tuple[NamedEventOccurrence, ...]
+    response_definitions: Tuple[EventResponseDefinition, ...]
+    results: Tuple[RowAdoptionResult, ...] = ()
+
+    @property
+    def adopted_count(self) -> int:
+        return sum(1 for result in self.results if result.adopted)
+
+
+def _normalised_type_label(event_type: Any) -> str:
+    canonical = normalise_event_type(event_type if isinstance(event_type, str) else None)
+    if canonical is not None:
+        return canonical
+    return str(event_type).strip().lower() if isinstance(event_type, str) else ""
+
+
+def _conflicting_batch_families(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Tuple[str, ...]]:
+    """`event_family_id` values for which this batch itself supplies more
+    than one distinct `event_type` label (after alias/case normalisation)
+    - implementation brief section 5.1: "if source rows for the same
+    family disagree on event_type, block adoption and explain the
+    conflict." Rows with a blank `event_family_id` are not considered
+    here; `missing_preferred_row_fields` already reports those."""
+    labels_by_family: Dict[str, set] = {}
+    for row in rows:
+        family_id = row.get("event_family_id")
+        event_type = row.get("event_type")
+        if not family_id or not event_type:
+            continue
+        labels_by_family.setdefault(str(family_id), set()).add(
+            _normalised_type_label(event_type)
+        )
+    return {
+        family_id: tuple(sorted(labels))
+        for family_id, labels in labels_by_family.items()
+        if len(labels) > 1
+    }
+
+
+def bulk_adopt_preferred_event_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    source_id: str,
+    source_version: Optional[int],
+    families: Sequence[NamedEventFamily],
+    occurrences: Sequence[NamedEventOccurrence],
+    response_definitions: Sequence[EventResponseDefinition],
+) -> BulkAdoptionOutcome:
+    """Adopt every valid preferred-contract row in `rows` in one governed
+    pass (implementation brief section 5: "provide a practical bulk-adopt
+    path for valid rows"). For each row this may:
+
+    1. register a new `NamedEventFamily` (`event_family_id` not yet
+       registered) - classification resolved from `event_type` via
+       `core.named_event_type_policy`, or marked `response_policy_
+       required` when `event_type` has no automatic policy (brief
+       section 6.2: an unsupported type is retained as governed metadata
+       but never silently opted into fitting);
+    2. verify an already-registered family's classification is
+       compatible with this row's resolved classification - a genuine
+       mismatch blocks that row rather than silently reclassifying the
+       family (section 5.1);
+    3. register the `NamedEventOccurrence` (factual dates preserved
+       verbatim);
+    4. register or reuse the family's deterministic `EventResponseDefinition`
+       (`{family_id}_default_response`, section 6.1) when `event_type`
+       resolves to an automatic policy - repeated yearly rows for the
+       same family reuse the identical, idempotent definition rather than
+       creating a new one each time.
+
+    A row that fails validation, a within-batch family/event_type
+    conflict, or a genuine cross-registration conflict is skipped with an
+    explanatory `RowAdoptionResult` - it never raises and never blocks
+    unrelated rows in the same batch.
+    """
+    current_families: List[NamedEventFamily] = list(families)
+    current_occurrences: List[NamedEventOccurrence] = list(occurrences)
+    current_definitions: List[EventResponseDefinition] = list(response_definitions)
+    conflicted_families = _conflicting_batch_families(rows)
+    results: List[RowAdoptionResult] = []
+
+    for row in rows:
+        event_id = str(row.get("event_id") or "") or "(missing event_id)"
+
+        missing = missing_preferred_row_fields(row)
+        if missing:
+            results.append(
+                RowAdoptionResult(
+                    event_id=event_id,
+                    adopted=False,
+                    problems=(f"missing required field(s): {', '.join(missing)}",),
+                )
+            )
+            continue
+
+        family_id = str(row["event_family_id"])
+        if family_id in conflicted_families:
+            results.append(
+                RowAdoptionResult(
+                    event_id=event_id,
+                    adopted=False,
+                    problems=(
+                        f"event_family_id {family_id!r} has conflicting event_type "
+                        f"values across the uploaded rows ({conflicted_families[family_id]!r})"
+                        " - resolve the conflict before adopting.",
+                    ),
+                )
+            )
+            continue
+
+        # Classification (governed metadata: what kind of family this is)
+        # and automatic response-definition policy (whether an
+        # EventResponseDefinition can be auto-created) are resolved
+        # separately - `event_type="promotion"` resolves a real
+        # classification ("promotional") but currently has no automatic
+        # response policy (see `core.named_event_type_policy` module
+        # docstring), which must not collapse it into "unsupported type".
+        resolved_classification = resolve_family_classification(row["event_type"])
+        policy = resolve_event_type_policy(row["event_type"])
+        existing_family = next(
+            (
+                f
+                for f in current_family_versions(current_families)
+                if f.family_id == family_id
+            ),
+            None,
+        )
+
+        created_family = False
+        response_policy_required = policy is None
+        if existing_family is None:
+            if policy is not None:
+                classification_status = DEFAULT_EVENT_EVIDENCE_STATUS
+            elif normalise_event_type(row["event_type"]) == EVENT_TYPE_PROMOTION:
+                # A recognised, classified type ("promotional") with a
+                # disclosed, decision-required statistical-method gap -
+                # not merely "unsupported event_type". See `docs/
+                # named_event_promotional_window_decision_package.md`.
+                classification_status = CLASSIFICATION_STATUS_PROMOTIONAL_WINDOW_UNRESOLVED
+            else:
+                classification_status = CLASSIFICATION_STATUS_RESPONSE_POLICY_REQUIRED
+            family_record = new_family(
+                family_id=family_id,
+                display_name=str(row["event_name"]),
+                classification=resolved_classification or str(row["event_type"]),
+                classification_status=classification_status,
+            )
+            current_families = list(register_family(current_families, family_record))
+            created_family = True
+        elif (
+            resolved_classification is not None
+            and existing_family.classification != resolved_classification
+        ):
+            results.append(
+                RowAdoptionResult(
+                    event_id=event_id,
+                    adopted=False,
+                    problems=(
+                        f"event_type {row['event_type']!r} resolves to classification "
+                        f"{resolved_classification!r}, which conflicts with family "
+                        f"{family_id!r}'s already-registered classification "
+                        f"{existing_family.classification!r}.",
+                    ),
+                )
+            )
+            continue
+
+        try:
+            occurrence = adopt_source_event_occurrence(
+                {
+                    k: row.get(k)
+                    for k in ("event_id", "event_name", "start_date", "end_date")
+                },
+                {
+                    "market": [str(row["market"])],
+                    "source_id": source_id,
+                    "source_version": source_version,
+                    "family_id": family_id,
+                },
+            )
+            current_occurrences = list(register_occurrence(current_occurrences, occurrence))
+        except ValueError as exc:
+            results.append(
+                RowAdoptionResult(
+                    event_id=event_id,
+                    adopted=False,
+                    problems=(str(exc),),
+                    created_family=created_family,
+                    response_policy_required=response_policy_required,
+                )
+            )
+            continue
+
+        created_definition = False
+        if policy is not None:
+            definition_id = default_response_definition_id(family_id)
+            already_registered = any(
+                d.response_definition_id == definition_id
+                for d in current_response_definition_versions(current_definitions)
+            )
+            new_definition = new_response_definition(
+                response_definition_id=definition_id,
+                family_id=family_id,
+                treatment=policy.treatment,
+                max_lead=policy.max_lead,
+                max_lag=policy.max_lag,
+                transformation_method_reference=policy.transformation_method_reference,
+            )
+            try:
+                current_definitions = list(
+                    register_response_definition(current_definitions, new_definition)
+                )
+                created_definition = not already_registered
+            except ValueError as exc:
+                results.append(
+                    RowAdoptionResult(
+                        event_id=event_id,
+                        adopted=True,
+                        problems=(str(exc),),
+                        created_family=created_family,
+                        response_policy_required=response_policy_required,
+                    )
+                )
+                continue
+
+        results.append(
+            RowAdoptionResult(
+                event_id=event_id,
+                adopted=True,
+                created_family=created_family,
+                created_response_definition=created_definition,
+                response_policy_required=response_policy_required,
+            )
+        )
+
+    return BulkAdoptionOutcome(
+        families=tuple(current_families),
+        occurrences=tuple(current_occurrences),
+        response_definitions=tuple(current_definitions),
+        results=tuple(results),
+    )

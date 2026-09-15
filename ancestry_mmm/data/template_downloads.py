@@ -323,11 +323,32 @@ def _context_template_tables() -> dict[str, pd.DataFrame]:
         "events": pd.DataFrame(
             [
                 {
-                    "event_id": "example_event",
-                    "event_name": "Synthetic example event",
-                    "start_date": "2026-01-08",
-                    "end_date": "2026-01-10",
-                }
+                    "event_id": "mothers_day_2026_uk",
+                    "event_name": "Mother's Day",
+                    "event_family_id": "mothers_day",
+                    "event_type": "gifting",
+                    "market": "UK",
+                    "start_date": "2026-03-15",
+                    "end_date": "2026-03-15",
+                },
+                {
+                    "event_id": "mothers_day_2026_de",
+                    "event_name": "Mother's Day",
+                    "event_family_id": "mothers_day",
+                    "event_type": "gifting",
+                    "market": "DE",
+                    "start_date": "2026-05-10",
+                    "end_date": "2026-05-10",
+                },
+                {
+                    "event_id": "black_friday_2026_uk",
+                    "event_name": "Black Friday",
+                    "event_family_id": "black_friday",
+                    "event_type": "promotion",
+                    "market": "UK",
+                    "start_date": "2026-11-27",
+                    "end_date": "2026-11-30",
+                },
             ]
         ),
     }

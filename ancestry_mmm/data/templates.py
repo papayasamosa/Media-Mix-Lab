@@ -71,6 +71,25 @@ OUTCOME_COMPLETENESS_COLUMNS = (
     "maturity_rule_description",
     "source_owner",
 )
+EVENT_UPLOAD_COLUMNS = (
+    "event_id",
+    "event_name",
+    "event_family_id",
+    "event_type",
+    "market",
+    "start_date",
+    "end_date",
+)
+# Legacy Context `events` contract, retained for backward compatibility -
+# still the only columns the standard-template parser (`_validate_tables`
+# below) actually requires for the sheet, so an older four-column upload
+# keeps loading unchanged. `EVENT_UPLOAD_COLUMNS` above is the new
+# preferred seven-column contract (`application.event_service`'s governed
+# adoption boundary); analyst-supplied `event_family_id`/`event_type`/
+# `market` are validated at the adoption boundary, never at parse time, so
+# a legacy file is never rejected merely for lacking them.
+_EVENT_LEGACY_REQUIRED_COLUMNS = ("event_id", "event_name", "start_date", "end_date")
+
 _OUTCOME_DEFINITION_OPTIONAL_COLUMNS = (
     "unit",
     "aggregation_type",
@@ -246,8 +265,13 @@ STANDARD_SHEET_SPECS: dict[str, tuple[SheetSpec, ...]] = {
         ),
         SheetSpec(
             "events",
-            ("event_id", "event_name", "start_date", "end_date"),
-            "Irregular named events and their scopes.",
+            _EVENT_LEGACY_REQUIRED_COLUMNS,
+            "Irregular named events. Preferred contract: event_id, event_name, "
+            "event_family_id, event_type, market, start_date, end_date "
+            "(EVENT_UPLOAD_COLUMNS) - event_family_id/event_type/market enable "
+            "automatic governed adoption. The legacy four-column contract "
+            "(event_id, event_name, start_date, end_date) remains accepted; "
+            "those rows require manual market/family completion at adoption.",
             required=False,
         ),
     ),
