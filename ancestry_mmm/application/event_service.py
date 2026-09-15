@@ -670,6 +670,21 @@ def bulk_adopt_preferred_event_rows(
                 continue
 
         try:
+            # Row-level lineage takes precedence over the function-level
+            # source_id/source_version - each row already carries its own
+            # true lineage when the caller supplies one (pages/01_Data_
+            # Upload.py stamps every row with the Context source it came
+            # from before calling this function), so one combined batch
+            # across every simultaneously active source still gives each
+            # row its own correct lineage. The function-level parameters
+            # remain a compatibility fallback for a row/caller that does
+            # not supply per-row lineage.
+            _row_source_id = row.get("source_id") or source_id
+            _row_source_version = (
+                row.get("source_version")
+                if row.get("source_version") is not None
+                else source_version
+            )
             occurrence = adopt_source_event_occurrence(
                 {
                     k: row.get(k)
@@ -677,8 +692,8 @@ def bulk_adopt_preferred_event_rows(
                 },
                 {
                     "market": [str(row["market"])],
-                    "source_id": source_id,
-                    "source_version": source_version,
+                    "source_id": _row_source_id,
+                    "source_version": _row_source_version,
                     "family_id": family_id,
                 },
             )

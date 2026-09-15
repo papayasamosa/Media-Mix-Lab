@@ -115,9 +115,11 @@ from ancestry_mmm.data import (
 )
 from ancestry_mmm.core.named_event_diagnostics import build_named_event_diagnostics
 from ancestry_mmm.core.named_event_fit_inputs import (
+    NamedEventIdentityResult,
+    NamedEventRegistryGovernanceError,
     build_named_event_fit_inputs,
     families_excluded_from_fitting,
-    named_event_fingerprint_components,
+    safe_named_event_identity,
 )
 from ancestry_mmm.core.named_events import (
     EventResponseDefinition,
@@ -313,69 +315,80 @@ with SectionCard(
         EventResponseDefinition.from_dict(item)
         for item in (get_state("named_event_response_definitions") or [])
     ]
-    _ne_preview = build_named_event_fit_inputs(
-        frame,
-        families=_ne_preview_families,
-        occurrences=_ne_preview_occurrences,
-        response_definitions=_ne_preview_definitions,
-    )
-    if _ne_preview is not None:
-        _ne_preview_markets = sorted({block.market for block in _ne_preview.blocks})
-        st.caption(
-            f"Named event families: {len(_ne_preview.family_ids)} "
-            f"({', '.join(_ne_preview.family_ids)}). "
-            f"Markets with event support: {', '.join(_ne_preview_markets)}. "
-            "Being fitted does not by itself make an event family approved for "
-            "headline reporting, planning or optimisation."
-        )
-    _ne_excluded_families = families_excluded_from_fitting(
-        frame,
-        families=_ne_preview_families,
-        occurrences=_ne_preview_occurrences,
-        response_definitions=_ne_preview_definitions,
-    )
-    if _ne_excluded_families:
-        _ne_excluded_by_id = {
-            item["family_id"]: item
-            for item in (get_state("named_event_families") or [])
-        }
-        _ne_excluded_labels = []
-        for _fam_id in _ne_excluded_families:
-            _status = (_ne_excluded_by_id.get(_fam_id) or {}).get(
-                "classification_status"
-            )
-            if _status == "promotional_window_unresolved":
-                _ne_excluded_labels.append(f"{_fam_id} (response mechanism unresolved)")
-            else:
-                _ne_excluded_labels.append(_fam_id)
-        st.warning(
-            "Registered named-event families NOT included in this fit: "
-            + ", ".join(_ne_excluded_labels)
-            + ". These are governed, factual event occurrences with no "
-            "opted-in response definition (or a not-yet-resolvable one) for "
-            "this frame - never a zero-effect modelling result."
-        )
-    if _ne_preview_occurrences:
-        _ne_diag_rows = build_named_event_diagnostics(
+    try:
+        _ne_preview = build_named_event_fit_inputs(
             frame,
             families=_ne_preview_families,
             occurrences=_ne_preview_occurrences,
             response_definitions=_ne_preview_definitions,
         )
-        _ne_status_counts: dict = {}
-        for _row in _ne_diag_rows:
-            _ne_status_counts[_row.fit_status] = (
-                _ne_status_counts.get(_row.fit_status, 0) + 1
-            )
-        st.caption(
-            f"Named-event family x market combinations: {len(_ne_diag_rows)} "
-            + "("
-            + ", ".join(f"{k}: {v}" for k, v in sorted(_ne_status_counts.items()))
-            + "). "
-            "See Diagnostics for the full per-family/market breakdown "
-            "(occurrence dates, model periods affected, response policy, "
-            "fitted support)."
+    except NamedEventRegistryGovernanceError as _ne_governance_exc:
+        _ne_preview = None
+        st.error(
+            "Named-event registry is invalid: "
+            f"{_ne_governance_exc} Fitting is blocked until this is resolved - "
+            "see the family/response-definition administration on Data Upload."
         )
+    else:
+        if _ne_preview is not None:
+            _ne_preview_markets = sorted({block.market for block in _ne_preview.blocks})
+            st.caption(
+                f"Named event families: {len(_ne_preview.family_ids)} "
+                f"({', '.join(_ne_preview.family_ids)}). "
+                f"Markets with event support: {', '.join(_ne_preview_markets)}. "
+                "Being fitted does not by itself make an event family approved for "
+                "headline reporting, planning or optimisation."
+            )
+        _ne_excluded_families = families_excluded_from_fitting(
+            frame,
+            families=_ne_preview_families,
+            occurrences=_ne_preview_occurrences,
+            response_definitions=_ne_preview_definitions,
+        )
+        if _ne_excluded_families:
+            _ne_excluded_by_id = {
+                item["family_id"]: item
+                for item in (get_state("named_event_families") or [])
+            }
+            _ne_excluded_labels = []
+            for _fam_id in _ne_excluded_families:
+                _status = (_ne_excluded_by_id.get(_fam_id) or {}).get(
+                    "classification_status"
+                )
+                if _status == "promotional_window_unresolved":
+                    _ne_excluded_labels.append(
+                        f"{_fam_id} (response mechanism unresolved)"
+                    )
+                else:
+                    _ne_excluded_labels.append(_fam_id)
+            st.warning(
+                "Registered named-event families NOT included in this fit: "
+                + ", ".join(_ne_excluded_labels)
+                + ". These are governed, factual event occurrences with no "
+                "opted-in response definition (or a not-yet-resolvable one) for "
+                "this frame - never a zero-effect modelling result."
+            )
+        if _ne_preview_occurrences:
+            _ne_diag_rows = build_named_event_diagnostics(
+                frame,
+                families=_ne_preview_families,
+                occurrences=_ne_preview_occurrences,
+                response_definitions=_ne_preview_definitions,
+            )
+            _ne_status_counts: dict = {}
+            for _row in _ne_diag_rows:
+                _ne_status_counts[_row.fit_status] = (
+                    _ne_status_counts.get(_row.fit_status, 0) + 1
+                )
+            st.caption(
+                f"Named-event family x market combinations: {len(_ne_diag_rows)} "
+                + "("
+                + ", ".join(f"{k}: {v}" for k, v in sorted(_ne_status_counts.items()))
+                + "). "
+                "See Diagnostics for the full per-family/market breakdown "
+                "(occurrence dates, model periods affected, response policy, "
+                "fitted support)."
+            )
 
 with InfoPanel(
     "Sampling plan",
@@ -1140,14 +1153,7 @@ def _build_proposed_model(build_model_type: str):
     return result.model, result.meta
 
 
-def _named_event_fit_inputs_for_current_frame():
-    """Resolve the current governed event registry for the actual fit frame.
-
-    The model-training page owns the fit-time boundary: event definitions are
-    read from the project snapshot and converted into the same deterministic
-    basis used by the model builder.  An opted-out or empty registry returns
-    ``None``, preserving the ordinary model graph exactly.
-    """
+def _current_named_event_registry():
     families = [
         NamedEventFamily.from_dict(item)
         for item in (get_state("named_event_families") or [])
@@ -1160,7 +1166,47 @@ def _named_event_fit_inputs_for_current_frame():
         EventResponseDefinition.from_dict(item)
         for item in (get_state("named_event_response_definitions") or [])
     ]
+    return families, occurrences, definitions
+
+
+def _named_event_fit_inputs_for_current_frame():
+    """Resolve the current governed event registry for the actual fit frame.
+
+    The model-training page owns the fit-time boundary: event definitions are
+    read from the project snapshot and converted into the same deterministic
+    basis used by the model builder.  An opted-out or empty registry returns
+    ``None``, preserving the ordinary model graph exactly.
+
+    Deliberately RAISES `NamedEventRegistryGovernanceError` (never silently
+    swallowed) when the registry is invalid (more than one current opted-in
+    response definition for a family) - this feeds the actual fit-build
+    path (`_fit_build_kwargs`/`_build_proposed_model`), which must fail
+    loudly and never silently proceed to fit without the named-event term
+    a governed family requires. Both call sites of `_build_proposed_model`
+    already catch `ValueError` (which this is a subclass of) and stop
+    rather than crash - see the "Preview prior predictive" and "Build &
+    fit model" button handlers below. A read-only preview/comparison that
+    must never crash should call `_named_event_identity_for_current_frame`
+    instead."""
+    families, occurrences, definitions = _current_named_event_registry()
     return build_named_event_fit_inputs(
+        frame,
+        families=families,
+        occurrences=occurrences,
+        response_definitions=definitions,
+    )
+
+
+def _named_event_identity_for_current_frame() -> NamedEventIdentityResult:
+    """Non-raising counterpart of `_named_event_fit_inputs_for_current_
+    frame` - see `core.named_event_fit_inputs.safe_named_event_identity`.
+    Used by every read-only preview/comparison on this page (`_proposed_
+    model_fingerprint` and its many callers) so an invalid registry can
+    never crash this page; the actual fit-build action still uses the
+    raising helper above so it fails loudly instead of silently fitting
+    without a governed family's response term."""
+    families, occurrences, definitions = _current_named_event_registry()
+    return safe_named_event_identity(
         frame,
         families=families,
         occurrences=occurrences,
@@ -1192,9 +1238,23 @@ def _proposed_model_fingerprint(fingerprint_model_type: str) -> str:
     activity_definitions = get_state("activity_definitions") or []
     search_objects = get_state("search_objects") or []
     coverage_matrix_dict = get_state("variable_coverage_matrix")
-    named_event_fit_inputs = _named_event_fit_inputs_for_current_frame()
-    _named_event_fit_fp, _named_event_classification_fp = (
-        named_event_fingerprint_components(named_event_fit_inputs)
+    # Non-raising: this function is a read-only preview/comparison called
+    # from many places on this page, never the fit-build action itself
+    # (see `_named_event_identity_for_current_frame`'s own docstring). An
+    # invalid registry must never crash it - it returns a fingerprint that
+    # can never match a real one instead, so every staleness comparison
+    # below correctly treats this as "changed", and the actual fit-build
+    # action independently fails loudly and closed (see the "Preview
+    # prior predictive"/"Build & fit model" button handlers, which call
+    # `_build_proposed_model` -> `_named_event_fit_inputs_for_current_
+    # frame` and catch its raised `NamedEventRegistryGovernanceError`).
+    _named_event_identity = _named_event_identity_for_current_frame()
+    if not _named_event_identity.is_valid:
+        return f"NAMED_EVENT_REGISTRY_INVALID:{_named_event_identity.governance_error}"
+    _named_event_fit_fp = _named_event_identity.fit_fingerprint
+    _named_event_classification_fp = _named_event_identity.classification_fingerprint
+    _named_event_occurrence_governance_fp = (
+        _named_event_identity.occurrence_governance_fingerprint
     )
     calibration_inputs = _calibration_inputs_for_current_fit()
     model_spec_fingerprint = fingerprint_model_spec(
@@ -1243,6 +1303,7 @@ def _proposed_model_fingerprint(fingerprint_model_type: str) -> str:
         official_preparation_evidence=get_state("official_preparation_result"),
         named_event_fit_fingerprint=_named_event_fit_fp,
         named_event_classification_fingerprint=_named_event_classification_fp,
+        named_event_occurrence_governance_fingerprint=_named_event_occurrence_governance_fp,
         calibration_fit_fingerprint=calibration_inputs_fingerprint(calibration_inputs),
         seo_fit_fingerprint=seo_fit_inputs_fingerprint(
             _seo_fit_inputs_for_current_frame()

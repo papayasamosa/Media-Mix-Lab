@@ -316,13 +316,15 @@ def build_fitted_model(
     posterior_params = extract_posterior_params(trace, meta)
     activity_definitions = build_activity_definitions()
 
-    named_event_fit_fp, named_event_classification_fp = (
-        current_named_event_identity_fingerprints(
-            frame,
-            families=named_event_families or (),
-            occurrences=named_event_occurrences or (),
-            response_definitions=named_event_response_definitions or (),
-        )
+    (
+        named_event_fit_fp,
+        named_event_classification_fp,
+        named_event_occurrence_governance_fp,
+    ) = current_named_event_identity_fingerprints(
+        frame,
+        families=named_event_families or (),
+        occurrences=named_event_occurrences or (),
+        response_definitions=named_event_response_definitions or (),
     )
 
     data_fingerprint = fingerprint_dataframe(frame["df"])
@@ -352,6 +354,7 @@ def build_fitted_model(
         ),
         named_event_fit_fingerprint=named_event_fit_fp,
         named_event_classification_fingerprint=named_event_classification_fp,
+        named_event_occurrence_governance_fingerprint=named_event_occurrence_governance_fp,
     )
     posterior_fingerprint = fingerprint_posterior(posterior_params)
 
@@ -408,25 +411,27 @@ def recompute_model_spec_fingerprint(
     must reproduce `fitted.model_spec_fingerprint` exactly (the "unchanged
     registry causes no drift" contract)."""
     consumed_columns = fitted.model_spec_dict.get("channels") or []
-    named_event_fit_fp, named_event_classification_fp = (
-        current_named_event_identity_fingerprints(
-            fitted.frame,
-            families=(
-                named_event_families
-                if named_event_families is not None
-                else fitted.named_event_families
-            ),
-            occurrences=(
-                named_event_occurrences
-                if named_event_occurrences is not None
-                else fitted.named_event_occurrences
-            ),
-            response_definitions=(
-                named_event_response_definitions
-                if named_event_response_definitions is not None
-                else fitted.named_event_response_definitions
-            ),
-        )
+    (
+        named_event_fit_fp,
+        named_event_classification_fp,
+        named_event_occurrence_governance_fp,
+    ) = current_named_event_identity_fingerprints(
+        fitted.frame,
+        families=(
+            named_event_families
+            if named_event_families is not None
+            else fitted.named_event_families
+        ),
+        occurrences=(
+            named_event_occurrences
+            if named_event_occurrences is not None
+            else fitted.named_event_occurrences
+        ),
+        response_definitions=(
+            named_event_response_definitions
+            if named_event_response_definitions is not None
+            else fitted.named_event_response_definitions
+        ),
     )
     return fingerprint_model_spec(
         fitted.model_spec_dict,
@@ -453,6 +458,7 @@ def recompute_model_spec_fingerprint(
         ),
         named_event_fit_fingerprint=named_event_fit_fp,
         named_event_classification_fingerprint=named_event_classification_fp,
+        named_event_occurrence_governance_fingerprint=named_event_occurrence_governance_fp,
     )
 
 

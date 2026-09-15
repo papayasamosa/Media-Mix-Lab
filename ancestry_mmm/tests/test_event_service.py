@@ -880,3 +880,127 @@ class TestResponseDefinitionReuseAndConflict:
         assert outcome.adopted_count == 2
         assert len(outcome.response_definitions) == 1
         assert outcome.response_definitions == (existing_definition,)
+
+
+class TestPerRowSourceLineageInOneCombinedBatch:
+    """`pages/01_Data_Upload.py` submits every preferred row from every
+    simultaneously active source in ONE `bulk_adopt_preferred_event_rows`
+    call (restored after the per-source-grouping regression) - lineage is
+    preserved per row (a row's own `source_id`/`source_version` takes
+    precedence over the function-level fallback), while
+    `_conflicting_batch_families` still sees every row in the batch at
+    once, so a cross-source classification disagreement blocks the whole
+    family rather than whichever source is processed first winning."""
+
+    def _adopt(self, rows, **registry):
+        return bulk_adopt_preferred_event_rows(
+            rows,
+            source_id="events",
+            source_version=None,
+            families=registry.get("families", ()),
+            occurrences=registry.get("occurrences", ()),
+            response_definitions=registry.get("response_definitions", ()),
+        )
+
+    def test_two_sources_same_family_compatible_type_both_adopt_with_distinct_lineage(
+        self,
+    ):
+        rows = [
+            _preferred_row(
+                event_id="a", market="UK", source_id="workbook_a", source_version=1
+            ),
+            _preferred_row(
+                event_id="b",
+                market="DE",
+                source_id="workbook_b",
+                source_version=7,
+                start_date="2025-05-11",
+                end_date="2025-05-11",
+            ),
+        ]
+        outcome = self._adopt(rows)
+        assert outcome.adopted_count == 2
+        assert len(outcome.families) == 1  # one shared family, not two
+        occ_by_id = {o.event_id: o for o in outcome.occurrences}
+        assert occ_by_id["a"].source_id == "workbook_a"
+        assert occ_by_id["a"].source_version == 1
+        assert occ_by_id["b"].source_id == "workbook_b"
+        assert occ_by_id["b"].source_version == 7
+
+    def test_two_sources_same_family_conflicting_type_both_blocked(self):
+        rows = [
+            _preferred_row(event_id="a", event_type="gifting", source_id="workbook_a"),
+            _preferred_row(
+                event_id="b", event_type="remembrance", source_id="workbook_b"
+            ),
+        ]
+        outcome = self._adopt(rows)
+        assert outcome.adopted_count == 0
+        assert outcome.families == ()
+        assert outcome.occurrences == ()
+        for result in outcome.results:
+            assert result.adopted is False
+            assert "conflicting event_type" in result.problems[0]
+
+    def test_source_ordering_does_not_change_the_result(self):
+        rows_ab = [
+            _preferred_row(event_id="a", event_type="gifting", source_id="workbook_a"),
+            _preferred_row(
+                event_id="b", event_type="remembrance", source_id="workbook_b"
+            ),
+        ]
+        rows_ba = list(reversed(rows_ab))
+        outcome_ab = self._adopt(rows_ab)
+        outcome_ba = self._adopt(rows_ba)
+        assert outcome_ab.adopted_count == outcome_ba.adopted_count == 0
+        assert outcome_ab.families == outcome_ba.families == ()
+        assert outcome_ab.occurrences == outcome_ba.occurrences == ()
+
+    def test_family_state_existing_before_the_batch_is_respected(self):
+        existing_family = new_family(
+            family_id="mothers_day",
+            display_name="Mother's Day (legacy)",
+            classification="commercial",
+        )
+        rows = [
+            _preferred_row(event_id="a", source_id="workbook_a"),
+            _preferred_row(
+                event_id="b",
+                source_id="workbook_b",
+                start_date="2025-05-11",
+                end_date="2025-05-11",
+            ),
+        ]
+        outcome = self._adopt(rows, families=[existing_family])
+        assert outcome.adopted_count == 0
+        for result in outcome.results:
+            assert result.adopted is False
+        assert outcome.families == (existing_family,)
+
+    def test_existing_single_source_behaviour_is_unchanged(self):
+        rows = [
+            _preferred_row(
+                event_id="mothers_day_2025_uk", source_id="events", source_version=1
+            )
+        ]
+        outcome = self._adopt(rows)
+        assert outcome.adopted_count == 1
+        assert outcome.occurrences[0].source_id == "events"
+        assert outcome.occurrences[0].source_version == 1
+
+    def test_function_level_lineage_fallback_still_works(self):
+        # No source_id/source_version key on the row at all - the
+        # function-level fallback (used by every existing caller/test
+        # that never supplies per-row lineage) must still apply.
+        row = _preferred_row()
+        outcome = bulk_adopt_preferred_event_rows(
+            [row],
+            source_id="legacy-caller-source",
+            source_version=3,
+            families=(),
+            occurrences=(),
+            response_definitions=(),
+        )
+        assert outcome.adopted_count == 1
+        assert outcome.occurrences[0].source_id == "legacy-caller-source"
+        assert outcome.occurrences[0].source_version == 3

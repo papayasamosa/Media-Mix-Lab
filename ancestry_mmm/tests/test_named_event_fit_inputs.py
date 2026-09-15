@@ -15,14 +15,19 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from ancestry_mmm.core.fingerprint import fingerprint_model_spec
 from ancestry_mmm.core.named_event_fit_inputs import (
     NamedEventFamilyFitBlock,
     NamedEventFitInputs,
     build_named_event_fit_inputs,
     build_named_event_fit_inputs_for_replay,
+    current_named_event_identity_fingerprints,
     families_excluded_from_fitting,
     families_without_opted_in_response_definition,
     named_event_classification_fingerprint,
+    named_event_fingerprint_components,
+    named_event_occurrence_governance_fingerprint,
+    safe_named_event_identity,
     weeks_overlapping_event_interval,
 )
 from ancestry_mmm.core.named_event_response import NAMED_EVENT_RESPONSE_STRUCTURE
@@ -816,3 +821,211 @@ class TestBuildNamedEventFitInputsForReplay:
         np.testing.assert_allclose(
             replay_result.blocks[0].design, fit_time_result.blocks[0].design
         )
+
+
+class TestOccurrenceGovernanceFingerprint:
+    """Occurrence-staleness follow-up: `named_event_occurrence_governance_
+    fingerprint` must change for a governance-relevant occurrence edit
+    even when it produces a byte-identical design (`fingerprint()`
+    unchanged) - the numerical design fingerprint alone cannot detect a
+    within-week date correction, a version/lineage-only edit, or (by
+    construction, since occurrence-governance provenance is scoped to
+    occurrences that actually activated a block) a future occurrence
+    outside the fitted historical period."""
+
+    def _build(self, occurrences, *, frame=None, family=None, definition=None):
+        frame = frame or _frame(["UK"], 10, start="2026-01-01")
+        family = family or _family()
+        definition = definition or _definition()
+        return build_named_event_fit_inputs(
+            frame,
+            families=[family],
+            occurrences=occurrences,
+            response_definitions=[definition],
+        )
+
+    def test_within_week_date_correction_changes_governance_not_design(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        period_starts = pd.to_datetime(frame["dates"])
+        week0_start = period_starts[0]
+        week0_end = period_starts[1] - pd.Timedelta(days=1)
+        assert week0_start != week0_end  # two distinct days, same model week
+
+        occ_a = _occurrence(
+            start_date=str(week0_start.date()), end_date=str(week0_start.date())
+        )
+        occ_b = _occurrence(
+            start_date=str(week0_end.date()), end_date=str(week0_end.date())
+        )
+        fit_a = self._build([occ_a], frame=frame)
+        fit_b = self._build([occ_b], frame=frame)
+
+        assert fit_a is not None and fit_b is not None
+        # Numerical design identity unchanged - both dates activate the
+        # exact same model week.
+        assert fit_a.fingerprint() == fit_b.fingerprint()
+        # Occurrence-governance identity changed - a real factual date
+        # correction to governed data.
+        fp_a = named_event_occurrence_governance_fingerprint(fit_a)
+        fp_b = named_event_occurrence_governance_fingerprint(fit_b)
+        assert fp_a != fp_b
+
+        # Official model identity as a whole also changes.
+        identity_a = fingerprint_model_spec(
+            {},
+            {},
+            4,
+            named_event_fit_fingerprint=fit_a.fingerprint(),
+            named_event_occurrence_governance_fingerprint=fp_a,
+        )
+        identity_b = fingerprint_model_spec(
+            {},
+            {},
+            4,
+            named_event_fit_fingerprint=fit_b.fingerprint(),
+            named_event_occurrence_governance_fingerprint=fp_b,
+        )
+        assert identity_a != identity_b
+
+    def test_source_version_change_changes_governance_not_design(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        occ_a = _occurrence(
+            start_date="2026-01-20", end_date="2026-01-20", source_version=1
+        )
+        occ_b = _occurrence(
+            start_date="2026-01-20", end_date="2026-01-20", source_version=2
+        )
+        fit_a = self._build([occ_a], frame=frame)
+        fit_b = self._build([occ_b], frame=frame)
+        assert fit_a is not None and fit_b is not None
+        assert fit_a.fingerprint() == fit_b.fingerprint()
+        assert named_event_occurrence_governance_fingerprint(
+            fit_a
+        ) != named_event_occurrence_governance_fingerprint(fit_b)
+
+    def test_occurrence_version_change_changes_governance_not_design(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        occ_a = _occurrence(
+            start_date="2026-01-20", end_date="2026-01-20", event_version=1
+        )
+        occ_b = _occurrence(
+            start_date="2026-01-20", end_date="2026-01-20", event_version=2
+        )
+        fit_a = self._build([occ_a], frame=frame)
+        fit_b = self._build([occ_b], frame=frame)
+        assert fit_a is not None and fit_b is not None
+        assert fit_a.fingerprint() == fit_b.fingerprint()
+        assert named_event_occurrence_governance_fingerprint(
+            fit_a
+        ) != named_event_occurrence_governance_fingerprint(fit_b)
+
+    def test_source_lineage_change_changes_governance_not_design(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        occ_a = _occurrence(
+            start_date="2026-01-20", end_date="2026-01-20", source_id="workbook_a"
+        )
+        occ_b = _occurrence(
+            start_date="2026-01-20", end_date="2026-01-20", source_id="workbook_b"
+        )
+        fit_a = self._build([occ_a], frame=frame)
+        fit_b = self._build([occ_b], frame=frame)
+        assert fit_a is not None and fit_b is not None
+        assert fit_a.fingerprint() == fit_b.fingerprint()
+        assert named_event_occurrence_governance_fingerprint(
+            fit_a
+        ) != named_event_occurrence_governance_fingerprint(fit_b)
+
+    def test_future_occurrence_outside_fitted_period_does_not_stale(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        historical_occ = _occurrence(start_date="2026-01-20", end_date="2026-01-20")
+        future_occ = _occurrence(
+            event_id="future-event",
+            event_version=1,
+            start_date="2026-06-01",
+            end_date="2026-06-01",
+        )
+        fit_without_future = self._build([historical_occ], frame=frame)
+        fit_with_future = self._build([historical_occ, future_occ], frame=frame)
+        assert fit_without_future is not None and fit_with_future is not None
+        assert fit_without_future.fingerprint() == fit_with_future.fingerprint()
+        assert named_event_occurrence_governance_fingerprint(
+            fit_without_future
+        ) == named_event_occurrence_governance_fingerprint(fit_with_future)
+        # The future occurrence never appears in the consumed-occurrence
+        # provenance at all - never merely cancels out.
+        assert "future-event" not in {
+            record.event_id
+            for record in fit_with_future.consumed_occurrence_governance_records()
+        }
+
+    def test_unchanged_governed_occurrence_state_is_deterministically_stable(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        occ = _occurrence(start_date="2026-01-20", end_date="2026-01-20")
+        fit_a = self._build([occ], frame=frame)
+        fit_b = self._build([occ], frame=frame)
+        assert named_event_occurrence_governance_fingerprint(
+            fit_a
+        ) == named_event_occurrence_governance_fingerprint(fit_b)
+
+    def test_market_scope_order_does_not_affect_the_fingerprint(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        occ_a = _occurrence(
+            start_date="2026-01-20",
+            end_date="2026-01-20",
+            market_scope=("UK", "DE"),
+        )
+        occ_b = _occurrence(
+            start_date="2026-01-20",
+            end_date="2026-01-20",
+            market_scope=("DE", "UK"),
+        )
+        fit_a = self._build([occ_a], frame=frame)
+        fit_b = self._build([occ_b], frame=frame)
+        assert fit_a is not None and fit_b is not None
+        assert named_event_occurrence_governance_fingerprint(
+            fit_a
+        ) == named_event_occurrence_governance_fingerprint(fit_b)
+
+    def test_no_consumed_occurrences_fingerprints_identically_to_none(self):
+        assert named_event_occurrence_governance_fingerprint(
+            None
+        ) == named_event_occurrence_governance_fingerprint(
+            NamedEventFitInputs(blocks=(), shrinkage_prior_scale_by_family={})
+        )
+
+    def test_all_official_identity_entry_points_agree_on_the_same_triple(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        families = [_family()]
+        occurrences = [_occurrence(start_date="2026-01-20", end_date="2026-01-20")]
+        definitions = [_definition()]
+
+        fit_inputs = build_named_event_fit_inputs(
+            frame,
+            families=families,
+            occurrences=occurrences,
+            response_definitions=definitions,
+        )
+        via_components = named_event_fingerprint_components(fit_inputs)
+        via_current_identity = current_named_event_identity_fingerprints(
+            frame,
+            families=families,
+            occurrences=occurrences,
+            response_definitions=definitions,
+        )
+        via_safe = safe_named_event_identity(
+            frame,
+            families=families,
+            occurrences=occurrences,
+            response_definitions=definitions,
+        )
+
+        assert via_components == via_current_identity
+        assert via_safe.is_valid
+        assert (
+            via_safe.fit_fingerprint,
+            via_safe.classification_fingerprint,
+            via_safe.occurrence_governance_fingerprint,
+        ) == via_components
+        # None of the three components is ever fabricated when there is
+        # genuinely something consumed.
+        assert all(via_components)

@@ -58,7 +58,10 @@ from .pathways import (
     resolve_pathway_masks,
 )
 from .net_billthrough import assert_model_frame_net_billthrough_complete
-from .named_event_fit_inputs import NamedEventFitInputs
+from .named_event_fit_inputs import (
+    NamedEventFitInputs,
+    named_event_occurrence_governance_fingerprint as named_event_occurrence_governance_fingerprint_fn,
+)
 from .experiment_lift_test_mapping import (
     ModelLiftTestCalibrationInput,
     attach_lift_test_calibration_terms,
@@ -258,6 +261,26 @@ class FHModelMeta:
     # from the current registry.
     named_event_fit_fingerprint: str = ""
     named_event_fit_block_provenance: List[Dict[str, Any]] = field(default_factory=list)
+    # Occurrence-staleness follow-up: a SEPARATE governance component from
+    # `named_event_fit_fingerprint` above (mirrors classification's own
+    # separate component - see `core.named_event_fit_inputs.named_event_
+    # occurrence_governance_fingerprint`'s docstring for why the numerical
+    # design fingerprint cannot detect a within-week date correction, a
+    # version/lineage-only occurrence edit, or a market-scope edit that
+    # happens not to change activated weeks). `named_event_occurrence_
+    # governance_fingerprint` is the fit-time value of that function;
+    # `named_event_occurrence_provenance` persists the exact governed
+    # fields (event_id/version, family_id, dates, market_scope, source_id/
+    # version) of every occurrence actually consumed at fit time - the
+    # per-occurrence detail the bare fingerprint cannot answer, and which
+    # cannot be truthfully reconstructed after the fact from the current
+    # registry (an occurrence may have since been edited or deleted).
+    # ""/[] (never None) when no named event was consumed - identical
+    # backward-compatibility contract as the two fields above.
+    named_event_occurrence_governance_fingerprint: str = ""
+    named_event_occurrence_provenance: List[Dict[str, Any]] = field(
+        default_factory=list
+    )
     # Production calibration provenance (Decision 11): exact positive lift
     # rows and target outcomes consumed by the fit, plus their identity
     # component. Empty/"" preserves old bundles and means no calibration term.
@@ -1460,6 +1483,8 @@ def build_fh_hierarchical_model(
         # discarded after model construction.
         named_event_fit_fingerprint = ""
         named_event_fit_block_provenance: List[Dict[str, Any]] = []
+        named_event_occurrence_governance_fingerprint = ""
+        named_event_occurrence_provenance: List[Dict[str, Any]] = []
         if named_event_fit_inputs is not None:
             named_event_response_method_version = NAMED_EVENT_RESPONSE_STRUCTURE
             consumed_response_definitions = list(
@@ -1479,6 +1504,13 @@ def build_fh_hierarchical_model(
                     "fitted_support_weeks": int(np.any(b.design != 0.0, axis=1).sum()),
                 }
                 for b in named_event_fit_inputs.blocks
+            ]
+            named_event_occurrence_governance_fingerprint = (
+                named_event_occurrence_governance_fingerprint_fn(named_event_fit_inputs)
+            )
+            named_event_occurrence_provenance = [
+                record.to_dict()
+                for record in named_event_fit_inputs.consumed_occurrence_governance_records()
             ]
             eta_events = pt.zeros((n_obs, n_outcomes))
             for family_id in named_event_fit_inputs.family_ids:
@@ -1608,6 +1640,8 @@ def build_fh_hierarchical_model(
         named_event_fit_blocks=named_event_fit_blocks,
         named_event_fit_fingerprint=named_event_fit_fingerprint,
         named_event_fit_block_provenance=named_event_fit_block_provenance,
+        named_event_occurrence_governance_fingerprint=named_event_occurrence_governance_fingerprint,
+        named_event_occurrence_provenance=named_event_occurrence_provenance,
         calibration_inputs_at_fit=[
             item.to_dict() for item in (calibration_inputs or ())
         ],
