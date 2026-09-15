@@ -1004,3 +1004,109 @@ class TestPerRowSourceLineageInOneCombinedBatch:
         assert outcome.adopted_count == 1
         assert outcome.occurrences[0].source_id == "legacy-caller-source"
         assert outcome.occurrences[0].source_version == 3
+
+
+class TestConflictingDuplicateEventIdBlocksAllRows:
+    """A stable event_id must never be decided by source iteration order
+    - two rows sharing an event_id with materially different governed
+    content (date, market, family, or lineage) block EVERY row for that
+    event_id, not just whichever arrives after the first."""
+
+    def _adopt(self, rows, **registry):
+        return bulk_adopt_preferred_event_rows(
+            rows,
+            source_id="events",
+            source_version=None,
+            families=registry.get("families", ()),
+            occurrences=registry.get("occurrences", ()),
+            response_definitions=registry.get("response_definitions", ()),
+        )
+
+    def test_conflicting_dates_for_the_same_event_id_blocks_both_rows(self):
+        rows = [
+            _preferred_row(
+                event_id="md-2026",
+                source_id="workbook_a",
+                start_date="2026-03-22",
+                end_date="2026-03-22",
+            ),
+            _preferred_row(
+                event_id="md-2026",
+                source_id="workbook_b",
+                start_date="2026-03-23",
+                end_date="2026-03-23",
+            ),
+        ]
+        outcome = self._adopt(rows)
+        assert outcome.adopted_count == 0
+        assert outcome.occurrences == ()
+        for result in outcome.results:
+            assert result.adopted is False
+            assert "appears more than once" in result.problems[0]
+
+    def test_conflicting_lineage_for_the_same_event_id_blocks_both_rows(self):
+        rows = [
+            _preferred_row(event_id="md-2026", source_id="workbook_a"),
+            _preferred_row(event_id="md-2026", source_id="workbook_b"),
+        ]
+        outcome = self._adopt(rows)
+        assert outcome.adopted_count == 0
+        assert outcome.occurrences == ()
+
+    def test_source_ordering_does_not_decide_the_winner(self):
+        rows_ab = [
+            _preferred_row(
+                event_id="md-2026",
+                source_id="workbook_a",
+                start_date="2026-03-22",
+                end_date="2026-03-22",
+            ),
+            _preferred_row(
+                event_id="md-2026",
+                source_id="workbook_b",
+                start_date="2026-03-23",
+                end_date="2026-03-23",
+            ),
+        ]
+        rows_ba = list(reversed(rows_ab))
+        outcome_ab = self._adopt(rows_ab)
+        outcome_ba = self._adopt(rows_ba)
+        assert outcome_ab.occurrences == outcome_ba.occurrences == ()
+
+    def test_identical_duplicate_rows_remain_idempotent(self):
+        # Same event_id, identical governed content twice - not a
+        # conflict, must remain the existing idempotent-reupload path.
+        row = _preferred_row(event_id="md-2026", source_id="workbook_a")
+        rows = [row, dict(row)]
+        outcome = self._adopt(rows)
+        assert outcome.adopted_count == 2
+        assert len(outcome.occurrences) == 1
+
+    def test_unrelated_event_id_in_the_same_batch_still_adopts(self):
+        rows = [
+            _preferred_row(
+                event_id="md-2026",
+                source_id="workbook_a",
+                start_date="2026-03-22",
+                end_date="2026-03-22",
+            ),
+            _preferred_row(
+                event_id="md-2026",
+                source_id="workbook_b",
+                start_date="2026-03-23",
+                end_date="2026-03-23",
+            ),
+            _preferred_row(
+                event_id="fathers_day_2025_uk",
+                event_family_id="fathers_day",
+                event_name="Father's Day",
+                start_date="2025-06-15",
+                end_date="2025-06-15",
+            ),
+        ]
+        outcome = self._adopt(rows)
+        assert outcome.adopted_count == 1
+        good_result = next(
+            r for r in outcome.results if r.event_id == "fathers_day_2025_uk"
+        )
+        assert good_result.adopted is True

@@ -460,6 +460,54 @@ def _conflicting_batch_families(
     }
 
 
+def _conflicting_batch_event_ids(
+    rows: Sequence[Mapping[str, Any]],
+) -> frozenset:
+    """`event_id` values for which this batch itself supplies more than
+    one row with materially different governed occurrence content
+    (event_name, dates, market, family link, or source lineage) - the
+    same "the batch disagrees with itself, block every row involved"
+    contract as `_conflicting_batch_families` above, extended to a
+    duplicate stable `event_id` rather than a family/event_type
+    disagreement.
+
+    Without this, two rows sharing an `event_id` but disagreeing on a
+    governed fact would let whichever row happens to be processed first
+    silently become the authoritative occurrence, with every later
+    conflicting row merely rejected on its own - i.e. source iteration
+    order would decide a governed fact. `adopt_source_event_occurrence`/
+    `register_occurrence`'s own content-equality check already catches
+    this one row at a time (a later row cannot silently overwrite an
+    earlier one), but that still lets the FIRST row's content win purely
+    by position; this scans the whole batch up front, before any row is
+    committed, so every row sharing a genuinely conflicting event_id is
+    blocked - never merely 'whichever arrived first'."""
+    signatures_by_event_id: Dict[str, set] = {}
+    for row in rows:
+        raw_event_id = row.get("event_id")
+        if _is_blank_preferred_value(raw_event_id):
+            continue
+        signature = (
+            str(row.get("event_name") or ""),
+            str(row.get("start_date") or ""),
+            str(row.get("end_date") or ""),
+            str(row.get("market") or ""),
+            str(row.get("event_family_id") or ""),
+            str(row.get("source_id") or ""),
+            (
+                str(row.get("source_version"))
+                if row.get("source_version") is not None
+                else ""
+            ),
+        )
+        signatures_by_event_id.setdefault(str(raw_event_id), set()).add(signature)
+    return frozenset(
+        event_id
+        for event_id, signatures in signatures_by_event_id.items()
+        if len(signatures) > 1
+    )
+
+
 def _response_definition_matches_policy(
     definition: EventResponseDefinition, policy: EventTypeResponsePolicy
 ) -> bool:
@@ -522,7 +570,10 @@ def bulk_adopt_preferred_event_rows(
        market at fit time).
 
     A row that fails validation, a within-batch family/event_type
-    conflict, or a genuine cross-registration conflict is skipped with an
+    conflict, a within-batch duplicate `event_id` whose content
+    materially disagrees across the batch (different name/dates/market/
+    family/lineage - never merely whichever row happens to be processed
+    first), or a genuine cross-registration conflict is skipped with an
     explanatory `RowAdoptionResult` - it never raises and never blocks
     unrelated rows in the same batch.
 
@@ -539,6 +590,7 @@ def bulk_adopt_preferred_event_rows(
     current_occurrences: List[NamedEventOccurrence] = list(occurrences)
     current_definitions: List[EventResponseDefinition] = list(response_definitions)
     conflicted_families = _conflicting_batch_families(rows)
+    conflicted_event_ids = _conflicting_batch_event_ids(rows)
     results: List[RowAdoptionResult] = []
 
     for row in rows:
@@ -556,6 +608,22 @@ def bulk_adopt_preferred_event_rows(
                     event_id=event_id,
                     adopted=False,
                     problems=(f"missing required field(s): {', '.join(missing)}",),
+                )
+            )
+            continue
+
+        if event_id in conflicted_event_ids:
+            results.append(
+                RowAdoptionResult(
+                    event_id=event_id,
+                    adopted=False,
+                    problems=(
+                        f"event_id {event_id!r} appears more than once in this "
+                        "batch with conflicting governed content (event_name, "
+                        "dates, market, family, or source lineage) - resolve "
+                        "the conflict before adopting; no row for this "
+                        "event_id was adopted.",
+                    ),
                 )
             )
             continue
