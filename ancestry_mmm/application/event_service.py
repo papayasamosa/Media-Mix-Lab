@@ -700,29 +700,42 @@ def bulk_adopt_preferred_event_rows(
                 and d.transformation_method_reference == NAMED_EVENT_RESPONSE_STRUCTURE
                 for d in current_response_definition_versions(candidate_definitions)
             )
-            if resolved_classification is None:
-                if has_fitted_definition:
-                    results.append(
-                        RowAdoptionResult(
-                            event_id=event_id,
-                            adopted=False,
-                            problems=(
-                                f"event_type {row['event_type']!r} does not resolve "
-                                "to a recognised classification, and family "
-                                f"{family_id!r} already has a fitted response "
-                                "definition - joining would silently include this "
-                                "occurrence in fitting without a governed "
-                                "classification.",
-                            ),
-                        )
+            # A row whose own event_type has no automatic response policy
+            # (an unrecognised type, OR the recognised-but-disclosed-gap
+            # "promotion"/"promotional" - `policy is None` for both, see
+            # `core.named_event_type_policy` module docstring) must never
+            # join a family that already has a fitted response definition:
+            # `build_named_event_fit_inputs` matches occurrences to a
+            # definition purely by `family_id`, so this row would be
+            # silently fitted through that existing definition despite its
+            # own type never having been opted in - for "promotion" this
+            # would directly contradict the disclosed, decision-required
+            # promotional-window gap (docs/named_event_promotional_window_
+            # decision_package.md: promotional events are adopted as
+            # governed metadata only, never silently included in fitting).
+            # Checked independently of the classification-conflict check
+            # below - even a MATCHING classification (e.g. both
+            # "promotional") must not bypass this.
+            if policy is None and has_fitted_definition:
+                results.append(
+                    RowAdoptionResult(
+                        event_id=event_id,
+                        adopted=False,
+                        problems=(
+                            f"event_type {row['event_type']!r} has no automatic "
+                            f"response policy, and family {family_id!r} already "
+                            "has a fitted response definition - joining would "
+                            "silently include this occurrence in fitting "
+                            "through that existing definition without this "
+                            "row's own type ever being opted in.",
+                        ),
                     )
-                    continue
-                # An unrecognised type against a family with no fitted
-                # definition yet stays governed metadata only, exactly as
-                # before - never silently opted into fitting (section
-                # 6.2), and there is no already-fitted definition here for
-                # it to be silently consumed by.
-            elif existing_family.classification != resolved_classification:
+                )
+                continue
+            if (
+                resolved_classification is not None
+                and existing_family.classification != resolved_classification
+            ):
                 results.append(
                     RowAdoptionResult(
                         event_id=event_id,

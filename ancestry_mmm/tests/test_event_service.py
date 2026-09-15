@@ -634,6 +634,75 @@ class TestUnknownEventTypeCannotJoinFittedFamily:
         assert len(outcome.occurrences) == 1
         assert outcome.occurrences[0].family_id == "mystery_event"
 
+    def test_promotion_type_against_a_fitted_family_rejects(self):
+        # A "promotional" family can already have a manually-created
+        # opted-in response definition (the same reachable path as the
+        # duplicate-opted-in-definition finding). A new promotion row for
+        # that SAME family resolves classification="promotional", which
+        # MATCHES the family's own classification - so the classification-
+        # conflict check alone would never catch this. The no-auto-policy
+        # guard must catch it independently: promotional events must never
+        # be silently fitted through an existing definition (disclosed,
+        # decision-required gap - docs/named_event_promotional_window_
+        # decision_package.md).
+        family = new_family(
+            family_id="black_friday",
+            display_name="Black Friday",
+            classification="promotional",
+            classification_status=CLASSIFICATION_STATUS_PROMOTIONAL_WINDOW_UNRESOLVED,
+        )
+        definition = new_response_definition(
+            response_definition_id="black_friday_manual",
+            family_id="black_friday",
+            treatment="anticipatory",
+            max_lead=2,
+            max_lag=0,
+            transformation_method_reference=NAMED_EVENT_RESPONSE_STRUCTURE,
+        )
+        row = _preferred_row(
+            event_id="black_friday_2026_uk",
+            event_family_id="black_friday",
+            event_name="Black Friday",
+            event_type="promotion",
+            start_date="2026-11-27",
+            end_date="2026-11-30",
+        )
+        outcome = self._adopt(
+            [row], families=[family], response_definitions=[definition]
+        )
+        assert outcome.adopted_count == 0
+        assert outcome.results[0].adopted is False
+        assert outcome.occurrences == ()
+        assert "fitted response definition" in outcome.results[0].problems[0]
+        assert outcome.families == (family,)
+        assert outcome.response_definitions == (definition,)
+
+    def test_promotion_type_against_an_unfitted_promotional_family_still_adopts(self):
+        # Preserves the existing, disclosed promotional behaviour: a
+        # promotional family with no auto/manual opted-in definition yet
+        # still accepts new governed occurrences (never silently fitted,
+        # but never blocked from being registered as governed metadata
+        # either).
+        family = new_family(
+            family_id="black_friday",
+            display_name="Black Friday",
+            classification="promotional",
+            classification_status=CLASSIFICATION_STATUS_PROMOTIONAL_WINDOW_UNRESOLVED,
+        )
+        row = _preferred_row(
+            event_id="black_friday_2026_uk",
+            event_family_id="black_friday",
+            event_name="Black Friday",
+            event_type="promotion",
+            start_date="2026-11-27",
+            end_date="2026-11-30",
+        )
+        outcome = self._adopt([row], families=[family])
+        assert outcome.adopted_count == 1
+        assert len(outcome.occurrences) == 1
+        assert outcome.occurrences[0].family_id == "black_friday"
+        assert outcome.response_definitions == ()
+
 
 class TestBulkAdoptionRowAtomicity:
     def _adopt(self, rows, **registry):
