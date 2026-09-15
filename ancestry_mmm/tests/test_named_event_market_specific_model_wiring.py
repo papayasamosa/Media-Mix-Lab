@@ -115,6 +115,8 @@ class TestNoFitInputsIsByteIdenticalToBefore:
         assert "eta_events" not in model.named_vars
         assert meta.named_event_response_definitions_at_fit == []
         assert meta.named_event_response_method_version == ""
+        assert meta.named_event_fit_fingerprint == ""
+        assert meta.named_event_fit_block_provenance == []
 
 
 class TestSuppliedFitInputsWireIntoTheRealModel:
@@ -138,6 +140,17 @@ class TestSuppliedFitInputsWireIntoTheRealModel:
         assert (
             meta.named_event_response_method_version == NAMED_EVENT_RESPONSE_STRUCTURE
         )
+        assert meta.named_event_fit_fingerprint == fit_inputs.fingerprint()
+        assert meta.named_event_fit_fingerprint != ""
+        provenance_by_market = {
+            record["market"]: record for record in meta.named_event_fit_block_provenance
+        }
+        assert set(provenance_by_market) == {"UK", "AU"}
+        for record in provenance_by_market.values():
+            assert record["family_id"] == "mothers_day"
+            assert record["response_definition_id"] == "md-def"
+            assert record["response_definition_version"] == 1
+            assert record["fitted_support_weeks"] > 0
 
     def test_eta_events_is_zero_outside_the_events_market_row_range(self):
         """Unpooled-by-default: an occurrence scoped to UK only must never

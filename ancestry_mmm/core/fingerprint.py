@@ -129,6 +129,8 @@ def fingerprint_model_spec(
     outcome_group_treatments: Optional[List[Dict[str, Any]]] = None,
     official_preparation_evidence: Optional[Dict[str, Any]] = None,
     named_event_fit_fingerprint: Optional[str] = None,
+    named_event_classification_fingerprint: Optional[str] = None,
+    named_event_occurrence_governance_fingerprint: Optional[str] = None,
     calibration_fit_fingerprint: Optional[str] = None,
     seo_fit_fingerprint: Optional[str] = None,
     search_intent_taxonomy_fit_fingerprint: Optional[str] = None,
@@ -278,6 +280,48 @@ def fingerprint_model_spec(
     old, unaware fingerprint. `""` when omitted (no coverage matrix governed
     yet for this project).
 
+    `named_event_classification_fingerprint` (event-upload-contract
+    implementation brief follow-up audit) is a SEPARATE governance
+    component from `named_event_fit_fingerprint` above, not a replacement
+    for it: `named_event_fit_fingerprint` is `NamedEventFitInputs.
+    fingerprint()`'s numerical design/consumed-response-definition
+    identity, which deliberately EXCLUDES a family's governed
+    `classification` (e.g. "gifting" vs "promotional") - a design choice
+    recorded in `core.named_event_fit_inputs.NamedEventFamilyFitBlock`'s
+    own docstring, because a pure reclassification with no window/
+    occurrence change produces byte-identical `design` arrays and is a
+    distinct kind of change from a design-affecting one. `REQ-EVENT-001`
+    section 8 nonetheless requires "changing... family mapping [or
+    classification]... must stale the affected fit" - reusing the exact
+    per-family fingerprint `core.named_events.fingerprint_event_family`
+    already computes (never a new hashing scheme), restricted to the
+    families this fit actually consumed (pass `core.named_event_fit_
+    inputs.NamedEventFitInputs.consumed_family_classifications()` via
+    `core.named_event_fit_inputs.named_event_classification_fingerprint`)
+    closes that gap without folding classification into the numerical
+    design fingerprint. Opt-in exactly like `named_event_fit_fingerprint`
+    - `""`/omitted for a fit that consumed no named event, so this
+    addition never invalidates an approval that has nothing to do with
+    named events.
+
+    `named_event_occurrence_governance_fingerprint` (occurrence-staleness
+    follow-up) is a THIRD, separate named-event governance component,
+    alongside `named_event_fit_fingerprint` (numerical design/consumed-
+    response-definition identity) and `named_event_classification_
+    fingerprint` (per-family classification identity): pass `core.
+    named_event_fit_inputs.named_event_occurrence_governance_fingerprint`
+    (or read it off `core.named_event_fit_inputs.NamedEventIdentityResult.
+    occurrence_governance_fingerprint` via `safe_named_event_identity`).
+    It hashes the governed fields of every occurrence actually consumed at
+    fit time (event_id/version, family_id, factual dates, market_scope,
+    source_id/version) - fields the numerical design fingerprint cannot
+    see because it hashes the resulting weekly design, not the occurrence
+    record that produced it, so a within-week date correction, a version/
+    lineage-only edit, or a market-scope edit that happens not to change
+    activated weeks would otherwise leave every existing named-event
+    fingerprint unchanged. Same opt-in contract - `""`/omitted for a fit
+    that consumed no named event.
+
     Note: adding `pipeline_steps`, `market_spec_config`,
     `direct_dna_outcome_ids`, `outcome_catalogue`, `outcome_groups`,
     `outcome_group_treatments`,
@@ -382,6 +426,30 @@ def fingerprint_model_spec(
     # unrelated saved approval.
     if named_event_fit_fingerprint:
         payload["named_event_fit_fingerprint"] = named_event_fit_fingerprint
+    # Separate governance component (see docstring): a family's
+    # classification does not affect the numerical design captured above,
+    # but REQ-EVENT-001 section 8 still requires a classification change
+    # to stale the fit. Same opt-in contract as named_event_fit_fingerprint.
+    if named_event_classification_fingerprint:
+        payload["named_event_classification_fingerprint"] = (
+            named_event_classification_fingerprint
+        )
+    # A THIRD, separate named-event governance component (occurrence
+    # staleness follow-up): two materially different governed occurrences
+    # (a within-week date correction, a version/lineage-only edit, a
+    # market-scope edit that happens not to change activated weeks) can
+    # produce the exact same numerical design captured by named_event_fit_
+    # fingerprint above. core.named_event_fit_inputs.named_event_
+    # occurrence_governance_fingerprint hashes the governed occurrence
+    # records themselves (restricted to occurrences actually consumed by
+    # this fit - never every occurrence in the registry), so an edit like
+    # that still stales the fit even though it changes neither the design
+    # nor any family's classification. Same opt-in contract as the other
+    # two named-event components above.
+    if named_event_occurrence_governance_fingerprint:
+        payload["named_event_occurrence_governance_fingerprint"] = (
+            named_event_occurrence_governance_fingerprint
+        )
     # Like named events, calibration is an opt-in model term. Keep ordinary
     # historical fits' fingerprints stable, but bind calibrated fits to the
     # exact experiment rows and target outcomes they consumed.

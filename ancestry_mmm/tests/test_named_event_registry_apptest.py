@@ -173,6 +173,229 @@ def test_registered_occurrences_render_with_factual_dates():
     assert "Registered occurrences (factual dates)" in _all_text(at)
 
 
+def _preferred_events_frame():
+    import pandas as pd
+
+    return pd.DataFrame(
+        [
+            {
+                "event_id": "mothers_day_2025_uk",
+                "event_name": "Mother's Day",
+                "event_family_id": "mothers_day",
+                "event_type": "gifting",
+                "market": "UK",
+                "start_date": "2025-03-30",
+                "end_date": "2025-03-30",
+            },
+            {
+                "event_id": "mothers_day_2025_de",
+                "event_name": "Mother's Day",
+                "event_family_id": "mothers_day",
+                "event_type": "gifting",
+                "market": "DE",
+                "start_date": "2025-05-11",
+                "end_date": "2025-05-11",
+            },
+        ]
+    )
+
+
+def _run_preferred_at(**extra_state):
+    at = AppTest.from_file(str(PAGE), default_timeout=60)
+    at.session_state["raw_sources"] = {"events": _preferred_events_frame()}
+    at.session_state["source_definitions"] = [
+        SourceDefinition(
+            source_id="events",
+            name="events",
+            logical_domain=DOMAIN_CONTEXT_AND_EXTERNAL_FACTORS,
+        ).to_dict()
+    ]
+    at.session_state["data_loaded"] = True
+    for key, value in extra_state.items():
+        at.session_state[key] = value
+    at.run()
+    return at
+
+
+def test_preferred_rows_show_bulk_adopt_section():
+    at = _run_preferred_at()
+    assert not at.exception, f"page raised: {at.exception}"
+    text = _all_text(at)
+    assert "Bulk adopt (preferred seven-column rows)" in text
+
+
+def test_bulk_adopt_button_registers_family_occurrences_and_definition():
+    at = _run_preferred_at()
+    assert not at.exception, f"page raised: {at.exception}"
+
+    submit = next(b for b in at.button if b.key == "ne_bulk_adopt_button")
+    submit.click().run()
+    assert not at.exception, f"page raised after bulk adopt: {at.exception}"
+
+    families = at.session_state["named_event_families"]
+    occurrences = at.session_state["named_event_occurrences"]
+    definitions = at.session_state["named_event_response_definitions"]
+    assert len(families) == 1
+    assert families[0]["family_id"] == "mothers_day"
+    assert families[0]["classification"] == "gifting"
+    assert len(occurrences) == 2
+    assert {tuple(o["market_scope"]) for o in occurrences} == {("UK",), ("DE",)}
+    assert len(definitions) == 1
+    assert definitions[0]["response_definition_id"] == "mothers_day_default_response"
+    assert definitions[0]["treatment"] == "anticipatory"
+
+
+def _promotion_events_frame():
+    import pandas as pd
+
+    return pd.DataFrame(
+        [
+            {
+                "event_id": "black_friday_2025_uk",
+                "event_name": "Black Friday",
+                "event_family_id": "black_friday",
+                "event_type": "promotion",
+                "market": "UK",
+                "start_date": "2025-11-28",
+                "end_date": "2025-12-01",
+            }
+        ]
+    )
+
+
+def _run_promotion_at(**extra_state):
+    at = AppTest.from_file(str(PAGE), default_timeout=60)
+    at.session_state["raw_sources"] = {"events": _promotion_events_frame()}
+    at.session_state["source_definitions"] = [
+        SourceDefinition(
+            source_id="events",
+            name="events",
+            logical_domain=DOMAIN_CONTEXT_AND_EXTERNAL_FACTORS,
+        ).to_dict()
+    ]
+    at.session_state["data_loaded"] = True
+    for key, value in extra_state.items():
+        at.session_state[key] = value
+    at.run()
+    return at
+
+
+def test_promotion_row_adopts_as_governed_data_with_no_response_definition():
+    at = _run_promotion_at()
+    assert not at.exception, f"page raised: {at.exception}"
+
+    submit = next(b for b in at.button if b.key == "ne_bulk_adopt_button")
+    submit.click().run()
+    assert not at.exception, f"page raised after bulk adopt: {at.exception}"
+
+    families = at.session_state["named_event_families"]
+    occurrences = at.session_state["named_event_occurrences"]
+    definitions = at.session_state["named_event_response_definitions"]
+    assert len(families) == 1
+    assert families[0]["family_id"] == "black_friday"
+    assert families[0]["classification"] == "promotional"
+    assert families[0]["classification_status"] == "promotional_window_unresolved"
+    assert len(occurrences) == 1
+    assert occurrences[0]["start_date"] == "2025-11-28"
+    assert occurrences[0]["end_date"] == "2025-12-01"
+    # Never auto-fitted - the bounded per-occurrence response mechanism is
+    # a disclosed, decision-required gap.
+    assert definitions == []
+
+    text = _all_text(at)
+    assert "NOT currently included in the fitted named-event response" in text
+    assert "decision-required" in text
+
+
+def _preferred_events_frame_a():
+    import pandas as pd
+
+    return pd.DataFrame(
+        [
+            {
+                "event_id": "mothers_day_2025_uk",
+                "event_name": "Mother's Day",
+                "event_family_id": "mothers_day",
+                "event_type": "gifting",
+                "market": "UK",
+                "start_date": "2025-03-30",
+                "end_date": "2025-03-30",
+            }
+        ]
+    )
+
+
+def _preferred_events_frame_b():
+    import pandas as pd
+
+    return pd.DataFrame(
+        [
+            {
+                "event_id": "fathers_day_2025_uk",
+                "event_name": "Father's Day",
+                "event_family_id": "fathers_day",
+                "event_type": "gifting",
+                "market": "UK",
+                "start_date": "2025-06-15",
+                "end_date": "2025-06-15",
+            }
+        ]
+    )
+
+
+def test_bulk_adopt_preserves_each_source_own_lineage():
+    # Two Context `events` workbooks are simultaneously active - the
+    # second workbook's source_id/source_version must never be collapsed
+    # onto the first's (the regression: only `_preferred_rows[0]`'s
+    # lineage used to be applied to the whole batch).
+    at = AppTest.from_file(str(PAGE), default_timeout=60)
+    at.session_state["raw_sources"] = {
+        "workbook_a__sheet__events": _preferred_events_frame_a(),
+        "workbook_b__sheet__events": _preferred_events_frame_b(),
+    }
+    at.session_state["active_source_upload_version"] = {
+        "workbook_a__sheet__events": 1,
+        "workbook_b__sheet__events": 7,
+    }
+    at.session_state["source_definitions"] = [
+        SourceDefinition(
+            source_id="workbook_a__sheet__events",
+            name="events",
+            logical_domain=DOMAIN_CONTEXT_AND_EXTERNAL_FACTORS,
+        ).to_dict(),
+        SourceDefinition(
+            source_id="workbook_b__sheet__events",
+            name="events",
+            logical_domain=DOMAIN_CONTEXT_AND_EXTERNAL_FACTORS,
+        ).to_dict(),
+    ]
+    at.session_state["data_loaded"] = True
+    at.run()
+    assert not at.exception, f"page raised: {at.exception}"
+
+    submit = next(b for b in at.button if b.key == "ne_bulk_adopt_button")
+    submit.click().run()
+    assert not at.exception, f"page raised after bulk adopt: {at.exception}"
+
+    families = at.session_state["named_event_families"]
+    occurrences = at.session_state["named_event_occurrences"]
+    # Both source groups' rows adopted - result counts/warnings reflect
+    # the combined batch, not just the first group.
+    assert len(families) == 2
+    assert len(occurrences) == 2
+    assert "Adopted 2 of 2 rows" in _all_text(at)
+
+    occurrences_by_family = {o["family_id"]: o for o in occurrences}
+    mothers_day_occ = occurrences_by_family["mothers_day"]
+    fathers_day_occ = occurrences_by_family["fathers_day"]
+    # Each occurrence records its own workbook's lineage - never the
+    # other workbook's, and never silently collapsed onto one identity.
+    assert mothers_day_occ["source_id"] == "workbook_a__sheet__events"
+    assert mothers_day_occ["source_version"] == 1
+    assert fathers_day_occ["source_id"] == "workbook_b__sheet__events"
+    assert fathers_day_occ["source_version"] == 7
+
+
 def test_registered_families_enable_definition_form():
     from ancestry_mmm.core.named_events import NamedEventFamily
 

@@ -89,6 +89,9 @@ from ancestry_mmm.core.named_events import (
     NamedEventFamily,
     NamedEventOccurrence,
 )
+from ancestry_mmm.core.named_event_fit_inputs import (
+    safe_named_event_identity,
+)
 from ancestry_mmm.application.project_service import verify_imported_readiness
 from ancestry_mmm.application.diagnostics_service import DiagnosticsArtefact
 from ancestry_mmm.application.curve_service import CurveService, CurveGovernanceError
@@ -369,73 +372,117 @@ def _resolve_official_curve_artifact_rows() -> list[dict]:
         and frame is not None
         and params is not None
     ):
-        current_identity = {
-            "model_run_id": model_run_id,
-            "data_fingerprint": fingerprint_dataframe(frame["df"]),
-            "model_spec_fingerprint": fingerprint_model_spec(
-                spec_dict,
-                prior_config,
-                dna_lag_weeks,
-                model_type=model_type,
-                pipeline_steps=get_state("pipeline_steps") or [],
-                market_spec_config=get_state("market_spec_config"),
-                direct_dna_outcome_ids=meta.direct_dna_outcome_ids
-                if meta is not None
-                else None,
-                outcome_catalogue=outcome_catalogue_fingerprint_payload(
-                    meta.outcome_catalogue_at_fit
-                )
-                if meta is not None
-                else None,
-                funnel_links=get_state("funnel_links"),
-                media_outcome_pathways=pathway_catalogue_fingerprint_payload(
-                    meta.pathway_catalogue_at_fit
-                )
-                if meta is not None
-                else None,
-                activity_fit_fingerprint=(
-                    activity_fit_fingerprint(activity_definitions)
-                    if activity_definitions
-                    else None
-                ),
-                causal_graph_structural_fingerprint=current_structural_fingerprint_for_identity(
-                    fit_time_structural_fingerprint=(
-                        getattr(meta, "causal_graph_structural_fingerprint", "") or ""
+        _named_event_families = [
+            NamedEventFamily.from_dict(item)
+            for item in (get_state("named_event_families") or [])
+        ]
+        _named_event_occurrences = [
+            NamedEventOccurrence.from_dict(item)
+            for item in (get_state("named_event_occurrences") or [])
+        ]
+        _named_event_response_definitions = [
+            EventResponseDefinition.from_dict(item)
+            for item in (get_state("named_event_response_definitions") or [])
+        ]
+        _named_event_identity = safe_named_event_identity(
+            frame,
+            families=_named_event_families,
+            occurrences=_named_event_occurrences,
+            response_definitions=_named_event_response_definitions,
+        )
+        if not _named_event_identity.is_valid:
+            st.error(
+                "Named-event registry is invalid: "
+                f"{_named_event_identity.governance_error} Current model "
+                "identity cannot be computed, and no export/official-output "
+                "action that depends on it can be authorised, until this is "
+                "resolved - see the family/response-definition "
+                "administration on Data Upload."
+            )
+        _named_event_fit_fp = _named_event_identity.fit_fingerprint
+        _named_event_classification_fp = (
+            _named_event_identity.classification_fingerprint
+        )
+        _named_event_occurrence_governance_fp = (
+            _named_event_identity.occurrence_governance_fingerprint
+        )
+        if _named_event_identity.is_valid:
+            current_identity = {
+                "model_run_id": model_run_id,
+                "data_fingerprint": fingerprint_dataframe(frame["df"]),
+                "model_spec_fingerprint": fingerprint_model_spec(
+                    spec_dict,
+                    prior_config,
+                    dna_lag_weeks,
+                    model_type=model_type,
+                    pipeline_steps=get_state("pipeline_steps") or [],
+                    market_spec_config=get_state("market_spec_config"),
+                    direct_dna_outcome_ids=meta.direct_dna_outcome_ids
+                    if meta is not None
+                    else None,
+                    outcome_catalogue=outcome_catalogue_fingerprint_payload(
+                        meta.outcome_catalogue_at_fit
                     )
                     if meta is not None
-                    else "",
-                    live_graph_dict=get_state("causal_graph"),
-                ),
-                search_object_fit_fingerprint=(
-                    search_object_fit_fingerprint(
-                        search_objects,
-                        consumed_model_input_columns=spec_dict.get("channels") or [],
+                    else None,
+                    funnel_links=get_state("funnel_links"),
+                    media_outcome_pathways=pathway_catalogue_fingerprint_payload(
+                        meta.pathway_catalogue_at_fit
                     )
-                    if search_objects
-                    else None
+                    if meta is not None
+                    else None,
+                    activity_fit_fingerprint=(
+                        activity_fit_fingerprint(activity_definitions)
+                        if activity_definitions
+                        else None
+                    ),
+                    causal_graph_structural_fingerprint=current_structural_fingerprint_for_identity(
+                        fit_time_structural_fingerprint=(
+                            getattr(meta, "causal_graph_structural_fingerprint", "")
+                            or ""
+                        )
+                        if meta is not None
+                        else "",
+                        live_graph_dict=get_state("causal_graph"),
+                    ),
+                    search_object_fit_fingerprint=(
+                        search_object_fit_fingerprint(
+                            search_objects,
+                            consumed_model_input_columns=spec_dict.get("channels")
+                            or [],
+                        )
+                        if search_objects
+                        else None
+                    ),
+                    search_intent_taxonomy_fit_fingerprint=search_intent_taxonomy_fit_fingerprint(
+                        activity_definitions,
+                        get_state("search_intent_groups") or [],
+                        get_state("search_intent_group_versions") or [],
+                        consumed_model_input_columns=spec_dict.get("channels") or [],
+                    ),
+                    named_event_fit_fingerprint=_named_event_fit_fp,
+                    named_event_classification_fingerprint=_named_event_classification_fp,
+                    named_event_occurrence_governance_fingerprint=_named_event_occurrence_governance_fp,
+                    variable_coverage_fingerprint=(
+                        VariableCoverageMatrix.from_dict(
+                            coverage_matrix_dict
+                        ).fingerprint()
+                        if coverage_matrix_dict
+                        else None
+                    ),
+                    official_preparation_evidence=get_state(
+                        "official_preparation_result"
+                    ),
+                    seo_fit_fingerprint=seo_fit_inputs_fingerprint(
+                        get_state("seo_fit_inputs")
+                        or getattr(meta, "seo_fit_inputs_at_fit", None)
+                    ),
+                    calibration_fit_fingerprint=(
+                        getattr(meta, "calibration_fit_fingerprint", "") or None
+                    ),
                 ),
-                search_intent_taxonomy_fit_fingerprint=search_intent_taxonomy_fit_fingerprint(
-                    activity_definitions,
-                    get_state("search_intent_groups") or [],
-                    get_state("search_intent_group_versions") or [],
-                    consumed_model_input_columns=spec_dict.get("channels") or [],
-                ),
-                variable_coverage_fingerprint=(
-                    VariableCoverageMatrix.from_dict(coverage_matrix_dict).fingerprint()
-                    if coverage_matrix_dict
-                    else None
-                ),
-                official_preparation_evidence=get_state("official_preparation_result"),
-                seo_fit_fingerprint=seo_fit_inputs_fingerprint(
-                    get_state("seo_fit_inputs")
-                    or getattr(meta, "seo_fit_inputs_at_fit", None)
-                ),
-                calibration_fit_fingerprint=(
-                    getattr(meta, "calibration_fit_fingerprint", "") or None
-                ),
-            ),
-            "posterior_fingerprint": fingerprint_posterior(params),
-        }
+                "posterior_fingerprint": fingerprint_posterior(params),
+            }
 
     approval_dict = get_state("model_approval")
     current_policy, _ = load_threshold_policy(get_state("validation_policy"))

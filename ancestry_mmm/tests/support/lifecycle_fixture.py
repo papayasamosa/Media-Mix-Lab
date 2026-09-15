@@ -60,6 +60,14 @@ from ancestry_mmm.core.media_costs import (
     MonetarySpendSupport,
 )
 from ancestry_mmm.core.model_identity import ModelIdentity
+from ancestry_mmm.core.named_event_fit_inputs import (
+    current_named_event_identity_fingerprints,
+)
+from ancestry_mmm.core.named_events import (
+    EventResponseDefinition,
+    NamedEventFamily,
+    NamedEventOccurrence,
+)
 from ancestry_mmm.core.optimization import scenario_to_dict
 from ancestry_mmm.core.outcome_approval import (
     OutcomeApproval,
@@ -253,10 +261,19 @@ class FittedModel:
     model_spec_fingerprint: str
     posterior_fingerprint: str
     search_objects: Tuple[SearchObjectDefinition, ...] = ()
+    named_event_families: Tuple[NamedEventFamily, ...] = ()
+    named_event_occurrences: Tuple[NamedEventOccurrence, ...] = ()
+    named_event_response_definitions: Tuple[EventResponseDefinition, ...] = ()
 
 
 def build_fitted_model(
-    *, search_objects: Optional[Sequence[SearchObjectDefinition]] = None
+    *,
+    search_objects: Optional[Sequence[SearchObjectDefinition]] = None,
+    named_event_families: Optional[Sequence[NamedEventFamily]] = None,
+    named_event_occurrences: Optional[Sequence[NamedEventOccurrence]] = None,
+    named_event_response_definitions: Optional[
+        Sequence[EventResponseDefinition]
+    ] = None,
 ) -> FittedModel:
     """Deterministically build a complete, internally-consistent fitted
     model: transformed frame, model spec, structurally-valid trace, derived
@@ -273,7 +290,20 @@ def build_fitted_model(
     `recompute_model_spec_fingerprint` below. Omitting it (the default)
     reproduces every existing caller's behaviour unchanged: `fingerprint_
     model_spec`'s own `search_object_fit_fingerprint` parameter already
-    defaults to `None` ("no Search governance data available")."""
+    defaults to `None` ("no Search governance data available").
+
+    `named_event_families`/`_occurrences`/`_response_definitions` are the
+    analogous optional governed named-event registry at fit time - passed
+    through `core.named_event_fit_inputs.current_named_event_identity_
+    fingerprints` (the SAME shared helper `pages/05_Model_Training.py`,
+    `06_Diagnostics.py`, `07_Results_Curve_Bank.py`, `08_Scenario_
+    Planner.py`, `09_Project_Export.py` and `13_Official_Curve_
+    Generation.py` all use, never a page- or test-specific reimplementation)
+    into `model_spec_fingerprint`'s own `named_event_fit_fingerprint`/
+    `named_event_classification_fingerprint` parameters. Omitting them (the
+    default) reproduces every existing caller's behaviour unchanged - both
+    fingerprints stay `None`, exactly `fingerprint_model_spec`'s own "no
+    named event consumed" contract."""
     outcome_definition = build_outcome_definition()
     meta = build_meta(outcome_definition)
     trace = build_trace(meta)
@@ -285,6 +315,17 @@ def build_fitted_model(
     frame = prepare_fh_modeling_frame(transformed_data, spec)
     posterior_params = extract_posterior_params(trace, meta)
     activity_definitions = build_activity_definitions()
+
+    (
+        named_event_fit_fp,
+        named_event_classification_fp,
+        named_event_occurrence_governance_fp,
+    ) = current_named_event_identity_fingerprints(
+        frame,
+        families=named_event_families or (),
+        occurrences=named_event_occurrences or (),
+        response_definitions=named_event_response_definitions or (),
+    )
 
     data_fingerprint = fingerprint_dataframe(frame["df"])
     model_spec_fingerprint = fingerprint_model_spec(
@@ -311,6 +352,9 @@ def build_fitted_model(
             if search_objects
             else None
         ),
+        named_event_fit_fingerprint=named_event_fit_fp,
+        named_event_classification_fingerprint=named_event_classification_fp,
+        named_event_occurrence_governance_fingerprint=named_event_occurrence_governance_fp,
     )
     posterior_fingerprint = fingerprint_posterior(posterior_params)
 
@@ -330,6 +374,9 @@ def build_fitted_model(
         model_spec_fingerprint=model_spec_fingerprint,
         posterior_fingerprint=posterior_fingerprint,
         search_objects=tuple(search_objects or ()),
+        named_event_families=tuple(named_event_families or ()),
+        named_event_occurrences=tuple(named_event_occurrences or ()),
+        named_event_response_definitions=tuple(named_event_response_definitions or ()),
     )
 
 
@@ -337,16 +384,55 @@ def recompute_model_spec_fingerprint(
     fitted: FittedModel,
     *,
     search_objects: Optional[Sequence[SearchObjectDefinition]] = None,
+    named_event_families: Optional[Sequence[NamedEventFamily]] = None,
+    named_event_occurrences: Optional[Sequence[NamedEventOccurrence]] = None,
+    named_event_response_definitions: Optional[
+        Sequence[EventResponseDefinition]
+    ] = None,
 ) -> str:
     """Recompute `model_spec_fingerprint` exactly the way `build_fitted_model`
-    did, but against a possibly-edited `search_objects` catalogue - lets a
-    test prove whether a specific *sanctioned* Search-object edit (via
-    `core.search_objects.new_search_object_version`) would stale an
-    already-fitted model's identity, without re-fitting anything. Every
-    other input is taken unchanged from `fitted`, so the only thing that can
-    differ from `fitted.model_spec_fingerprint` is the Search catalogue
-    passed here."""
+    did, but against a possibly-edited `search_objects` catalogue and/or
+    named-event registry - lets a test prove whether a specific *sanctioned*
+    edit (a Search-object version bump via `core.search_objects.
+    new_search_object_version`, or a named-event occurrence/family/response-
+    definition change) would stale an already-fitted model's identity,
+    without re-fitting anything. Every other input is taken unchanged from
+    `fitted`, so the only thing that can differ from `fitted.model_spec_
+    fingerprint` is whichever catalogue/registry is passed here.
+
+    Named-event arguments default to `fitted`'s OWN fit-time registry
+    (`fitted.named_event_families`/etc.), not to empty - unlike
+    `search_objects` (whose omission has always meant "no Search governance
+    data available" even when the fit consumed one), the point of this
+    named-event parameter is specifically to let a test hold everything else
+    fixed and change ONLY the registry, so a caller must pass an explicit
+    (possibly edited) sequence to see a different named-event fingerprint;
+    omitting it recomputes the SAME registry `fitted` was built from, which
+    must reproduce `fitted.model_spec_fingerprint` exactly (the "unchanged
+    registry causes no drift" contract)."""
     consumed_columns = fitted.model_spec_dict.get("channels") or []
+    (
+        named_event_fit_fp,
+        named_event_classification_fp,
+        named_event_occurrence_governance_fp,
+    ) = current_named_event_identity_fingerprints(
+        fitted.frame,
+        families=(
+            named_event_families
+            if named_event_families is not None
+            else fitted.named_event_families
+        ),
+        occurrences=(
+            named_event_occurrences
+            if named_event_occurrences is not None
+            else fitted.named_event_occurrences
+        ),
+        response_definitions=(
+            named_event_response_definitions
+            if named_event_response_definitions is not None
+            else fitted.named_event_response_definitions
+        ),
+    )
     return fingerprint_model_spec(
         fitted.model_spec_dict,
         fitted.prior_config,
@@ -370,6 +456,9 @@ def recompute_model_spec_fingerprint(
             if search_objects
             else None
         ),
+        named_event_fit_fingerprint=named_event_fit_fp,
+        named_event_classification_fingerprint=named_event_classification_fp,
+        named_event_occurrence_governance_fingerprint=named_event_occurrence_governance_fp,
     )
 
 
@@ -670,7 +759,13 @@ class LifecycleProject:
 
 
 def build_lifecycle_project(
-    *, search_objects: Optional[Sequence[SearchObjectDefinition]] = None
+    *,
+    search_objects: Optional[Sequence[SearchObjectDefinition]] = None,
+    named_event_families: Optional[Sequence[NamedEventFamily]] = None,
+    named_event_occurrences: Optional[Sequence[NamedEventOccurrence]] = None,
+    named_event_response_definitions: Optional[
+        Sequence[EventResponseDefinition]
+    ] = None,
 ) -> LifecycleProject:
     """The one builder that assembles the complete, deterministic,
     already-fitted synthetic project: fitted model, policy-backed model
@@ -680,8 +775,15 @@ def build_lifecycle_project(
 
     `search_objects` threads straight through to `build_fitted_model` (Work
     Package 1 Correction C) - omitted by default, reproducing every existing
-    caller's behaviour unchanged."""
-    fitted = build_fitted_model(search_objects=search_objects)
+    caller's behaviour unchanged. `named_event_families`/`_occurrences`/
+    `_response_definitions` do the same for the governed named-event
+    registry at fit time."""
+    fitted = build_fitted_model(
+        search_objects=search_objects,
+        named_event_families=named_event_families,
+        named_event_occurrences=named_event_occurrences,
+        named_event_response_definitions=named_event_response_definitions,
+    )
     policy, readiness, approval, diagnostics = build_policy_backed_governance(
         fitted.model_run_id,
         fitted.data_fingerprint,

@@ -68,6 +68,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -93,6 +94,41 @@ NAMED_EVENT_FIT_INPUTS_VERSION = "named-event-fit-inputs-v1"
 
 
 @dataclass(frozen=True)
+class ConsumedOccurrenceGovernance:
+    """A snapshot of one `NamedEventOccurrence`'s governed identity fields
+    at the moment it was consumed by a `NamedEventFamilyFitBlock` -
+    exactly the fields `named_event_occurrence_governance_fingerprint`
+    needs to detect a governance-relevant occurrence edit that produces a
+    byte-identical design matrix (a within-week date correction, a
+    version/lineage-only edit, a market-scope edit that happens not to
+    change which weeks are activated) - none of which the numerical
+    `NamedEventFitInputs.fingerprint()` above can see, by construction,
+    since it hashes the resulting weekly design, not the occurrence
+    record that produced it."""
+
+    event_id: str
+    event_version: int
+    family_id: str
+    start_date: str
+    end_date: str
+    market_scope: Tuple[str, ...]
+    source_id: str
+    source_version: Optional[int]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "event_id": self.event_id,
+            "event_version": self.event_version,
+            "family_id": self.family_id,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+            "market_scope": sorted(self.market_scope),
+            "source_id": self.source_id,
+            "source_version": self.source_version,
+        }
+
+
+@dataclass(frozen=True)
 class NamedEventFamilyFitBlock:
     """One `(market, family)`'s spline-basis design matrix, already
     embedded into this fit's full `(n_obs, n_basis)` row range (zero
@@ -108,6 +144,22 @@ class NamedEventFamilyFitBlock:
     response_definition_id: str
     response_definition_version: int
     outcome_scope: Tuple[str, ...]
+    # The family's own governed classification at fit time (e.g. "gifting")
+    # - diagnostic provenance only (implementation brief: "make named-event
+    # diagnostics fit-time provenance aware"), never consumed by the PyMC
+    # graph and deliberately excluded from `fingerprint()` below (a pure
+    # reclassification with no design/definition change is a real, distinct
+    # drift reason - not the same thing as a design-affecting change, so it
+    # is compared directly by diagnostics rather than folded into one opaque
+    # hash). Defaults to "" so this remains a purely additive field.
+    classification: str = ""
+    # The exact occurrences that activated at least one week of THIS
+    # block's design (i.e. actually consumed by the fitted historical
+    # model, never every occurrence merely registered for the family -
+    # see `named_event_occurrence_governance_fingerprint`'s docstring for
+    # why this is a separate governance component from `fingerprint()`
+    # below). Defaults to `()` so this remains a purely additive field.
+    consumed_occurrences: Tuple[ConsumedOccurrenceGovernance, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -147,6 +199,47 @@ class NamedEventFitInputs:
                 seen.append(pair)
         return tuple(seen)
 
+    def consumed_family_classifications(self) -> Tuple[Tuple[str, str], ...]:
+        """`(family_id, classification)` pairs for every family actually
+        consumed at fit time, deduplicated and sorted by `family_id` -
+        the governance identity `fingerprint()` below deliberately
+        excludes (see `NamedEventFamilyFitBlock.classification`'s own
+        docstring). Feeds `named_event_classification_fingerprint`
+        below, which `core.fingerprint.fingerprint_model_spec` combines
+        alongside `fingerprint()`'s numerical design identity as a
+        SEPARATE component, so a classification change (e.g. gifting ->
+        promotion) participates in official model staleness
+        (`REQ-EVENT-001` section 8) even when it changes nothing about
+        the fitted design shape."""
+        seen: Dict[str, str] = {}
+        for block in self.blocks:
+            seen.setdefault(block.family_id, block.classification)
+        return tuple(sorted(seen.items()))
+
+    def consumed_occurrence_governance_records(
+        self,
+    ) -> Tuple[ConsumedOccurrenceGovernance, ...]:
+        """Every occurrence actually consumed by at least one block
+        (deduplicated by `(event_id, event_version)`, sorted
+        deterministically) - the exact, and only, occurrences relevant to
+        this fitted historical model. An occurrence that never activated
+        any week of any block (e.g. a future occurrence of the same
+        family that falls entirely outside this fit's date range) simply
+        never appears in any block's `consumed_occurrences` in the first
+        place, so it never appears here either - `named_event_occurrence_
+        governance_fingerprint` below therefore cannot be changed by
+        adding a future occurrence outside the fitted historical period."""
+        seen: Dict[Tuple[str, int], ConsumedOccurrenceGovernance] = {}
+        for block in self.blocks:
+            for record in block.consumed_occurrences:
+                seen.setdefault((record.event_id, record.event_version), record)
+        return tuple(
+            sorted(
+                seen.values(),
+                key=lambda record: (record.event_id, record.event_version),
+            )
+        )
+
     def fingerprint(self) -> str:
         """Fingerprint the exact event design consumed by a model fit.
 
@@ -176,6 +269,251 @@ class NamedEventFitInputs:
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
+
+
+def named_event_classification_fingerprint(
+    fit_inputs: Optional[NamedEventFitInputs],
+) -> str:
+    """Deterministic fingerprint over the governed `classification` of
+    every family actually consumed at fit time (`fit_inputs.consumed_
+    family_classifications()`) - the SEPARATE governance component
+    `core.fingerprint.fingerprint_model_spec`'s own `named_event_
+    classification_fingerprint` parameter combines alongside `NamedEvent
+    FitInputs.fingerprint()`'s numerical design identity, so `REQ-EVENT-
+    001` section 8's "changing... family mapping [classification]...
+    must stale the affected fit" is enforced through the model's own
+    official fingerprint - never merely shown as an informational
+    Diagnostics-only difference (see `core.named_event_diagnostics.
+    assess_named_event_drift`, which reports the same kind of change for
+    display purposes only and does not itself participate in official
+    staleness). `fit_inputs=None` (no named event consumed) fingerprints
+    identically to an empty tuple, matching every other named-event
+    field's "no event" convention - callers pass the resulting value to
+    `fingerprint_model_spec` exactly like `named_event_fit_fingerprint`
+    (falsy is omitted from the payload, never invalidating an approval
+    that consumed no named event)."""
+    pairs = (
+        fit_inputs.consumed_family_classifications() if fit_inputs is not None else ()
+    )
+    payload = {"family_classifications": [list(pair) for pair in pairs]}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def named_event_occurrence_governance_fingerprint(
+    fit_inputs: Optional[NamedEventFitInputs],
+) -> str:
+    """Deterministic fingerprint over the governed occurrence fields of
+    every occurrence actually consumed at fit time (`fit_inputs.consumed_
+    occurrence_governance_records()`) - a THIRD, separate governance
+    component alongside `NamedEventFitInputs.fingerprint()`'s numerical
+    design identity and `named_event_classification_fingerprint`'s
+    per-family classification identity.
+
+    Why a separate component, rather than folding this into the
+    numerical design fingerprint: two materially different governed
+    occurrences can produce the exact same weekly design matrix - moving
+    a factual date within the same model week, bumping only the
+    occurrence's version/lineage (`event_version`/`source_id`/
+    `source_version`) with no date change, or a market-scope edit that
+    happens not to change which weeks are activated. `fingerprint()`
+    hashes the *design*, so none of these change it; this function hashes
+    the *governed occurrence record itself*, exactly mirroring why
+    classification needed its own component (see `named_event_
+    classification_fingerprint`'s docstring) rather than being smuggled
+    into the numerical fingerprint.
+
+    Scope: only occurrences that actually activated at least one week of
+    a consumed block - never every occurrence sitting in the registry.
+    A future occurrence of the same family, registered for planning but
+    outside the fitted historical frame's date range, never appears in
+    any block's `consumed_occurrences` (`build_named_event_fit_inputs`
+    only records an occurrence there when it produced a non-empty overlap
+    for that block), so it can never change this fingerprint and can
+    never stale an already-approved historical fit.
+
+    `fit_inputs=None` fingerprints identically to no consumed occurrences
+    - the same "no event" convention as `named_event_classification_
+    fingerprint`. Deterministic sorting/canonical serialisation: records
+    are pre-sorted by `(event_id, event_version)` in `consumed_occurrence_
+    governance_records()`, and each record's own `market_scope` is sorted
+    again in `ConsumedOccurrenceGovernance.to_dict()`, so two logically
+    identical results always fingerprint identically regardless of
+    construction order."""
+    records = (
+        fit_inputs.consumed_occurrence_governance_records()
+        if fit_inputs is not None
+        else ()
+    )
+    payload = {"occurrences": [record.to_dict() for record in records]}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def named_event_fingerprint_components(
+    fit_inputs: Optional[NamedEventFitInputs],
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """The exact `(named_event_fit_fingerprint, named_event_
+    classification_fingerprint, named_event_occurrence_governance_
+    fingerprint)` triple every `core.fingerprint.fingerprint_model_spec`
+    call site must pass - built once, here, so the three can never be
+    computed inconsistently (e.g. one page passing the design fingerprint
+    but forgetting the occurrence-governance one, or computing it a
+    different way) across Model Training, Diagnostics, Curve Bank,
+    Scenario Planner, Project Export and Official Curve Generation. All
+    three are `None` (never an empty-but-present value) when `fit_inputs`
+    is `None` - the same "opt-in, omitted entirely when no named event is
+    consumed" contract `fingerprint_model_spec` already applies to all
+    three fields."""
+    if fit_inputs is None:
+        return None, None, None
+    return (
+        fit_inputs.fingerprint(),
+        named_event_classification_fingerprint(fit_inputs) or None,
+        named_event_occurrence_governance_fingerprint(fit_inputs) or None,
+    )
+
+
+class NamedEventRegistryGovernanceError(ValueError):
+    """Raised (by `build_named_event_fit_inputs`) when the governed
+    named-event registry is in a state that must never be used to build
+    fit inputs or compute model identity - currently: more than one
+    current, opted-in `EventResponseDefinition` for the same family (see
+    that function's own defensive-invariant docstring). Subclasses
+    `ValueError` so any pre-existing bare `except ValueError` at a call
+    site still catches it, but callers building LIVE fit inputs/identity
+    from a caller-controlled registry (never a fit-time-pinned replay,
+    which is pinned to definitions that were valid when originally fit)
+    should catch this specific type and surface a governed, blocking
+    error - never let it crash the page, never fabricate a fingerprint,
+    never silently pick one of the conflicting definitions. See
+    `safe_named_event_identity` below for the shared safe entry point
+    every live page should use instead of calling `build_named_event_
+    fit_inputs`/`current_named_event_identity_fingerprints` directly."""
+
+
+def current_named_event_identity_fingerprints(
+    frame: Mapping[str, Any],
+    *,
+    families: Sequence[NamedEventFamily],
+    occurrences: Sequence[NamedEventOccurrence],
+    response_definitions: Sequence[EventResponseDefinition],
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Convenience one-shot for a caller that only needs the fingerprint
+    triple (not the full `NamedEventFitInputs` object) for the CURRENT
+    governed registry against `frame`: builds `NamedEventFitInputs` via
+    `build_named_event_fit_inputs` (current registry, never a
+    fit-time-pinned replay - this is "what would be consumed if
+    prepared/fitted again right now", the same semantics `core.
+    named_event_diagnostics.build_named_event_diagnostics`'s readiness
+    view and `pages/06_Diagnostics.py`'s `current_model_identity` both
+    already use), then returns `named_event_fingerprint_components`'s
+    triple. A caller that already has a built `NamedEventFitInputs` for
+    another reason (e.g. `pages/05_Model_Training.py`, which also passes
+    it as a fit build kwarg) should call `named_event_fingerprint_
+    components` directly on that object instead of rebuilding it here.
+
+    Raises `NamedEventRegistryGovernanceError` exactly like
+    `build_named_event_fit_inputs` (never caught here) - a live page must
+    use `safe_named_event_identity` instead of this function directly so
+    an invalid registry cannot crash it; this function stays raising for
+    any caller (e.g. a fit-time-pinned replay reconstruction that already
+    knows the registry was valid when fit) that legitimately wants the
+    exception to propagate."""
+    fit_inputs = build_named_event_fit_inputs(
+        frame,
+        families=families,
+        occurrences=occurrences,
+        response_definitions=response_definitions,
+    )
+    return named_event_fingerprint_components(fit_inputs)
+
+
+@dataclass(frozen=True)
+class NamedEventIdentityResult:
+    """The one safe result shape every live page uses for named-event
+    identity - whether it needs the full `NamedEventFitInputs` (to build/
+    backtest a fit) or only the fingerprint triple (to compute model
+    identity for approval/authorization). `governance_error` is `None`
+    for every legitimate outcome, including "no named events consumed at
+    all" (in which case every other field is also `None`/empty) - it is
+    set ONLY when the registry itself is invalid (see `NamedEventRegistry
+    GovernanceError`), which is a materially different situation from "no
+    named events" and must never be treated identically to it."""
+
+    fit_inputs: Optional[NamedEventFitInputs] = None
+    fit_fingerprint: Optional[str] = None
+    classification_fingerprint: Optional[str] = None
+    occurrence_governance_fingerprint: Optional[str] = None
+    governance_error: Optional[str] = None
+
+    @property
+    def is_valid(self) -> bool:
+        return self.governance_error is None
+
+    def as_fingerprint_kwargs(self) -> Dict[str, Optional[str]]:
+        """Ready to `**`-expand into `core.fingerprint.fingerprint_model_
+        spec`'s `named_event_fit_fingerprint`/`named_event_classification_
+        fingerprint`/`named_event_occurrence_governance_fingerprint`
+        keyword arguments - the one place these three names are spelled,
+        so no call site can pass them inconsistently or forget one. When
+        `governance_error` is set, every value here is `None` - never a
+        fabricated fingerprint standing in for an invalid registry."""
+        return {
+            "named_event_fit_fingerprint": self.fit_fingerprint,
+            "named_event_classification_fingerprint": self.classification_fingerprint,
+            "named_event_occurrence_governance_fingerprint": (
+                self.occurrence_governance_fingerprint
+            ),
+        }
+
+
+def safe_named_event_identity(
+    frame: Mapping[str, Any],
+    *,
+    families: Sequence[NamedEventFamily],
+    occurrences: Sequence[NamedEventOccurrence],
+    response_definitions: Sequence[EventResponseDefinition],
+) -> NamedEventIdentityResult:
+    """The one safe entry point every LIVE page (Model Training,
+    Diagnostics, Curve Bank, Scenario Planner, Project Export, Official
+    Curve Generation) must use to get the current `NamedEventFitInputs`
+    and/or its official identity fingerprints for the CURRENT governed
+    registry against `frame` - this can never raise. An invalid registry
+    (more than one current opted-in response definition for a family -
+    `build_named_event_fit_inputs`'s own defensive invariant) is caught
+    here and returned as `governance_error`, never re-raised past this
+    function, never silently resolved by picking a definition, and never
+    faked as "no named events consumed" (every fingerprint field stays
+    `None`, exactly like the legitimate no-event case, but `governance_
+    error` is truthy so a caller can - and must - tell the two apart and
+    render a governance-blocking message instead of proceeding as if
+    nothing were configured).
+
+    A caller MUST treat a truthy `governance_error` as "current model
+    identity is unavailable" for every purpose an ordinary `None` current
+    identity already blocks (matching an approval, authorizing a curve,
+    proceeding with a fit) - never merely a cosmetic warning."""
+    try:
+        fit_inputs = build_named_event_fit_inputs(
+            frame,
+            families=families,
+            occurrences=occurrences,
+            response_definitions=response_definitions,
+        )
+    except NamedEventRegistryGovernanceError as exc:
+        return NamedEventIdentityResult(governance_error=str(exc))
+    fit_fp, classification_fp, occurrence_fp = named_event_fingerprint_components(
+        fit_inputs
+    )
+    return NamedEventIdentityResult(
+        fit_inputs=fit_inputs,
+        fit_fingerprint=fit_fp,
+        classification_fingerprint=classification_fp,
+        occurrence_governance_fingerprint=occurrence_fp,
+    )
 
 
 def build_named_event_fit_inputs_for_replay(
@@ -259,6 +597,68 @@ def build_named_event_fit_inputs_for_replay(
     return NamedEventFitInputs(blocks=(), shrinkage_prior_scale_by_family={})
 
 
+def _weekly_period_bounds(
+    period_starts: pd.DatetimeIndex,
+) -> Tuple[pd.DatetimeIndex, pd.DatetimeIndex]:
+    """Each period's own `[start, end]` calendar span, derived from the
+    model's own weekly grid (implementation-brief section 7's preferred
+    approach) rather than assuming a fixed Monday anchor: period `i`'s end
+    is period `i+1`'s start minus one day; the final period uses the
+    grid's own inferred spacing (falling back to seven days - the current
+    weekly MMM's frequency - when only one period exists). `period_starts`
+    must already be sorted ascending, matching `data.preprocessor.
+    prepare_fh_modeling_frame`'s contiguous-per-market-block layout."""
+    if len(period_starts) > 1:
+        step = period_starts[1] - period_starts[0]
+    else:
+        step = pd.Timedelta(days=7)
+    next_starts = period_starts[1:].append(pd.DatetimeIndex([period_starts[-1] + step]))
+    period_ends = next_starts - pd.Timedelta(days=1)
+    return period_starts, period_ends
+
+
+def weekly_period_bounds_for_market(
+    frame: Mapping[str, Any], market: str
+) -> Tuple[pd.DatetimeIndex, pd.DatetimeIndex]:
+    """Public wrapper over `_weekly_period_bounds` for one market's own
+    slice of `frame` - the exact period boundaries `build_named_event_
+    fit_inputs` itself uses for that market. Returns two empty
+    `DatetimeIndex` values when `market` is not one of `frame["markets"]`
+    (nothing to bound). Exists so a read-only reporting consumer (`core.
+    named_event_diagnostics`) can reuse the model's own period-boundary
+    construction verbatim rather than re-deriving an approximation of
+    it."""
+    markets: List[str] = list(frame["markets"])
+    if market not in markets:
+        empty = pd.DatetimeIndex([])
+        return empty, empty
+    market_i = markets.index(market)
+    dates = np.asarray(frame["dates"])
+    market_bounds: List[Tuple[int, int]] = list(frame["market_bounds"])
+    start, end = market_bounds[market_i]
+    market_dates = pd.to_datetime(dates[start:end])
+    return _weekly_period_bounds(market_dates)
+
+
+def weeks_overlapping_event_interval(
+    period_starts: pd.DatetimeIndex,
+    period_ends: pd.DatetimeIndex,
+    occ_start: pd.Timestamp,
+    occ_end: pd.Timestamp,
+) -> Tuple[int, ...]:
+    """The (0-indexed) positions of every period whose own
+    `[period_starts[i], period_ends[i]]` calendar span overlaps the
+    factual `[occ_start, occ_end]` event interval at all (implementation
+    brief section 7's overlap rule: `period_start <= event_end and
+    period_end >= event_start`) - never whether the period's own anchor
+    date falls inside the event interval, which misses an event landing
+    later in the same period (e.g. a Sunday event in a Monday-start
+    week). The single tested core helper `build_named_event_fit_inputs`
+    uses for this - not duplicated in the UI or anywhere else."""
+    mask = (period_starts <= occ_end) & (period_ends >= occ_start)
+    return tuple(int(i) for i in np.where(mask)[0])
+
+
 def build_named_event_fit_inputs(
     frame: Mapping[str, Any],
     *,
@@ -290,6 +690,37 @@ def build_named_event_fit_inputs(
     ]
     if not opted_in_definitions:
         return None
+
+    # Defensive registry-invariant check: `application.event_service.
+    # bulk_adopt_preferred_event_rows` never creates a second current
+    # opted-in definition for one family, but this function's registry
+    # inputs are not exclusively reachable through that boundary (e.g. the
+    # manual family/response-definition admin forms). Two opted-in
+    # definitions for the same family would each produce their own block
+    # below, and both model builders key their PyMC variable purely on
+    # `family_id`/market (`event_coefs_<family_id>_<market>`) - so this
+    # fails closed here, before any block is built, rather than letting a
+    # duplicate-variable collision surface deep inside `pm.Model()`. This
+    # does not pick a definition to prefer; that would be inventing a
+    # selection rule this module has no approval to make.
+    _duplicate_opted_in_family_ids = sorted(
+        family_id
+        for family_id, count in Counter(
+            d.family_id for d in opted_in_definitions
+        ).items()
+        if count > 1
+    )
+    if _duplicate_opted_in_family_ids:
+        raise NamedEventRegistryGovernanceError(
+            "Invalid named-event registry: famil"
+            + ("y" if len(_duplicate_opted_in_family_ids) == 1 else "ies")
+            + f" {tuple(_duplicate_opted_in_family_ids)!r} has more than one current "
+            "opted-in EventResponseDefinition - this would create duplicate "
+            "event_coefs_<family>_<market> variables at fit time. Reconcile the "
+            "registry to exactly one current opted-in response definition per "
+            "family before fitting."
+        )
+
     current_occurrences = current_occurrence_versions(occurrences)
 
     blocks: List[NamedEventFamilyFitBlock] = []
@@ -319,15 +750,49 @@ def build_named_event_fit_inputs(
             start, end = market_bounds[market_i]
             n_weeks = end - start
             market_dates = pd.to_datetime(dates[start:end])
+            period_starts, period_ends = _weekly_period_bounds(market_dates)
 
             event_week_set: set[int] = set()
+            consumed_occurrences: List[ConsumedOccurrenceGovernance] = []
             for occ in family_occurrences:
                 if market not in occ.market_scope:
                     continue
                 occ_start = pd.Timestamp(occ.start_date)
                 occ_end = pd.Timestamp(occ.end_date)
-                mask = (market_dates >= occ_start) & (market_dates <= occ_end)
-                event_week_set.update(int(i) for i in np.where(mask)[0])
+                # Interval overlap, not anchor-date containment (brief
+                # section 7): a period is activated whenever its own span
+                # overlaps the occurrence's factual span at all - e.g. a
+                # Sunday event still activates the Monday-start week that
+                # contains it, and a multi-week promotion activates every
+                # week it crosses.
+                occ_weeks = weeks_overlapping_event_interval(
+                    period_starts, period_ends, occ_start, occ_end
+                )
+                if not occ_weeks:
+                    # This occurrence (e.g. a future occurrence of the
+                    # same family outside this frame's date range) did
+                    # not actually activate anything in THIS block - it
+                    # must never participate in occurrence-governance
+                    # provenance for a fit it had no effect on.
+                    continue
+                event_week_set.update(occ_weeks)
+                consumed_occurrences.append(
+                    ConsumedOccurrenceGovernance(
+                        event_id=occ.event_id,
+                        event_version=occ.event_version,
+                        # family.family_id, not occ.family_id (typed
+                        # Optional[str]) - family_occurrences is already
+                        # filtered to occ.family_id == family.family_id,
+                        # so these are the same value; family.family_id
+                        # is the non-Optional one.
+                        family_id=family.family_id,
+                        start_date=occ.start_date,
+                        end_date=occ.end_date,
+                        market_scope=tuple(occ.market_scope),
+                        source_id=occ.source_id,
+                        source_version=occ.source_version,
+                    )
+                )
             if not event_week_set:
                 continue
 
@@ -351,6 +816,13 @@ def build_named_event_fit_inputs(
                     response_definition_id=definition.response_definition_id,
                     response_definition_version=definition.response_definition_version,
                     outcome_scope=tuple(definition.outcome_scope),
+                    classification=family.classification,
+                    consumed_occurrences=tuple(
+                        sorted(
+                            consumed_occurrences,
+                            key=lambda record: (record.event_id, record.event_version),
+                        )
+                    ),
                 )
             )
             shrinkage_scale_by_family.setdefault(
@@ -364,3 +836,69 @@ def build_named_event_fit_inputs(
         blocks=tuple(blocks),
         shrinkage_prior_scale_by_family=shrinkage_scale_by_family,
     )
+
+
+def families_without_opted_in_response_definition(
+    families: Sequence[NamedEventFamily],
+    occurrences: Sequence[NamedEventOccurrence],
+    response_definitions: Sequence[EventResponseDefinition],
+) -> Tuple[str, ...]:
+    """Registry-only visibility signal (no model frame required, usable
+    immediately after adoption): the family ids that have at least one
+    current, factual occurrence but no current response definition opted
+    into fitting (`transformation_method_reference == NAMED_EVENT_
+    RESPONSE_STRUCTURE`). These families are registered, governed data
+    that currently contribute nothing to any fit - a caller must surface
+    this explicitly rather than let the absence go unremarked (e.g. a
+    `promotion`/`promotional` family, whose response mechanism is a
+    disclosed, decision-required gap - see `docs/named_event_promotional_
+    window_decision_package.md`).
+
+    This is a coarser, registry-only cousin of `families_excluded_from_
+    fitting`: it does not know about a specific fit frame, so it cannot
+    detect a response definition that IS opted in but still contributes
+    nothing for another reason (a degenerate window, or an occurrence
+    outside this particular frame's market/date coverage) -
+    `families_excluded_from_fitting` is authoritative for that."""
+    current_occs = current_occurrence_versions(occurrences)
+    family_ids_with_occurrences = {
+        occ.family_id for occ in current_occs if occ.family_id
+    }
+    opted_in_family_ids = {
+        d.family_id
+        for d in current_response_definition_versions(response_definitions)
+        if d.transformation_method_reference == NAMED_EVENT_RESPONSE_STRUCTURE
+    }
+    return tuple(sorted(family_ids_with_occurrences - opted_in_family_ids))
+
+
+def families_excluded_from_fitting(
+    frame: Mapping[str, Any],
+    *,
+    families: Sequence[NamedEventFamily],
+    occurrences: Sequence[NamedEventOccurrence],
+    response_definitions: Sequence[EventResponseDefinition],
+) -> Tuple[str, ...]:
+    """Frame-aware, authoritative visibility signal: the family ids with
+    at least one current, factual occurrence that nonetheless do not
+    appear in `build_named_event_fit_inputs`' actual result for THIS
+    frame. Catches every reason a registered family contributes nothing
+    to a specific fit - no opted-in response definition, a degenerate
+    window, or no occurrence inside this frame's market/date coverage -
+    not only the "never opted in" case `families_without_opted_in_
+    response_definition` reports. A caller (the fit-proposal UI) must
+    show this list explicitly: a registered family absent from the fit
+    must never be presented as though it had been modelled and found to
+    have zero effect."""
+    current_occs = current_occurrence_versions(occurrences)
+    family_ids_with_occurrences = {
+        occ.family_id for occ in current_occs if occ.family_id
+    }
+    fit_inputs = build_named_event_fit_inputs(
+        frame,
+        families=families,
+        occurrences=occurrences,
+        response_definitions=response_definitions,
+    )
+    fitted_family_ids = set(fit_inputs.family_ids) if fit_inputs is not None else set()
+    return tuple(sorted(family_ids_with_occurrences - fitted_family_ids))

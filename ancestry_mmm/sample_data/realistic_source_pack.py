@@ -479,6 +479,8 @@ def _events() -> pd.DataFrame:
             {
                 "event_id": "uk_tv_launch",
                 "event_name": "UK brand TV launch",
+                "event_family_id": "uk_tv_launch",
+                "event_type": "promotion",
                 "start_date": "2025-01-09",
                 "end_date": "2025-01-19",
                 "market": "UK",
@@ -486,6 +488,8 @@ def _events() -> pd.DataFrame:
             {
                 "event_id": "au_partner_burst",
                 "event_name": "AU partner burst",
+                "event_family_id": "au_partner_burst",
+                "event_type": "promotion",
                 "start_date": "2025-02-03",
                 "end_date": "2025-02-05",
                 "market": "AU",

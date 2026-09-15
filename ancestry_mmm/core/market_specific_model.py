@@ -53,7 +53,10 @@ from .pathways import MediaOutcomePathway
 from .net_billthrough import assert_model_frame_net_billthrough_complete
 from .schema import ModelSpec
 from .transformations import pt_geometric_adstock_matrix, pt_hill_function
-from .named_event_fit_inputs import NamedEventFitInputs
+from .named_event_fit_inputs import (
+    NamedEventFitInputs,
+    named_event_occurrence_governance_fingerprint as named_event_occurrence_governance_fingerprint_fn,
+)
 from .experiment_lift_test_mapping import (
     ModelLiftTestCalibrationInput,
     attach_lift_test_calibration_terms,
@@ -570,6 +573,13 @@ def build_fh_market_specific_model(
         consumed_response_definitions: List[Any] = []
         named_event_response_method_version = ""
         named_event_fit_blocks: List[Any] = []
+        # Diagnostics fit-time provenance - see `core.hierarchical_model.
+        # build_fh_hierarchical_model`'s identical comment for the full
+        # rationale. Pure bookkeeping, no effect on any fitted number.
+        named_event_fit_fingerprint = ""
+        named_event_fit_block_provenance: List[Dict[str, Any]] = []
+        named_event_occurrence_governance_fingerprint = ""
+        named_event_occurrence_provenance: List[Dict[str, Any]] = []
         if named_event_fit_inputs is not None:
             named_event_response_method_version = NAMED_EVENT_RESPONSE_STRUCTURE
             consumed_response_definitions = list(
@@ -577,6 +587,25 @@ def build_fh_market_specific_model(
             )
             named_event_fit_blocks = [
                 (b.family_id, b.market) for b in named_event_fit_inputs.blocks
+            ]
+            named_event_fit_fingerprint = named_event_fit_inputs.fingerprint()
+            named_event_fit_block_provenance = [
+                {
+                    "family_id": b.family_id,
+                    "market": b.market,
+                    "response_definition_id": b.response_definition_id,
+                    "response_definition_version": b.response_definition_version,
+                    "classification": b.classification,
+                    "fitted_support_weeks": int(np.any(b.design != 0.0, axis=1).sum()),
+                }
+                for b in named_event_fit_inputs.blocks
+            ]
+            named_event_occurrence_governance_fingerprint = (
+                named_event_occurrence_governance_fingerprint_fn(named_event_fit_inputs)
+            )
+            named_event_occurrence_provenance = [
+                record.to_dict()
+                for record in named_event_fit_inputs.consumed_occurrence_governance_records()
             ]
             eta_events = pt.zeros((n_obs, n_outcomes))
             for family_id in named_event_fit_inputs.family_ids:
@@ -691,6 +720,10 @@ def build_fh_market_specific_model(
         named_event_response_definitions_at_fit=consumed_response_definitions,
         named_event_response_method_version=named_event_response_method_version,
         named_event_fit_blocks=named_event_fit_blocks,
+        named_event_fit_fingerprint=named_event_fit_fingerprint,
+        named_event_fit_block_provenance=named_event_fit_block_provenance,
+        named_event_occurrence_governance_fingerprint=named_event_occurrence_governance_fingerprint,
+        named_event_occurrence_provenance=named_event_occurrence_provenance,
         calibration_inputs_at_fit=[
             item.to_dict() for item in (calibration_inputs or ())
         ],

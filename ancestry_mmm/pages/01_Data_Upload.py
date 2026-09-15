@@ -22,12 +22,21 @@ from ancestry_mmm.application.experiment_service import (
 )
 from ancestry_mmm.application.event_service import (
     adopt_source_event_occurrence,
+    bulk_adopt_preferred_event_rows,
+    is_preferred_source_row,
     new_family,
     new_response_definition,
     register_family,
     register_occurrence,
     register_response_definition,
     registry_problems,
+)
+from ancestry_mmm.core.named_event_fit_inputs import (
+    families_without_opted_in_response_definition,
+)
+from ancestry_mmm.core.named_event_type_policy import (
+    EVENT_TYPE_PROMOTION,
+    normalise_event_type,
 )
 from ancestry_mmm.application.outcome_valuation_input_service import (
     OUTCOME_VALUATION_UPLOAD_COLUMNS,
@@ -1515,6 +1524,152 @@ if sources:
                 width="stretch",
                 column_config=dataframe_column_config(_rows_df),
             )
+
+            _preferred_rows = [r for r in _event_rows if is_preferred_source_row(r)]
+            _legacy_rows = [r for r in _event_rows if not is_preferred_source_row(r)]
+
+            if _preferred_rows:
+                st.markdown("#### Bulk adopt (preferred seven-column rows)")
+                st.caption(
+                    "These rows supply event_family_id, event_type and market "
+                    "directly - family, occurrence and (for a supported event "
+                    "type) response definition are resolved automatically. "
+                    "event_type is never inferred from event_name."
+                )
+                _review_records = []
+                for _row in _preferred_rows:
+                    _canonical_type = normalise_event_type(_row.get("event_type"))
+                    _existing_family = next(
+                        (
+                            f
+                            for f in _families
+                            if f.family_id == _row.get("event_family_id")
+                        ),
+                        None,
+                    )
+                    if _canonical_type in ("gifting", "remembrance"):
+                        _response_status = "yes - fitted automatically"
+                    elif _canonical_type == EVENT_TYPE_PROMOTION:
+                        _response_status = "no - response mechanism unresolved (governed metadata only)"
+                    else:
+                        _response_status = "no - unrecognised event_type"
+                    _review_records.append(
+                        {
+                            "event_id": _row.get("event_id"),
+                            "event_family_id": _row.get("event_family_id"),
+                            "event_type": _row.get("event_type"),
+                            "market": _row.get("market"),
+                            "family_exists": _existing_family is not None,
+                            "response_policy": _response_status,
+                        }
+                    )
+                st.dataframe(
+                    pd.DataFrame(_review_records),
+                    width="stretch",
+                    column_config=dataframe_column_config(
+                        pd.DataFrame(_review_records)
+                    ),
+                )
+                if st.button("Bulk adopt valid rows", key="ne_bulk_adopt_button"):
+                    # One combined call across every preferred row from
+                    # every simultaneously active source - never split per
+                    # source - so _conflicting_batch_families() sees a
+                    # family/event_type disagreement across two sources in
+                    # the same pass and blocks the whole family, rather than
+                    # whichever source happens to be processed first
+                    # winning. Each row already carries its own source_id/
+                    # source_version (stamped in when _event_rows was built
+                    # above) and bulk_adopt_preferred_event_rows() now
+                    # prefers that per-row lineage over the function-level
+                    # fallback below, so lineage is still preserved exactly
+                    # per row within this one call.
+                    _outcome = bulk_adopt_preferred_event_rows(
+                        _preferred_rows,
+                        source_id="events",
+                        source_version=None,
+                        families=_families,
+                        occurrences=_occurrences,
+                        response_definitions=_definitions,
+                    )
+                    set_state(
+                        "named_event_families",
+                        [fam.to_dict() for fam in _outcome.families],
+                    )
+                    set_state(
+                        "named_event_occurrences",
+                        [occ.to_dict() for occ in _outcome.occurrences],
+                    )
+                    set_state(
+                        "named_event_response_definitions",
+                        [d.to_dict() for d in _outcome.response_definitions],
+                    )
+                    st.success(
+                        f"Adopted {_outcome.adopted_count} of "
+                        f"{len(_outcome.results)} rows."
+                    )
+                    _blocked = [r for r in _outcome.results if not r.adopted]
+                    for _result in _blocked:
+                        st.warning(f"{_result.event_id}: {'; '.join(_result.problems)}")
+                    _needs_policy = [
+                        r
+                        for r in _outcome.results
+                        if r.adopted and r.response_policy_required
+                    ]
+                    _adopted_families_by_id = {
+                        fam.family_id: fam for fam in _outcome.families
+                    }
+                    for _result in _needs_policy:
+                        _row_family_id = next(
+                            (
+                                r.get("event_family_id")
+                                for r in _preferred_rows
+                                if r.get("event_id") == _result.event_id
+                            ),
+                            None,
+                        )
+                        _row_family = _adopted_families_by_id.get(_row_family_id)
+                        if (
+                            _row_family is not None
+                            and _row_family.classification_status
+                            == "promotional_window_unresolved"
+                        ):
+                            st.warning(
+                                f"{_result.event_id}: adopted as governed family/"
+                                "occurrence data. It is NOT currently included in "
+                                "the fitted named-event response - the bounded "
+                                "per-occurrence response mechanism for "
+                                "promotional events is a disclosed, "
+                                "decision-required gap (see "
+                                "docs/named_event_promotional_window_decision_"
+                                "package.md), not a zero-effect modelling "
+                                "result."
+                            )
+                        else:
+                            st.info(
+                                f"{_result.event_id}: adopted, but its event_type "
+                                "has no automatic response policy - it will not be "
+                                "fitted until a response definition is registered "
+                                "explicitly below."
+                            )
+                    # Deliberately no st.rerun() here: an explicit rerun would
+                    # immediately discard the feedback just rendered above
+                    # (the button's own click-triggered rerun already refreshes
+                    # every session-state-driven view below on the next
+                    # interaction; the persistent "Registered but NOT included
+                    # in any fit" warning near the families table is the
+                    # reliable, rerun-proof surface for the promotional-window
+                    # gap - see families_without_opted_in_response_definition
+                    # below).
+                    _families = list(_outcome.families)
+                    _occurrences = list(_outcome.occurrences)
+                    _definitions = list(_outcome.response_definitions)
+
+            if _legacy_rows:
+                st.markdown("#### Manual adoption (legacy or advanced)")
+                st.caption(
+                    "Legacy four-column rows, and any row you want to adopt "
+                    "manually instead of through bulk adopt, are completed here."
+                )
             _row_keys = [
                 f"{str(row.get('event_id') or '')} ({row.get('source_id')})"
                 for row in _event_rows
@@ -1585,7 +1740,11 @@ if sources:
             st.info(
                 "No Context events table rows supplied. The optional standard "
                 "Context template's `events` sheet carries event_id, "
-                "event_name, start_date and end_date."
+                "event_name, event_family_id, event_type, market, start_date "
+                "and end_date (event_family_id/event_type/market enable "
+                "automatic bulk adoption). Legacy four-column files "
+                "(event_id, event_name, start_date, end_date) remain "
+                "supported through manual adoption."
             )
 
         if _occurrences:
@@ -1674,6 +1833,21 @@ if sources:
                 width="stretch",
                 column_config=dataframe_column_config(_fam_df),
             )
+
+            _ne_excluded_families = families_without_opted_in_response_definition(
+                _families, _occurrences, _definitions
+            )
+            if _ne_excluded_families:
+                st.warning(
+                    "Registered but NOT included in any fit: "
+                    + ", ".join(_ne_excluded_families)
+                    + ". These families have factual, governed occurrences but no "
+                    "response definition opted into fitting - they contribute "
+                    "nothing to the model. This is never a silent zero effect; "
+                    "a promotional family's response mechanism is a disclosed, "
+                    "decision-required gap (docs/named_event_promotional_window_"
+                    "decision_package.md)."
+                )
 
             st.markdown("#### Event response definitions")
             with st.form("ne_definition_form"):

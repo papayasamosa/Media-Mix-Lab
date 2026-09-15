@@ -15,11 +15,20 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from ancestry_mmm.core.fingerprint import fingerprint_model_spec
 from ancestry_mmm.core.named_event_fit_inputs import (
     NamedEventFamilyFitBlock,
     NamedEventFitInputs,
     build_named_event_fit_inputs,
     build_named_event_fit_inputs_for_replay,
+    current_named_event_identity_fingerprints,
+    families_excluded_from_fitting,
+    families_without_opted_in_response_definition,
+    named_event_classification_fingerprint,
+    named_event_fingerprint_components,
+    named_event_occurrence_governance_fingerprint,
+    safe_named_event_identity,
+    weeks_overlapping_event_interval,
 )
 from ancestry_mmm.core.named_event_response import NAMED_EVENT_RESPONSE_STRUCTURE
 from ancestry_mmm.core.named_events import (
@@ -170,6 +179,90 @@ class TestNoOptInReturnsNone:
         assert result is None
 
 
+class TestDuplicateOptedInDefinitionFailsClosed:
+    """Narrow defensive registry-invariant check: `application.event_
+    service.bulk_adopt_preferred_event_rows` never creates a second
+    current opted-in response definition for one family, but this
+    function's registry inputs are also reachable through the manual
+    admin forms - so an already-invalid registry (two current opted-in
+    definitions for the same family) must fail early here, before either
+    model builder can hit a duplicate `event_coefs_<family>_<market>`
+    PyMC variable name."""
+
+    def test_two_opted_in_definitions_for_one_family_raises(self):
+        frame = _frame(["UK"], 20)
+        definitions = [
+            _definition(response_definition_id="md-def-a"),
+            _definition(response_definition_id="md-def-b", max_lead=6),
+        ]
+        try:
+            build_named_event_fit_inputs(
+                frame,
+                families=[_family()],
+                occurrences=[_occurrence()],
+                response_definitions=definitions,
+            )
+            assert False, "expected ValueError for duplicate opted-in definitions"
+        except ValueError as exc:
+            assert "mothers_day" in str(exc)
+            assert "more than one current opted-in" in str(exc)
+
+    def test_never_picks_a_definition_between_conflicting_ones(self):
+        """The safeguard must fail closed, not silently prefer one
+        definition over the other - it never selects."""
+        frame = _frame(["UK"], 20)
+        definitions = [
+            _definition(response_definition_id="md-def-a", max_lead=3),
+            _definition(response_definition_id="md-def-b", max_lead=6),
+        ]
+        raised = False
+        try:
+            build_named_event_fit_inputs(
+                frame,
+                families=[_family()],
+                occurrences=[_occurrence()],
+                response_definitions=definitions,
+            )
+        except ValueError:
+            raised = True
+        assert raised
+
+    def test_one_opted_in_definition_per_family_is_unaffected(self):
+        frame = _frame(["UK"], 20)
+        result = build_named_event_fit_inputs(
+            frame,
+            families=[_family()],
+            occurrences=[_occurrence()],
+            response_definitions=[_definition()],
+        )
+        assert result is not None
+        assert len(result.blocks) == 1
+
+    def test_two_different_families_each_with_one_definition_is_unaffected(self):
+        frame = _frame(["UK"], 30)
+        second_family = _family(family_id="fathers_day", display_name="Father's Day")
+        second_occurrence = _occurrence(
+            event_id="fd-2026",
+            family_id="fathers_day",
+            start_date="2026-06-21",
+            end_date="2026-06-21",
+        )
+        second_definition = _definition(
+            response_definition_id="fd-def", family_id="fathers_day"
+        )
+        result = build_named_event_fit_inputs(
+            frame,
+            families=[_family(), second_family],
+            occurrences=[_occurrence(), second_occurrence],
+            response_definitions=[_definition(), second_definition],
+        )
+        assert result is not None
+        assert {block.family_id for block in result.blocks} == {
+            "mothers_day",
+            "fathers_day",
+        }
+
+
 class TestOptedInFamilyProducesABlock:
     def test_single_market_produces_one_block_with_a_nonzero_design(self):
         frame = _frame(["UK"], 20, start="2026-01-01")
@@ -285,6 +378,235 @@ class TestOptedInFamilyProducesABlock:
         assert block.response_definition_version == 2
 
 
+class TestConsumedFamilyClassificationsAndFingerprint:
+    """`NamedEventFitInputs.consumed_family_classifications()` and
+    `named_event_classification_fingerprint` - the SEPARATE governance
+    component `core.fingerprint.fingerprint_model_spec` combines
+    alongside `NamedEventFitInputs.fingerprint()`'s numerical design
+    identity, so a classification change (e.g. gifting -> promotion)
+    participates in official model staleness (REQ-EVENT-001 section 8)
+    even when the fitted design itself is unaffected."""
+
+    def test_consumed_family_classifications_reports_the_fit_time_value(self):
+        frame = _frame(["UK"], 20, start="2026-01-01")
+        result = build_named_event_fit_inputs(
+            frame,
+            families=[_family(classification="gifting")],
+            occurrences=[_occurrence()],
+            response_definitions=[_definition()],
+        )
+        assert result is not None
+        assert result.consumed_family_classifications() == (("mothers_day", "gifting"),)
+
+    def test_reclassification_leaves_the_design_fingerprint_unchanged(self):
+        """The numerical design fingerprint deliberately does not react to
+        a pure reclassification - a documented, deliberate exclusion, not
+        an oversight (see NamedEventFamilyFitBlock.classification's own
+        docstring)."""
+        frame = _frame(["UK"], 20, start="2026-01-01")
+        gifting = build_named_event_fit_inputs(
+            frame,
+            families=[_family(classification="gifting")],
+            occurrences=[_occurrence()],
+            response_definitions=[_definition()],
+        )
+        promotion = build_named_event_fit_inputs(
+            frame,
+            families=[_family(classification="promotion")],
+            occurrences=[_occurrence()],
+            response_definitions=[_definition()],
+        )
+        assert gifting is not None and promotion is not None
+        assert gifting.fingerprint() == promotion.fingerprint()
+
+    def test_reclassification_changes_the_classification_fingerprint(self):
+        """...but the SEPARATE classification fingerprint does react,
+        which is exactly the point: official staleness must be able to
+        see this change even though the design fingerprint cannot."""
+        frame = _frame(["UK"], 20, start="2026-01-01")
+        gifting = build_named_event_fit_inputs(
+            frame,
+            families=[_family(classification="gifting")],
+            occurrences=[_occurrence()],
+            response_definitions=[_definition()],
+        )
+        promotion = build_named_event_fit_inputs(
+            frame,
+            families=[_family(classification="promotion")],
+            occurrences=[_occurrence()],
+            response_definitions=[_definition()],
+        )
+        assert named_event_classification_fingerprint(
+            gifting
+        ) != named_event_classification_fingerprint(promotion)
+
+    def test_no_fit_inputs_fingerprints_deterministically_to_empty(self):
+        fp_a = named_event_classification_fingerprint(None)
+        fp_b = named_event_classification_fingerprint(None)
+        assert fp_a == fp_b
+        assert isinstance(fp_a, str) and len(fp_a) == 64
+
+    def test_two_families_are_both_reported_sorted_by_family_id(self):
+        frame = _frame(["UK"], 30, start="2026-01-01")
+        fathers_day_family = _family(
+            family_id="fathers_day",
+            display_name="Father's Day",
+            classification="gifting",
+        )
+        fathers_day_occurrence = _occurrence(
+            event_id="fd-2026",
+            family_id="fathers_day",
+            start_date="2026-06-21",
+            end_date="2026-06-21",
+        )
+        fathers_day_definition = _definition(
+            response_definition_id="fathers_day-def", family_id="fathers_day"
+        )
+        result = build_named_event_fit_inputs(
+            frame,
+            families=[_family(classification="gifting"), fathers_day_family],
+            occurrences=[_occurrence(), fathers_day_occurrence],
+            response_definitions=[_definition(), fathers_day_definition],
+        )
+        assert result is not None
+        assert result.consumed_family_classifications() == (
+            ("fathers_day", "gifting"),
+            ("mothers_day", "gifting"),
+        )
+
+
+class TestFamiliesWithoutOptedInResponseDefinition:
+    """Registry-only visibility signal - used before a model frame
+    exists (e.g. immediately after adoption on Data Upload)."""
+
+    def test_family_with_occurrence_and_no_definition_is_reported(self):
+        result = families_without_opted_in_response_definition(
+            [_family()], [_occurrence()], []
+        )
+        assert result == ("mothers_day",)
+
+    def test_family_with_a_non_opted_in_definition_is_still_reported(self):
+        # A promotional family (or any family whose response_definition
+        # was never resolved to the approved reference) - registered
+        # metadata only, must still be surfaced as excluded.
+        definition = _definition(transformation_method_reference="not-the-approved-ref")
+        result = families_without_opted_in_response_definition(
+            [_family()], [_occurrence()], [definition]
+        )
+        assert result == ("mothers_day",)
+
+    def test_family_with_an_opted_in_definition_is_not_reported(self):
+        result = families_without_opted_in_response_definition(
+            [_family()], [_occurrence()], [_definition()]
+        )
+        assert result == ()
+
+    def test_family_with_no_occurrences_is_not_reported(self):
+        result = families_without_opted_in_response_definition([_family()], [], [])
+        assert result == ()
+
+
+class TestFamiliesExcludedFromFitting:
+    """Frame-aware, authoritative visibility signal - catches every
+    reason a registered family contributes nothing to a specific fit,
+    including a degenerate (0, 0) window that `build_named_event_fit_
+    inputs` silently skips (never raises) rather than surfacing on its
+    own - this is the promotional-family gap `docs/named_event_
+    promotional_window_decision_package.md` records."""
+
+    def test_family_with_no_response_definition_is_excluded(self):
+        frame = _frame(["UK"], 20, start="2026-01-01")
+        result = families_excluded_from_fitting(
+            frame,
+            families=[_family()],
+            occurrences=[_occurrence()],
+            response_definitions=[],
+        )
+        assert result == ("mothers_day",)
+
+    def test_family_with_a_degenerate_opted_in_window_is_excluded(self):
+        # Opted in (the approved reference) but (0, 0) - silently skipped
+        # by build_named_event_fit_inputs, never an error - must still
+        # show up here as excluded, not merely absent.
+        frame = _frame(["UK"], 20, start="2026-01-01")
+        definition = _definition(max_lead=0, max_lag=0)
+        result = families_excluded_from_fitting(
+            frame,
+            families=[_family()],
+            occurrences=[_occurrence()],
+            response_definitions=[definition],
+        )
+        assert result == ("mothers_day",)
+
+    def test_family_actually_fitted_is_not_excluded(self):
+        frame = _frame(["UK"], 20, start="2026-01-01")
+        result = families_excluded_from_fitting(
+            frame,
+            families=[_family()],
+            occurrences=[_occurrence()],
+            response_definitions=[_definition()],
+        )
+        assert result == ()
+
+    def test_family_with_no_occurrences_is_not_excluded(self):
+        frame = _frame(["UK"], 20, start="2026-01-01")
+        result = families_excluded_from_fitting(
+            frame, families=[_family()], occurrences=[], response_definitions=[]
+        )
+        assert result == ()
+
+
+class TestWeeksOverlappingEventInterval:
+    """Direct tests of the section-7 overlap helper (implementation brief
+    "Critical date-to-model-period fix") - period-interval overlap, never
+    anchor-date containment."""
+
+    def _monday_weeks(self, start: str, n: int) -> pd.DatetimeIndex:
+        return pd.date_range(start, periods=n, freq="7D")
+
+    def test_sunday_event_activates_the_containing_monday_week_not_the_next_one(self):
+        # Brief's own example: model week starts 2025-03-24 (Monday);
+        # Mother's Day UK falls on 2025-03-30 (Sunday), inside that week.
+        period_starts = self._monday_weeks("2025-03-24", 3)  # 03-24, 03-31, 04-07
+        _, period_ends = (
+            period_starts,
+            period_starts[1:].append(
+                pd.DatetimeIndex([period_starts[-1] + pd.Timedelta(days=7)])
+            )
+            - pd.Timedelta(days=1),
+        )
+        occ = pd.Timestamp("2025-03-30")
+        overlapping = weeks_overlapping_event_interval(
+            period_starts, period_ends, occ, occ
+        )
+        assert overlapping == (0,)  # week commencing 2025-03-24, not 03-31
+
+    def test_black_friday_interval_overlaps_both_weeks_it_crosses(self):
+        period_starts = self._monday_weeks("2025-11-17", 4)
+        # 2025-11-17, 11-24, 12-01, 12-08
+        period_ends = period_starts[1:].append(
+            pd.DatetimeIndex([period_starts[-1] + pd.Timedelta(days=7)])
+        ) - pd.Timedelta(days=1)
+        overlapping = weeks_overlapping_event_interval(
+            period_starts,
+            period_ends,
+            pd.Timestamp("2025-11-28"),
+            pd.Timestamp("2025-12-01"),
+        )
+        assert overlapping == (1, 2)  # weeks commencing 11-24 and 12-01
+
+    def test_event_outside_the_grid_overlaps_nothing(self):
+        period_starts = self._monday_weeks("2025-01-06", 4)
+        period_ends = period_starts[1:].append(
+            pd.DatetimeIndex([period_starts[-1] + pd.Timedelta(days=7)])
+        ) - pd.Timedelta(days=1)
+        occ = pd.Timestamp("2025-06-01")
+        overlapping = weeks_overlapping_event_interval(
+            period_starts, period_ends, occ, occ
+        )
+        assert overlapping == ()
+
+
 class TestMultiWeekOccurrence:
     def test_an_occurrence_spanning_several_weeks_populates_every_covered_week(self):
         frame = _frame(["UK"], 20, start="2026-01-01")
@@ -302,6 +624,84 @@ class TestMultiWeekOccurrence:
         # would (loosely - exact row count depends on the spline basis).
         nonzero_rows = int(np.any(block.design != 0.0, axis=1).sum())
         assert nonzero_rows > 1
+
+
+def _monday_frame(markets, n_weeks_per_market, *, start="2025-01-06"):
+    """Like `_frame`, but with an explicit Monday-start weekly grid - the
+    brief's own worked examples (Mother's Day/Black Friday) are anchored
+    to a Monday-start week."""
+    dates = []
+    market_bounds = []
+    offset = 0
+    for _m in markets:
+        block_dates = pd.date_range(start, periods=n_weeks_per_market, freq="7D")
+        dates.extend(block_dates)
+        market_bounds.append((offset, offset + n_weeks_per_market))
+        offset += n_weeks_per_market
+    return {
+        "markets": list(markets),
+        "dates": np.array(dates, dtype="datetime64[ns]"),
+        "market_bounds": market_bounds,
+    }
+
+
+class TestWeeklyOverlapEndToEnd:
+    """End-to-end confirmation that `build_named_event_fit_inputs` itself
+    (not just the extracted helper) activates the correct week(s) for the
+    brief's own worked examples."""
+
+    def test_sunday_mothers_day_activates_the_containing_week(self):
+        frame = _monday_frame(["UK"], 10, start="2025-03-03")
+        occurrence = _occurrence(start_date="2025-03-30", end_date="2025-03-30")
+        # A small non-degenerate window (max_lead=1) so the design carries
+        # signal, while max_lag=0 keeps the week AFTER the event free of
+        # any lag-derived contribution - isolating the containing week.
+        definition = _definition(max_lead=1, max_lag=0)
+        result = build_named_event_fit_inputs(
+            frame,
+            families=[_family()],
+            occurrences=[occurrence],
+            response_definitions=[definition],
+        )
+        assert result is not None
+        block = result.blocks_for_family("mothers_day")[0]
+        market_dates = pd.to_datetime(frame["dates"])
+        week_of = list(market_dates).index(pd.Timestamp("2025-03-24"))
+        week_after = list(market_dates).index(pd.Timestamp("2025-03-31"))
+        assert np.any(block.design[week_of, :] != 0.0)
+        assert np.all(block.design[week_after, :] == 0.0)
+
+    def test_black_friday_activates_both_weeks_it_crosses(self):
+        frame = _monday_frame(["UK"], 10, start="2025-11-03")
+        occurrence = _occurrence(
+            event_id="black_friday_2025_uk",
+            start_date="2025-11-28",
+            end_date="2025-12-01",
+            family_id="black_friday",
+        )
+        family = _family(family_id="black_friday", classification="promotional")
+        definition = _definition(
+            response_definition_id="bf-def",
+            family_id="black_friday",
+            treatment="post_event",
+            max_lead=0,
+            max_lag=1,
+        )
+        result = build_named_event_fit_inputs(
+            frame,
+            families=[family],
+            occurrences=[occurrence],
+            response_definitions=[definition],
+        )
+        assert result is not None
+        block = result.blocks_for_family("black_friday")[0]
+        market_dates = pd.to_datetime(frame["dates"])
+        week_before = list(market_dates).index(pd.Timestamp("2025-11-17"))
+        week_1 = list(market_dates).index(pd.Timestamp("2025-11-24"))
+        week_2 = list(market_dates).index(pd.Timestamp("2025-12-01"))
+        assert np.all(block.design[week_before, :] == 0.0)
+        assert np.any(block.design[week_1, :] != 0.0)
+        assert np.any(block.design[week_2, :] != 0.0)
 
 
 class TestBuildNamedEventFitInputsForReplay:
@@ -421,3 +821,211 @@ class TestBuildNamedEventFitInputsForReplay:
         np.testing.assert_allclose(
             replay_result.blocks[0].design, fit_time_result.blocks[0].design
         )
+
+
+class TestOccurrenceGovernanceFingerprint:
+    """Occurrence-staleness follow-up: `named_event_occurrence_governance_
+    fingerprint` must change for a governance-relevant occurrence edit
+    even when it produces a byte-identical design (`fingerprint()`
+    unchanged) - the numerical design fingerprint alone cannot detect a
+    within-week date correction, a version/lineage-only edit, or (by
+    construction, since occurrence-governance provenance is scoped to
+    occurrences that actually activated a block) a future occurrence
+    outside the fitted historical period."""
+
+    def _build(self, occurrences, *, frame=None, family=None, definition=None):
+        frame = frame or _frame(["UK"], 10, start="2026-01-01")
+        family = family or _family()
+        definition = definition or _definition()
+        return build_named_event_fit_inputs(
+            frame,
+            families=[family],
+            occurrences=occurrences,
+            response_definitions=[definition],
+        )
+
+    def test_within_week_date_correction_changes_governance_not_design(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        period_starts = pd.to_datetime(frame["dates"])
+        week0_start = period_starts[0]
+        week0_end = period_starts[1] - pd.Timedelta(days=1)
+        assert week0_start != week0_end  # two distinct days, same model week
+
+        occ_a = _occurrence(
+            start_date=str(week0_start.date()), end_date=str(week0_start.date())
+        )
+        occ_b = _occurrence(
+            start_date=str(week0_end.date()), end_date=str(week0_end.date())
+        )
+        fit_a = self._build([occ_a], frame=frame)
+        fit_b = self._build([occ_b], frame=frame)
+
+        assert fit_a is not None and fit_b is not None
+        # Numerical design identity unchanged - both dates activate the
+        # exact same model week.
+        assert fit_a.fingerprint() == fit_b.fingerprint()
+        # Occurrence-governance identity changed - a real factual date
+        # correction to governed data.
+        fp_a = named_event_occurrence_governance_fingerprint(fit_a)
+        fp_b = named_event_occurrence_governance_fingerprint(fit_b)
+        assert fp_a != fp_b
+
+        # Official model identity as a whole also changes.
+        identity_a = fingerprint_model_spec(
+            {},
+            {},
+            4,
+            named_event_fit_fingerprint=fit_a.fingerprint(),
+            named_event_occurrence_governance_fingerprint=fp_a,
+        )
+        identity_b = fingerprint_model_spec(
+            {},
+            {},
+            4,
+            named_event_fit_fingerprint=fit_b.fingerprint(),
+            named_event_occurrence_governance_fingerprint=fp_b,
+        )
+        assert identity_a != identity_b
+
+    def test_source_version_change_changes_governance_not_design(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        occ_a = _occurrence(
+            start_date="2026-01-20", end_date="2026-01-20", source_version=1
+        )
+        occ_b = _occurrence(
+            start_date="2026-01-20", end_date="2026-01-20", source_version=2
+        )
+        fit_a = self._build([occ_a], frame=frame)
+        fit_b = self._build([occ_b], frame=frame)
+        assert fit_a is not None and fit_b is not None
+        assert fit_a.fingerprint() == fit_b.fingerprint()
+        assert named_event_occurrence_governance_fingerprint(
+            fit_a
+        ) != named_event_occurrence_governance_fingerprint(fit_b)
+
+    def test_occurrence_version_change_changes_governance_not_design(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        occ_a = _occurrence(
+            start_date="2026-01-20", end_date="2026-01-20", event_version=1
+        )
+        occ_b = _occurrence(
+            start_date="2026-01-20", end_date="2026-01-20", event_version=2
+        )
+        fit_a = self._build([occ_a], frame=frame)
+        fit_b = self._build([occ_b], frame=frame)
+        assert fit_a is not None and fit_b is not None
+        assert fit_a.fingerprint() == fit_b.fingerprint()
+        assert named_event_occurrence_governance_fingerprint(
+            fit_a
+        ) != named_event_occurrence_governance_fingerprint(fit_b)
+
+    def test_source_lineage_change_changes_governance_not_design(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        occ_a = _occurrence(
+            start_date="2026-01-20", end_date="2026-01-20", source_id="workbook_a"
+        )
+        occ_b = _occurrence(
+            start_date="2026-01-20", end_date="2026-01-20", source_id="workbook_b"
+        )
+        fit_a = self._build([occ_a], frame=frame)
+        fit_b = self._build([occ_b], frame=frame)
+        assert fit_a is not None and fit_b is not None
+        assert fit_a.fingerprint() == fit_b.fingerprint()
+        assert named_event_occurrence_governance_fingerprint(
+            fit_a
+        ) != named_event_occurrence_governance_fingerprint(fit_b)
+
+    def test_future_occurrence_outside_fitted_period_does_not_stale(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        historical_occ = _occurrence(start_date="2026-01-20", end_date="2026-01-20")
+        future_occ = _occurrence(
+            event_id="future-event",
+            event_version=1,
+            start_date="2026-06-01",
+            end_date="2026-06-01",
+        )
+        fit_without_future = self._build([historical_occ], frame=frame)
+        fit_with_future = self._build([historical_occ, future_occ], frame=frame)
+        assert fit_without_future is not None and fit_with_future is not None
+        assert fit_without_future.fingerprint() == fit_with_future.fingerprint()
+        assert named_event_occurrence_governance_fingerprint(
+            fit_without_future
+        ) == named_event_occurrence_governance_fingerprint(fit_with_future)
+        # The future occurrence never appears in the consumed-occurrence
+        # provenance at all - never merely cancels out.
+        assert "future-event" not in {
+            record.event_id
+            for record in fit_with_future.consumed_occurrence_governance_records()
+        }
+
+    def test_unchanged_governed_occurrence_state_is_deterministically_stable(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        occ = _occurrence(start_date="2026-01-20", end_date="2026-01-20")
+        fit_a = self._build([occ], frame=frame)
+        fit_b = self._build([occ], frame=frame)
+        assert named_event_occurrence_governance_fingerprint(
+            fit_a
+        ) == named_event_occurrence_governance_fingerprint(fit_b)
+
+    def test_market_scope_order_does_not_affect_the_fingerprint(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        occ_a = _occurrence(
+            start_date="2026-01-20",
+            end_date="2026-01-20",
+            market_scope=("UK", "DE"),
+        )
+        occ_b = _occurrence(
+            start_date="2026-01-20",
+            end_date="2026-01-20",
+            market_scope=("DE", "UK"),
+        )
+        fit_a = self._build([occ_a], frame=frame)
+        fit_b = self._build([occ_b], frame=frame)
+        assert fit_a is not None and fit_b is not None
+        assert named_event_occurrence_governance_fingerprint(
+            fit_a
+        ) == named_event_occurrence_governance_fingerprint(fit_b)
+
+    def test_no_consumed_occurrences_fingerprints_identically_to_none(self):
+        assert named_event_occurrence_governance_fingerprint(
+            None
+        ) == named_event_occurrence_governance_fingerprint(
+            NamedEventFitInputs(blocks=(), shrinkage_prior_scale_by_family={})
+        )
+
+    def test_all_official_identity_entry_points_agree_on_the_same_triple(self):
+        frame = _frame(["UK"], 10, start="2026-01-01")
+        families = [_family()]
+        occurrences = [_occurrence(start_date="2026-01-20", end_date="2026-01-20")]
+        definitions = [_definition()]
+
+        fit_inputs = build_named_event_fit_inputs(
+            frame,
+            families=families,
+            occurrences=occurrences,
+            response_definitions=definitions,
+        )
+        via_components = named_event_fingerprint_components(fit_inputs)
+        via_current_identity = current_named_event_identity_fingerprints(
+            frame,
+            families=families,
+            occurrences=occurrences,
+            response_definitions=definitions,
+        )
+        via_safe = safe_named_event_identity(
+            frame,
+            families=families,
+            occurrences=occurrences,
+            response_definitions=definitions,
+        )
+
+        assert via_components == via_current_identity
+        assert via_safe.is_valid
+        assert (
+            via_safe.fit_fingerprint,
+            via_safe.classification_fingerprint,
+            via_safe.occurrence_governance_fingerprint,
+        ) == via_components
+        # None of the three components is ever fabricated when there is
+        # genuinely something consumed.
+        assert all(via_components)

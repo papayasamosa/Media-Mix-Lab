@@ -3242,9 +3242,20 @@ def audit_project_resumability(imported: Dict[str, Any]) -> Dict[str, Any]:
                     "its model approval."
                 )
             else:
-                current_data_fp, current_spec_fp, current_posterior_fp = (
-                    current_model_identity_fingerprints(imported, reconstructed)
-                )
+                # A registry with more than one current opted-in response
+                # definition for one family (see build_named_event_fit_
+                # inputs's own defensive invariant) must fail this audit
+                # closed with a governed reason, never crash the caller -
+                # never treated as "no named events" either.
+                from .named_event_fit_inputs import NamedEventRegistryGovernanceError
+
+                try:
+                    current_data_fp, current_spec_fp, current_posterior_fp = (
+                        current_model_identity_fingerprints(imported, reconstructed)
+                    )
+                except NamedEventRegistryGovernanceError as exc:
+                    model_identity_reason = f"named_event_registry_invalid: {exc}"
+            if model_identity_reason is None:
                 raw_approval = imported.get("model_approval")
                 if not raw_approval:
                     model_identity_reason = (
@@ -3959,6 +3970,43 @@ def current_model_identity_fingerprints(
     taxonomy_groups = resolve_imported_search_intent_groups(
         imported.get("search_intent_groups") or []
     )
+    # Named-event identity (implementation brief: close the official
+    # staleness propagation gap) - reuses the exact shared helper every
+    # live page (05/06/07/08/09/13) calls, over the imported bundle's own
+    # governed registry (quarantine-checked exactly like search_objects/
+    # causal_graphs/coverage matrices above), never a page- or
+    # reconstruction-specific reimplementation.
+    from .named_events import (
+        EventResponseDefinition as _EventResponseDefinition,
+        NamedEventFamily as _NamedEventFamily,
+        NamedEventOccurrence as _NamedEventOccurrence,
+    )
+    from .named_event_fit_inputs import current_named_event_identity_fingerprints
+
+    (
+        _named_event_family_dicts,
+        _named_event_occurrence_dicts,
+        _named_event_definition_dicts,
+        _,
+    ) = resolve_imported_named_events(imported)
+    (
+        named_event_fit_fp,
+        named_event_classification_fp,
+        named_event_occurrence_governance_fp,
+    ) = current_named_event_identity_fingerprints(
+        frame,
+        families=[
+            _NamedEventFamily.from_dict(item) for item in _named_event_family_dicts
+        ],
+        occurrences=[
+            _NamedEventOccurrence.from_dict(item)
+            for item in _named_event_occurrence_dicts
+        ],
+        response_definitions=[
+            _EventResponseDefinition.from_dict(item)
+            for item in _named_event_definition_dicts
+        ],
+    )
     spec_fp = fingerprint_model_spec(
         fitted_spec_dict or {},
         imported.get("prior_config") or {},
@@ -4007,6 +4055,9 @@ def current_model_identity_fingerprints(
         ),
         official_preparation_evidence=imported.get("official_preparation_result"),
         seo_fit_fingerprint=seo_fit_inputs_fingerprint(imported.get("seo_fit_inputs")),
+        named_event_fit_fingerprint=named_event_fit_fp,
+        named_event_classification_fingerprint=named_event_classification_fp,
+        named_event_occurrence_governance_fingerprint=named_event_occurrence_governance_fp,
     )
     posterior_fp = fingerprint_posterior(posterior_params)
     return data_fp, spec_fp, posterior_fp
@@ -4064,9 +4115,25 @@ def verify_imported_approval(
             "The model must be reviewed and approved again."
         )
 
-    data_fp, spec_fp, posterior_fp = current_model_identity_fingerprints(
-        imported, reconstructed
-    )
+    # A registry with more than one current opted-in response definition
+    # for one family (build_named_event_fit_inputs's own defensive
+    # invariant) must fail this verification closed with a governed
+    # reason, never crash the caller - never treated as "no named
+    # events" either.
+    from .named_event_fit_inputs import NamedEventRegistryGovernanceError
+
+    try:
+        data_fp, spec_fp, posterior_fp = current_model_identity_fingerprints(
+            imported, reconstructed
+        )
+    except NamedEventRegistryGovernanceError as exc:
+        return None, (
+            "This bundle's named-event registry has more than one active "
+            f"fitted response definition for a family ({exc}) - treated as "
+            "unverified. Reconcile the registry to exactly one current "
+            "opted-in response definition per family before this approval "
+            "can be verified."
+        )
     current_run_id = imported.get("model_run_id") or approval.model_run_id
 
     try:

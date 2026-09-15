@@ -102,8 +102,17 @@ from ancestry_mmm.core.causal_graph import (
     current_structural_fingerprint_for_identity,
 )
 from ancestry_mmm.core.named_event_fit_inputs import (
+    NamedEventRegistryGovernanceError,
     build_named_event_fit_inputs,
     build_named_event_fit_inputs_for_replay,
+    safe_named_event_identity,
+)
+from ancestry_mmm.core.named_event_diagnostics import (
+    NAMED_EVENT_CONFIG_CHANGED_SINCE_FIT,
+    NAMED_EVENT_CONFIG_CURRENT,
+    assess_named_event_drift,
+    build_fitted_named_event_diagnostics,
+    build_named_event_diagnostics,
 )
 from ancestry_mmm.core.named_events import (
     EventResponseDefinition,
@@ -474,8 +483,35 @@ experiment_assessments = [
 # different inputs later on this page, or diagnostics/readiness/approval
 # can silently drift apart on what they each think "the current model" is.
 current_model_identity: "ModelIdentity | None" = None
+_named_event_registry_governance_error: str | None = None
 if model_run_id and posterior_params is not None and model_spec_dict is not None:
-    current_named_event_fit_inputs = _backtest_named_event_fit_inputs(frame)
+    _named_event_families, _named_event_occurrences, _named_event_definitions = (
+        _current_named_event_registry()
+    )
+    _current_named_event_identity = safe_named_event_identity(
+        frame,
+        families=_named_event_families,
+        occurrences=_named_event_occurrences,
+        response_definitions=_named_event_definitions,
+    )
+    _current_named_event_fit_fp = _current_named_event_identity.fit_fingerprint
+    _current_named_event_classification_fp = (
+        _current_named_event_identity.classification_fingerprint
+    )
+    _current_named_event_occurrence_governance_fp = (
+        _current_named_event_identity.occurrence_governance_fingerprint
+    )
+    _named_event_registry_governance_error = (
+        _current_named_event_identity.governance_error
+    )
+if _named_event_registry_governance_error:
+    st.error(
+        "Named-event registry is invalid: "
+        f"{_named_event_registry_governance_error} Current model identity "
+        "cannot be computed until this is resolved - see the family/"
+        "response-definition administration on Data Upload."
+    )
+elif model_run_id and posterior_params is not None and model_spec_dict is not None:
     current_model_identity = ModelIdentity(
         model_run_id=model_run_id,
         data_fingerprint=fingerprint_dataframe(frame["df"]),
@@ -529,11 +565,9 @@ if model_run_id and posterior_params is not None and model_spec_dict is not None
                     consumed_model_input_columns=model_spec_dict.get("channels") or [],
                 )
             ),
-            named_event_fit_fingerprint=(
-                current_named_event_fit_inputs.fingerprint()
-                if current_named_event_fit_inputs is not None
-                else None
-            ),
+            named_event_fit_fingerprint=_current_named_event_fit_fp,
+            named_event_classification_fingerprint=_current_named_event_classification_fp,
+            named_event_occurrence_governance_fingerprint=_current_named_event_occurrence_governance_fp,
             variable_coverage_fingerprint=(
                 VariableCoverageMatrix.from_dict(coverage_matrix_dict).fingerprint()
                 if coverage_matrix_dict
@@ -3131,4 +3165,134 @@ with st.expander("Experiment & calibration evidence", expanded=False):
             "experiment record is still required."
         )
 
-    render_next_step("diagnostics")
+with st.expander("Named-event diagnostics", expanded=False):
+    st.caption(
+        "Diagnostic only - never changes fit behaviour and never feeds back "
+        "into the model graph. Two separate views, never blended: 'This "
+        "fitted model' (what the current fit actually consumed - built "
+        "purely from this fit's own persisted provenance) and 'Current "
+        "registry / next-fit readiness' (what would be used if the model "
+        "were prepared/fitted again right now). No numeric minimum-"
+        "occurrence threshold is invented here, and no family is labelled "
+        "'adequately identified' - see `core.named_event_response."
+        "assess_family_pooling_eligibility` for that governed, fail-closed "
+        "gate."
+    )
+    try:
+        _ned_families, _ned_occurrences, _ned_definitions = (
+            _current_named_event_registry()
+        )
+        _ned_fitted_rows = build_fitted_named_event_diagnostics(meta)
+
+        if _ned_fitted_rows:
+            st.markdown("#### This fitted model")
+            st.caption(
+                "The authoritative named-event configuration actually consumed "
+                "by the current fit. Built only from this model's own persisted "
+                "fit-time provenance (`FHModelMeta.named_event_fit_blocks`/"
+                "`named_event_fit_block_provenance`) - immune by construction to "
+                "any registry edit made after fitting; a later occurrence, "
+                "family, or response-definition change can never rewrite this "
+                "table."
+            )
+            _ned_fitted_df = pd.DataFrame([row.to_dict() for row in _ned_fitted_rows])
+            st.dataframe(
+                _ned_fitted_df,
+                width="stretch",
+                column_config=dataframe_column_config(_ned_fitted_df),
+            )
+            if any(not row.provenance_complete for row in _ned_fitted_rows):
+                st.info(
+                    "Some rows show response_definition_id/version/"
+                    "fitted_support_weeks as unavailable - this model was "
+                    "fitted before that per-block provenance was persisted, so "
+                    "it genuinely cannot be reconstructed after the fact (never "
+                    "approximated from the current registry)."
+                )
+
+            _ned_drift = assess_named_event_drift(
+                frame,
+                meta,
+                families=_ned_families,
+                occurrences=_ned_occurrences,
+                response_definitions=_ned_definitions,
+            )
+            if _ned_drift.status == NAMED_EVENT_CONFIG_CURRENT:
+                st.success(
+                    "Named-event configuration: Current - the governed registry, "
+                    "replayed against this fit's own frame, matches what this "
+                    "fit actually consumed."
+                )
+            elif _ned_drift.status == NAMED_EVENT_CONFIG_CHANGED_SINCE_FIT:
+                st.warning(
+                    "Named-event configuration: Changed since fit. "
+                    + "; ".join(_ned_drift.reasons)
+                    + ". Refit to bring the model back in sync with the current "
+                    "registry."
+                )
+            else:
+                st.info(
+                    "Named-event configuration drift: unknown - this model was "
+                    "fitted before fit-time fingerprinting existed; refit to "
+                    "enable this check."
+                )
+        else:
+            st.info(
+                "This model did not consume any named event at fit time - "
+                "showing current-registry readiness only below."
+            )
+
+        st.markdown("#### Current registry / next-fit readiness")
+        st.caption(
+            "What would be used if the model were prepared/fitted again right "
+            "now - NOT what the model above actually consumed. One row per "
+            "event_family_id x market from the governed registry, cross-checked "
+            "against this fit's own prepared frame using the exact same "
+            "interval-overlap and event-response construction the model itself "
+            "uses (`core.named_event_fit_inputs`), never a separate "
+            "approximation."
+        )
+        if not _ned_occurrences:
+            st.info("No named-event occurrences are registered for this project.")
+        else:
+            _ned_rows = build_named_event_diagnostics(
+                frame,
+                families=_ned_families,
+                occurrences=_ned_occurrences,
+                response_definitions=_ned_definitions,
+            )
+            if not _ned_rows:
+                st.info("No event_family_id x market combinations to report.")
+            else:
+                _ned_df = pd.DataFrame([row.to_dict() for row in _ned_rows])
+                st.dataframe(
+                    _ned_df,
+                    width="stretch",
+                    column_config=dataframe_column_config(_ned_df),
+                )
+                _ned_status_counts = _ned_df["fit_status"].value_counts().to_dict()
+                st.caption(
+                    "fit_status counts: "
+                    + ", ".join(
+                        f"{status}: {count}"
+                        for status, count in sorted(_ned_status_counts.items())
+                    )
+                )
+                st.caption(
+                    "'registered_not_fitted', 'outside_model_window', "
+                    "'response_policy_required' and 'promotional_window_unresolved' "
+                    "all mean the family contributes NOTHING to this fit - never "
+                    "the same thing as a fitted zero effect. Repeated yearly "
+                    "occurrences of the same family and market collapse into one "
+                    "row (see occurrence_count); the same family in a different "
+                    "market is always a separate row."
+                )
+    except NamedEventRegistryGovernanceError as _ne_diag_governance_exc:
+        st.error(
+            "Named-event registry is invalid: "
+            f"{_ne_diag_governance_exc} Named-event diagnostics cannot be "
+            "computed until this is resolved - see the family/response-"
+            "definition administration on Data Upload."
+        )
+
+render_next_step("diagnostics")

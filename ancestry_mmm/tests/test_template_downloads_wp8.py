@@ -13,6 +13,7 @@ from ancestry_mmm.data.template_downloads import (
     standard_template_filename,
 )
 from ancestry_mmm.data.templates import (
+    EVENT_UPLOAD_COLUMNS,
     OUTCOMES_TEMPLATE_SCHEMA_VERSION,
     canonicalize_standard_workbook,
     parse_standard_workbook,
@@ -37,6 +38,23 @@ def test_downloadable_templates_are_valid_domain_workbooks():
         assert workbook.manifest.logical_domain == domain
         assert all(not table.empty for table in workbook.tables.values())
         canonicalize_standard_workbook(workbook)
+
+
+def test_downloadable_context_template_events_sheet_has_all_preferred_columns():
+    """The downloadable Context template's `events` sheet must carry the
+    full seven-column preferred contract (`EVENT_UPLOAD_COLUMNS`), not
+    only the legacy four columns - the legacy structure remains supported
+    only as a compatibility path for older uploads, never the shipped
+    template itself."""
+    workbook = parse_standard_workbook(
+        build_standard_template(DOMAIN_CONTEXT_AND_EXTERNAL_FACTORS),
+        source_id="template-context",
+        filename=standard_template_filename(DOMAIN_CONTEXT_AND_EXTERNAL_FACTORS),
+        logical_domain=DOMAIN_CONTEXT_AND_EXTERNAL_FACTORS,
+    )
+    events_table = workbook.tables["events"]
+    assert set(EVENT_UPLOAD_COLUMNS).issubset(set(events_table.columns))
+    assert not events_table.empty
 
 
 def test_outcomes_download_is_v2_and_contains_explicit_dna_partitions():
