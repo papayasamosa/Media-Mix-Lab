@@ -113,7 +113,12 @@ from ancestry_mmm.data import (
     TEMPLATE_MIME_TYPE,
     build_candidate_a_template,
 )
-from ancestry_mmm.core.named_event_fit_inputs import build_named_event_fit_inputs
+from ancestry_mmm.core.named_event_diagnostics import build_named_event_diagnostics
+from ancestry_mmm.core.named_event_fit_inputs import (
+    build_named_event_fit_inputs,
+    families_excluded_from_fitting,
+    named_event_fingerprint_components,
+)
 from ancestry_mmm.core.named_events import (
     EventResponseDefinition,
     NamedEventFamily,
@@ -296,6 +301,75 @@ with SectionCard(
         "DNA-targeted channels: "
         + (", ".join(frame["channels"][i] for i in frame["dna_channel_idx"]) or "none")
     )
+    _ne_preview_families = [
+        NamedEventFamily.from_dict(item)
+        for item in (get_state("named_event_families") or [])
+    ]
+    _ne_preview_occurrences = [
+        NamedEventOccurrence.from_dict(item)
+        for item in (get_state("named_event_occurrences") or [])
+    ]
+    _ne_preview_definitions = [
+        EventResponseDefinition.from_dict(item)
+        for item in (get_state("named_event_response_definitions") or [])
+    ]
+    _ne_preview = build_named_event_fit_inputs(
+        frame,
+        families=_ne_preview_families,
+        occurrences=_ne_preview_occurrences,
+        response_definitions=_ne_preview_definitions,
+    )
+    if _ne_preview is not None:
+        _ne_preview_markets = sorted({block.market for block in _ne_preview.blocks})
+        st.caption(
+            f"Named event families: {len(_ne_preview.family_ids)} "
+            f"({', '.join(_ne_preview.family_ids)}). "
+            f"Markets with event support: {', '.join(_ne_preview_markets)}. "
+            "Being fitted does not by itself make an event family approved for "
+            "headline reporting, planning or optimisation."
+        )
+    _ne_excluded_families = families_excluded_from_fitting(
+        frame,
+        families=_ne_preview_families,
+        occurrences=_ne_preview_occurrences,
+        response_definitions=_ne_preview_definitions,
+    )
+    if _ne_excluded_families:
+        _ne_excluded_by_id = {
+            item["family_id"]: item
+            for item in (get_state("named_event_families") or [])
+        }
+        _ne_excluded_labels = []
+        for _fam_id in _ne_excluded_families:
+            _status = (_ne_excluded_by_id.get(_fam_id) or {}).get("classification_status")
+            if _status == "promotional_window_unresolved":
+                _ne_excluded_labels.append(f"{_fam_id} (response mechanism unresolved)")
+            else:
+                _ne_excluded_labels.append(_fam_id)
+        st.warning(
+            "Registered named-event families NOT included in this fit: "
+            + ", ".join(_ne_excluded_labels)
+            + ". These are governed, factual event occurrences with no "
+            "opted-in response definition (or a not-yet-resolvable one) for "
+            "this frame - never a zero-effect modelling result."
+        )
+    if _ne_preview_occurrences:
+        _ne_diag_rows = build_named_event_diagnostics(
+            frame,
+            families=_ne_preview_families,
+            occurrences=_ne_preview_occurrences,
+            response_definitions=_ne_preview_definitions,
+        )
+        _ne_status_counts: dict = {}
+        for _row in _ne_diag_rows:
+            _ne_status_counts[_row.fit_status] = _ne_status_counts.get(_row.fit_status, 0) + 1
+        st.caption(
+            f"Named-event family x market combinations: {len(_ne_diag_rows)} "
+            + "(" + ", ".join(f"{k}: {v}" for k, v in sorted(_ne_status_counts.items())) + "). "
+            "See Diagnostics for the full per-family/market breakdown "
+            "(occurrence dates, model periods affected, response policy, "
+            "fitted support)."
+        )
 
 with InfoPanel(
     "Sampling plan",
@@ -1113,6 +1187,9 @@ def _proposed_model_fingerprint(fingerprint_model_type: str) -> str:
     search_objects = get_state("search_objects") or []
     coverage_matrix_dict = get_state("variable_coverage_matrix")
     named_event_fit_inputs = _named_event_fit_inputs_for_current_frame()
+    _named_event_fit_fp, _named_event_classification_fp = named_event_fingerprint_components(
+        named_event_fit_inputs
+    )
     calibration_inputs = _calibration_inputs_for_current_fit()
     model_spec_fingerprint = fingerprint_model_spec(
         fit_spec.to_dict(),
@@ -1158,11 +1235,8 @@ def _proposed_model_fingerprint(fingerprint_model_type: str) -> str:
             else None
         ),
         official_preparation_evidence=get_state("official_preparation_result"),
-        named_event_fit_fingerprint=(
-            named_event_fit_inputs.fingerprint()
-            if named_event_fit_inputs is not None
-            else None
-        ),
+        named_event_fit_fingerprint=_named_event_fit_fp,
+        named_event_classification_fingerprint=_named_event_classification_fp,
         calibration_fit_fingerprint=calibration_inputs_fingerprint(calibration_inputs),
         seo_fit_fingerprint=seo_fit_inputs_fingerprint(
             _seo_fit_inputs_for_current_frame()

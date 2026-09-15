@@ -27,10 +27,14 @@ file)."""
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
+
 import numpy as np
 import pymc as pm
 
-from ancestry_mmm.core.hierarchical_model import build_fh_hierarchical_model
+from ancestry_mmm.core.hierarchical_model import FHModelMeta, build_fh_hierarchical_model
+from ancestry_mmm.core.named_event_diagnostics import build_fitted_named_event_diagnostics
 from ancestry_mmm.core.named_event_fit_inputs import build_named_event_fit_inputs
 from ancestry_mmm.core.named_event_response import NAMED_EVENT_RESPONSE_STRUCTURE
 from ancestry_mmm.core.named_events import (
@@ -125,6 +129,8 @@ class TestNoFitInputsIsByteIdenticalToBefore:
         assert "eta_events" not in model.named_vars
         assert meta.named_event_response_definitions_at_fit == []
         assert meta.named_event_response_method_version == ""
+        assert meta.named_event_fit_fingerprint == ""
+        assert meta.named_event_fit_block_provenance == []
 
     def test_explicit_none_is_identical_to_omitting_the_argument(self):
         frame = _frame()
@@ -165,6 +171,49 @@ class TestSuppliedFitInputsWireIntoTheRealModel:
         assert (
             meta.named_event_response_method_version == NAMED_EVENT_RESPONSE_STRUCTURE
         )
+
+    def test_meta_records_fit_time_provenance_for_diagnostics(self):
+        _model, meta, fit_inputs_frame = self._built()
+        # named_event_fit_fingerprint reuses NamedEventFitInputs.fingerprint()
+        # verbatim - it must match a fresh, independent recomputation over
+        # the exact same registry/frame this fit actually used.
+        fit_inputs = build_named_event_fit_inputs(
+            fit_inputs_frame,
+            families=[_family()],
+            occurrences=[_occurrence()],
+            response_definitions=[_definition()],
+        )
+        assert meta.named_event_fit_fingerprint == fit_inputs.fingerprint()
+        assert meta.named_event_fit_fingerprint != ""
+
+        assert len(meta.named_event_fit_block_provenance) == 1
+        record = meta.named_event_fit_block_provenance[0]
+        assert record["family_id"] == "mothers_day"
+        assert record["market"] == "UK"
+        assert record["response_definition_id"] == "md-def"
+        assert record["response_definition_version"] == 1
+        assert record["fitted_support_weeks"] > 0
+
+    def test_fit_time_provenance_round_trips_through_export_import(self):
+        """Mirrors `core.persistence`'s actual model_meta round trip
+        (`json.dumps(asdict(model_meta))` on export, `FHModelMeta(**dict)`
+        on import) - proves the new provenance fields are JSON-safe and
+        that the fit-time diagnostics VIEW built from the restored meta
+        is identical to the one built before export, not merely that the
+        raw fields happen to match."""
+        _model, meta, _frame_dict = self._built()
+        fitted_before = build_fitted_named_event_diagnostics(meta)
+
+        exported = json.loads(json.dumps(asdict(meta), default=str))
+        restored = FHModelMeta(**exported)
+
+        assert restored.named_event_fit_fingerprint == meta.named_event_fit_fingerprint
+        assert restored.named_event_fit_block_provenance == meta.named_event_fit_block_provenance
+        assert [tuple(pair) for pair in restored.named_event_fit_blocks] == [
+            tuple(pair) for pair in meta.named_event_fit_blocks
+        ]
+        fitted_after = build_fitted_named_event_diagnostics(restored)
+        assert fitted_after == fitted_before
 
     def test_eta_events_has_the_right_shape_and_is_not_trivially_zero(self):
         model, _meta, frame = self._built()
