@@ -48,7 +48,7 @@ from ancestry_mmm.tests.support.lifecycle_fixture import build_lifecycle_project
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STARTUP_TIMEOUT_SECONDS = 60
 TV_BRAND_ACTIVITY_NODE_ID = "activity:UK:tv-brand-paid"
-NEW_OUTCOME_NODE_LABEL = "Family History · New · GSA (definition 1.0)"
+NEW_OUTCOME_NODE_LABEL = "Family History Â· New Â· GSA (definition 1.0)"
 # CI's "Upload failure artefacts" step (.github/workflows/tests.yml, job
 # `browser`) uploads test-artifacts/playwright/** only `if: failure()` - a
 # repo-relative, not a pytest tmp_path, location so it survives test
@@ -265,14 +265,36 @@ def streamlit_base_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str
             proc.stdout.close()
 
 
-def _add_node(page: Page, node_id: str, role: str) -> None:
+def _add_node(
+    page: Page, node_id: str, role: str, *, expected_target_label: str
+) -> None:
     page.get_by_role("textbox", name="Node id").fill(node_id)
     _select_option(page, "Role", role, nth=0)
     # Streamlit can briefly retain the previous form submit button across a
     # rerender, so the accessible role may resolve to two equivalent buttons.
     # The last form is the live node-creation form.
-    page.get_by_role("button", name="Add node").last.click()
-    page.wait_for_timeout(1500)
+
+    def node_is_available_as_target() -> bool:
+        target = page.get_by_role("combobox", name="Target node")
+        if target.count() == 0:
+            return False
+        try:
+            target.click(timeout=1_000)
+            expect(
+                page.get_by_role("option", name=expected_target_label, exact=True)
+            ).to_be_visible(timeout=500)
+            return True
+        except (AssertionError, PlaywrightTimeoutError):
+            return False
+        finally:
+            page.keyboard.press("Escape")
+
+    _click_until_condition(
+        page.get_by_role("button", name="Add node").last,
+        node_is_available_as_target,
+        attempts=5,
+        wait_ms=3_000,
+    )
 
 
 def _add_edge(page: Page, source: str, target: str, role: str) -> None:
@@ -336,7 +358,12 @@ def test_causal_graph_editor_journey_in_browser(
     )
 
     # --- attempt a prohibited reverse edge (outcome -> intervention) -------
-    _add_node(page, "branded_demand", "Funnel mediator")
+    _add_node(
+        page,
+        "branded_demand",
+        "Funnel mediator",
+        expected_target_label="branded demand",
+    )
     _add_edge(page, "TV Brand", "branded demand", "Mediated")
     _add_edge(page, NEW_OUTCOME_NODE_LABEL, "TV Brand", "Direct")
 
@@ -392,7 +419,7 @@ def test_causal_graph_editor_journey_in_browser(
     expect(page.get_by_text("Structural links", exact=True).first).to_be_visible(
         timeout=15_000
     )
-    page.get_by_text("Technical details · compilation plan", exact=True).click()
+    page.get_by_text("Technical details Â· compilation plan", exact=True).click()
     # `.first` (same pattern as the "draft" status-badge check above): a
     # Streamlit rerun can transiently render both the old and new fragment
     # of the technical preview for one frame, which a strict-mode
