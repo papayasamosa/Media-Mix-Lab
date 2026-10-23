@@ -4,6 +4,10 @@
 
 These instructions apply to the whole `papayasamosa/Media-Mix-Lab` repository.
 
+Persistent agent roles, confidentiality rules, and the owner-authorized GitHub
+sync workflow are documented in
+[`docs/development/agent_operating_policy.md`](docs/development/agent_operating_policy.md).
+
 More specific `AGENTS.md` files under `ancestry_mmm/core`, `ancestry_mmm/pages`, and `ancestry_mmm/tests` add rules for those areas. The most specific applicable file takes precedence, but no nested instruction may weaken the business definitions, mathematical-correctness requirements, or governance rules in this root file.
 
 ## Requirements authority
@@ -396,8 +400,14 @@ Usage rules:
 
 - **GitHub MCP**: use to read commits, PR/review state, and Actions results
   when remote state matters. Never a substitute for the local Git worktree
-  when editing code. Read-only by policy - no write-capable GitHub tool call
-  runs without explicit user approval in the moment.
+  when editing code. Read-only by default. The standing owner-authorized
+  synchronization workflow in `docs/development/agent_operating_policy.md`
+  permits validated development-branch pushes, pull requests, and conditional
+  merges to `papayasamosa/Media-Mix-Lab` after content-safety review, required
+  checks, repository protections, and applicable scientific/release gates pass.
+  It never permits publishing confidential data, commercial information,
+  credentials, or posterior artifacts. No write-capable GitHub call runs
+  outside that workflow or other explicit owner authorization.
 - **Context7 MCP**: use whenever a task depends on an external library's
   API, configuration, version compatibility, or recommended usage. Resolve
   the exact library and version from `pyproject.toml`/`uv.lock` first, query
