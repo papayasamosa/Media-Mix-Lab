@@ -48,7 +48,7 @@ from ancestry_mmm.tests.support.lifecycle_fixture import build_lifecycle_project
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STARTUP_TIMEOUT_SECONDS = 60
 TV_BRAND_ACTIVITY_NODE_ID = "activity:UK:tv-brand-paid"
-NEW_OUTCOME_NODE_LABEL = "Family History Â· New Â· GSA (definition 1.0)"
+NEW_OUTCOME_NODE_LABEL = "Family History · New · GSA (definition 1.0)"
 # CI's "Upload failure artefacts" step (.github/workflows/tests.yml, job
 # `browser`) uploads test-artifacts/playwright/** only `if: failure()` - a
 # repo-relative, not a pytest tmp_path, location so it survives test
@@ -419,7 +419,7 @@ def test_causal_graph_editor_journey_in_browser(
     expect(page.get_by_text("Structural links", exact=True).first).to_be_visible(
         timeout=15_000
     )
-    page.get_by_text("Technical details Â· compilation plan", exact=True).click()
+    page.get_by_text("Technical details · compilation plan", exact=True).click()
     # `.first` (same pattern as the "draft" status-badge check above): a
     # Streamlit rerun can transiently render both the old and new fragment
     # of the technical preview for one frame, which a strict-mode
