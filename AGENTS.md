@@ -4,6 +4,13 @@
 
 These instructions apply to the whole `papayasamosa/Media-Mix-Lab` repository.
 
+For persistent, resumable agent workflow, Claude Code use, and role boundaries, see
+[`docs/development/agent_operating_policy.md`](docs/development/agent_operating_policy.md).
+That policy is subordinate to this file, approved requirements, and the four
+locally provisioned living MMM governance records. Those records are not
+shipped in this public tree. The operating policy cannot authorize science,
+data use, compute, retries, or release.
+
 More specific `AGENTS.md` files under `ancestry_mmm/core`, `ancestry_mmm/pages`, and `ancestry_mmm/tests` add rules for those areas. The most specific applicable file takes precedence, but no nested instruction may weaken the business definitions, mathematical-correctness requirements, or governance rules in this root file.
 
 ## Requirements authority
@@ -27,6 +34,41 @@ If these sources conflict, stop and report the conflict. Do not invent a busines
 `AGENTS.md` files summarise stable implementation invariants distilled from approved decisions. They must not create new business definitions or invent an unresolved decision.
 
 Human-facing traceability from implementation requirements back to the external PRD should be maintained in an approved requirements manifest or decision log (`docs/approved_requirements/`, `docs/decision_log.md`). Coding agents should cite the requirement ID or implementation brief, not reinterpret the PRD text.
+
+For candidate-specific work, use the current approved implementation brief,
+source contract, and run evidence supplied through the governed local project
+workflow. Do not place local source paths, source data, or run-specific
+evidence in this public repository. Source-only evidence does not authorize
+graph compilation, inference, or production use.
+
+## Mandatory MMM session bootstrap (2026-10-09)
+
+### Read first / do not forget
+
+Before any MMM modelling, source preparation, diagnostics, prior changes,
+media-taxonomy edits, compilation, or reporting, obtain and read all four
+locally provisioned living records listed below. They are intentionally not
+shipped in this public tree. If the current governed copies are unavailable,
+stop MMM work and request them; do not substitute archived copies.
+
+- `docs/mmm_governance/PROJECT_MODEL_CONTRACT.md`
+- `docs/mmm_governance/DECISION_LOG.md`
+- `docs/mmm_governance/MODEL_EVIDENCE_LEDGER.md`
+- `docs/mmm_governance/NEXT_ACTIONS.md`
+
+Then verify applicable PRD/source-contract versions and inspect the exact
+candidate's run evidence. These records distinguish analyst-confirmed
+objectives, formal requirements, diagnostic implementation, synthetic
+evidence, and production approval. A proposal or diagnostic result is not
+approval. The living contract uses the concise status tokens `TARGET`,
+`FORMALLY_APPROVED`, `DIAGNOSTIC_IMPLEMENTED`, `SYNTHETIC_VALIDATED`,
+`UK_FIT_VALIDATED`, `BLOCKED`, and `REJECTED`; a target is not a formal amendment. At the end of a
+material task, append evidence to the ledger, update next actions, and update
+the contract/decision log only when a decision or stable invariant changed.
+
+Session checklist: read contract -> verify source/spec versions -> inspect
+stage evidence -> declare gates -> make scoped changes -> run focused tests ->
+record evidence and remaining actions -> report the exact terminal status.
 
 ## Product objective
 
@@ -70,6 +112,71 @@ Fit the main Family History segments separately:
 - Winback
 
 Totals may be calculated from draw-level segment outcomes after fitting.
+
+## DO NOT FORGET / DO NOT CONFLATE — UK joint-FH work
+
+Before touching UK joint-FH code, read the four `docs/mmm_governance/`
+living records listed in the mandatory bootstrap and verify the specific
+source/stage identity. In particular:
+
+- Keep New, DNA cross-sell, and Winback as three distinct likelihood outcomes;
+  Overall FH is only a same-chain × draw × week count-scale sum and is not a
+  fifth likelihood. Total DNA is a distinct fourth outcome, never an FH segment.
+- `REQ-NBT-004` v2.0 formally approves three distinct FH likelihoods fitted
+  jointly with Total DNA as a distinct fourth likelihood; Overall FH remains
+  only a same-chain × draw × week count-scale sum, not a fifth likelihood.
+  This is architecture approval, not fit authorization or proof of runner
+  readiness. Inspect the actual governed runner and configuration; do not
+  infer or silently change its topology from this architecture approval. Real
+  UK sampling requires the current independent source, graph, pathway,
+  fit-authorization, and validation gates to pass.
+- FH media-response beta pooling and activity-specific adstock-decay pooling
+  are different parameter classes. Sharing decay must not silently share
+  beta, Hill K/S, Search, control, trend, event, or outcome effects.
+- DNA-only media is direct to Total DNA only unless a specific approved
+  pathway says otherwise; generated Total-DNA-to-FH mediation remains
+  `G_APPROVAL_PENDING`. Brand Search mediators remain absent from F0/N9.
+- Source-platform aggregation rules authorize arithmetic only and do not
+  establish unique-user reach, deduplication, causal effects, production
+  eligibility, or fit authorization. Keep those evidence states independent.
+- Resolve the active input universe from current, hash-verified source rows and
+  the approved activity/event roster. Do not revive excluded activities. For a
+  named event, a present blank `product_affected` follows `REQ-EVENT-001`: it is
+  `GENERAL_BLANK`, eligible for both product blocks, and distinct from explicit
+  shared scope. A missing source column or unknown value remains fail-closed;
+  promotion blanks are governed separately.
+- Compile-only means no posterior, prior-predictive, or posterior-predictive
+  API call, including indirect resolver calls. Real-data sampling requires
+  an approval bound to the compiled stage, graph/prior, source hashes, masks,
+  and settings.
+
+Keep these as target/status distinctions in the living contract. Update the
+evidence ledger and next-actions register after any material implementation
+or validation change; do not copy a diagnostic result into production status.
+
+## Staged compile and market-applicability invariants
+
+- Before relying on staged compile behavior, inspect the actual checked-in
+  runner and its callsites. Do not assume a particular UK runner exists or
+  that a named stage is enforced merely because a workflow describes it.
+  Source QA/preparation/identity must not construct a real model graph;
+  compile-only means graph/logp inspection, not predictive or inferential
+  permission.
+- Search source lineage may be explicitly marked unverified for compile-only
+  inspection, but an unverified source-trust tier must fail closed at
+  prior-predictive/MCMC and later inference/release boundaries. A synthetic
+  fixture marker can never authorize real-source graph construction.
+- Market applicability is resolved by a market/activity/effective-date
+  schedule. Catalogue presence alone does not imply an expected source row;
+  explicit applicable missing weeks are quality failures; `not_applicable`
+  preserves catalog lineage while removing that market-period from expected
+  coverage and the effective predictor roster. Observed-zero support remains
+  distinct from nonparticipation. The rule is generic and does not authorize
+  UK/DE pooling or transfer of UK masks into DE.
+- Synthetic market compilation is integration evidence only. Real-source graph
+  construction and inference require the exact approved source, prior,
+  execution, and stage identities. Synthetic markers can never authorize
+  real-source graph construction.
 
 ## Pathway taxonomy
 
@@ -396,8 +503,14 @@ Usage rules:
 
 - **GitHub MCP**: use to read commits, PR/review state, and Actions results
   when remote state matters. Never a substitute for the local Git worktree
-  when editing code. Read-only by policy - no write-capable GitHub tool call
-  runs without explicit user approval in the moment.
+  when editing code. Read-only by default. The standing owner-authorized
+  GitHub sync workflow in `docs/development/agent_operating_policy.md` permits
+  validated development-branch pushes, pull requests, and conditional merges
+  to the explicitly owner-authorized public `papayasamosa/Media-Mix-Lab`
+  repository, for reviewed-safe code, tests, and documentation only, under
+  its content-safety, checks, protections, and release-gate rules.
+  No write-capable GitHub tool call runs outside that workflow or other
+  explicit user authorization.
 - **Context7 MCP**: use whenever a task depends on an external library's
   API, configuration, version compatibility, or recommended usage. Resolve
   the exact library and version from `pyproject.toml`/`uv.lock` first, query

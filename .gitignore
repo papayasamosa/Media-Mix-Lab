@@ -48,6 +48,8 @@ Thumbs.db
 
 # Project specific
 *.log
+.pytest-stagec-synthetic-*/
+.pytest-tmp*/
 
 # Test coverage artefacts
 .coverage
@@ -62,15 +64,36 @@ htmlcov/
 .bandit/
 .env
 .env.local
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
 
 # Claude Code
 .claude/
 
-# Large data files (keep in repo for this example)
-# conjura_mmm_data.csv
+# Confidential local input data and artifacts never belong in Git.
+# `.local-data` is the canonical private input area. The path-specific
+# patterns below catch common misplaced input directories as well.
+.local-data/
+**/.local-data/
+**/local-data/
+**/raw-data/
+**/private-data/
+*.xlsx
+*.xls
+*.csv
+*.parquet
 
 # Model outputs
 *.pkl
+*.nc
+*.netcdf
+*.zarr/
+*.h5
+*.hdf5
 ancestry_mmm/.fit_jobs/
 *.joblib
 traces/
