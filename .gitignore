@@ -83,8 +83,15 @@ htmlcov/
 **/raw-data/
 **/private-data/
 *.xlsx
+# The committed Dictionary Builder templates are safe, generated docs assets.
+!docs/Ancestry_MMM_Activity_Dictionary_Builder.xlsx
+!docs/Ancestry_MMM_Context_Dictionary_Builder.xlsx
+!docs/Ancestry_MMM_Outcome_Dictionary_Builder.xlsx
 *.xls
 *.csv
+# Safe, versioned synthetic examples are part of the application and docs.
+!ancestry_mmm/sample_data/*.csv
+!docs/fixtures/**/*.csv
 *.parquet
 
 # Model outputs

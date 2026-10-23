@@ -88,8 +88,11 @@ the approval-gated actions listed below or expand any task's specific scope.
 
 Before any remote write, verify the owner-authorized repository and base
 branch, then inspect the exact outgoing tree and commit history for confidential
-data, credentials, posterior artifacts, or other prohibited material. The owner
-has explicitly authorized `papayasamosa/Media-Mix-Lab` as a public destination
+data, credentials, posterior artifacts, or other prohibited material. Under the
+current written owner authorization, the owner-authorized repository is
+`papayasamosa/Media-Mix-Lab` and the authorized pull-request target/base branch
+is `main`. The owner has
+explicitly authorized this repository as a public destination
 for reviewed-safe application code, tests, and documentation. This does not
 authorize publishing Ancestry datasets, commercial information, confidential
 reports, credentials, or posterior artifacts. Recheck the live repository and
